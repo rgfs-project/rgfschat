@@ -4,6 +4,34 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ChatUI</title>
+
+    <!--
+      The theme is applied before the first paint.
+
+      React can only set it once it has mounted, which is at least one paint
+      too late: a dark-mode user got a full white frame on every reload. This
+      runs synchronously in the head, so the very first frame is already right.
+
+      `colorScheme` is set inline as well as the attribute. The attribute needs
+      the stylesheet to have loaded to mean anything; `color-scheme` tells the
+      browser what to paint the canvas *before* any CSS arrives, which is the
+      part that was actually flashing white.
+
+      The key must stay in step with THEME_KEY in `client/App.tsx`; there is a
+      test that fails if they drift.
+    -->
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem('workspace.theme') === 'dark' ? 'dark' : 'light';
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.style.colorScheme = theme;
+        } catch (error) {
+          // Storage unavailable (private mode, blocked cookies). Light is the
+          // default anyway, so there is nothing to recover from.
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

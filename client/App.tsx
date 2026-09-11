@@ -35,6 +35,9 @@ const SIDEBAR_KEY = 'workspace.sidebarCollapsed';
 /** Last model used overall, the fallback for a conversation with no memory. */
 const LAST_MODEL_KEY = 'workspace.lastModel';
 
+/** Must outlast `--motion-theme` so the class is not pulled mid-fade. */
+const THEME_FADE_MS = 320;
+
 /**
  * A dialog waiting on the user.
  *
@@ -214,6 +217,10 @@ export function App({
 
   useEffect(() => {
     document.documentElement.dataset['theme'] = theme;
+    // Kept in step with the attribute so the browser repaints its own canvas,
+    // scrollbars and form controls on a toggle, not just our styles. The same
+    // pair is set by the inline script in index.html before the first paint.
+    document.documentElement.style.colorScheme = theme;
     writeStored(THEME_KEY, theme);
   }, [theme]);
 
@@ -246,6 +253,31 @@ export function App({
    * question is whether *this* generation has been settled, which is a fact
    * about the data, not about how many times an effect happened to run.
    */
+  /*
+   * Marks the document while a theme change is in flight, so the colour
+   * transition applies to that moment and not to every hover afterwards.
+   */
+  const themeFadeTimer = useRef<number | null>(null);
+  const toggleTheme = useCallback(() => {
+    const root = document.documentElement;
+    root.classList.add('theme-transition');
+
+    if (themeFadeTimer.current !== null) window.clearTimeout(themeFadeTimer.current);
+    themeFadeTimer.current = window.setTimeout(() => {
+      root.classList.remove('theme-transition');
+      themeFadeTimer.current = null;
+    }, THEME_FADE_MS);
+
+    setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (themeFadeTimer.current !== null) window.clearTimeout(themeFadeTimer.current);
+    },
+    []
+  );
+
   const settledRef = useRef<string | null>(null);
   useEffect(() => {
     if (generationId === null) return;
@@ -445,7 +477,7 @@ export function App({
             currentId={currentId}
             user={user}
             theme={theme}
-            onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+            onToggleTheme={toggleTheme}
             onCollapse={closeSidebar}
             onCreate={onCreate}
             onOpen={onSelectConversation}

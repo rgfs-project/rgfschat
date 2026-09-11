@@ -50,6 +50,8 @@
    */
   --motion-fast: 120ms;
   --motion: 180ms;
+  /* Long enough to read as a cross-fade rather than a stutter. */
+  --motion-theme: 260ms;
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
 
   --sidebar-width: 22rem;
@@ -63,12 +65,21 @@
   --font-display: 'Playfair Variable', 'Playfair Display', Georgia, serif;
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 
-  color-scheme: light dark;
+  /*
+   * Stated explicitly per theme rather than `light dark`.
+   *
+   * `light dark` lets the browser pick from the *system* preference, so a
+   * system-dark user reading the app in light mode got a dark canvas behind a
+   * light page — and the scrollbars and form controls to match. The app's own
+   * theme is the authority here, so each value names one.
+   */
+  color-scheme: light;
   font-family: var(--font-sans);
   font-synthesis-weight: none;
 }
 
 :root[data-theme='dark'] {
+  color-scheme: dark;
   --bg: #0d0d0d;
   --raised: #171717;
   --surface: #0a0a0a;
@@ -87,6 +98,34 @@
 }
 
 /*
+ * Cross-fading between themes.
+ *
+ * Custom properties are not animatable, so transitioning `--bg` does nothing —
+ * the variable flips instantly. What *can* transition is the resolved colour
+ * each element ends up with, so the transition goes on the properties rather
+ * than on the tokens.
+ *
+ * It is applied only while a toggle is in flight, added by the control and
+ * removed when it lands. Left on permanently it would put a 260ms fade on
+ * every hover and focus in the application, which would make the whole
+ * interface feel like it was lagging behind the pointer.
+ *
+ * Surfaces cross-fade; **text does not**. `color` is deliberately absent, for
+ * the same reason nothing else animates text: letters easing through the
+ * midpoint between two ink colours read as blurring rather than as changing.
+ * They swap once, cleanly, while the ground moves underneath them.
+ */
+.theme-transition,
+.theme-transition *,
+.theme-transition *::before,
+.theme-transition *::after {
+  transition:
+    background-color var(--motion-theme) ease,
+    border-color var(--motion-theme) ease,
+    box-shadow var(--motion-theme) ease !important;
+}
+
+/*
  * One switch for everyone who has asked for less movement. Declared once,
  * globally, rather than repeated per rule — a component added later is covered
  * without anyone remembering to cover it.
@@ -99,6 +138,20 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  /*
+   * Stated again at matching specificity.
+   *
+   * Among `!important` declarations the more specific selector wins whatever
+   * the source order, and `.theme-transition *` outranks a bare `*` — so the
+   * blanket rule above does not reach the theme cross-fade. This one does.
+   */
+  .theme-transition,
+  .theme-transition *,
+  .theme-transition *::before,
+  .theme-transition *::after {
+    transition-duration: 0.01ms !important;
   }
 }
 
