@@ -1,13 +1,21 @@
+/*
+ * Monochrome. Every value is strictly achromatic (R = G = B), anchored on pure
+ * black and pure white — no tint in any channel. Meaning that colour used to
+ * carry (primary vs destructive, error states) is carried by contrast, fill,
+ * and border weight instead, which also keeps it legible to anyone who
+ * wouldn't have distinguished the hues in the first place.
+ */
 :root {
-  --bg: #0f1115;
-  --surface: #171a21;
-  --surface-2: #1e222b;
-  --border: #262b36;
-  --text: #e6e8ee;
-  --muted: #9aa2b1;
-  --ok: #3fb950;
-  --error: #f85149;
-  --accent: #4c8dff;
+  --bg: #000000;
+  --surface: #0d0d0d;
+  --surface-2: #1a1a1a;
+  --border: #303030;
+  --border-strong: #6b6b6b;
+  --text: #ffffff;
+  --muted: #a0a0a0;
+  /* Highest-contrast end of the ramp: the primary fill and emphasis. */
+  --accent: #ffffff;
+  --on-accent: #000000;
 
   color-scheme: dark light;
   font-family:
@@ -21,12 +29,15 @@
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #f6f7f9;
+    --bg: #ffffff;
     --surface: #ffffff;
-    --surface-2: #f0f2f5;
-    --border: #dfe3ea;
-    --text: #1a1d23;
-    --muted: #5b6373;
+    --surface-2: #f4f4f4;
+    --border: #d4d4d4;
+    --border-strong: #8a8a8a;
+    --text: #000000;
+    --muted: #5c5c5c;
+    --accent: #000000;
+    --on-accent: #ffffff;
   }
 }
 
@@ -126,9 +137,10 @@ select {
 }
 
 .state {
-  color: var(--accent);
+  color: var(--muted);
   text-transform: none;
   letter-spacing: 0;
+  font-style: italic;
 }
 
 .msg__body {
@@ -163,7 +175,7 @@ select {
   display: inline-block;
   width: 0.5rem;
   height: 1rem;
-  background: var(--accent);
+  background: var(--text);
   vertical-align: text-bottom;
   animation: blink 1s steps(2, start) infinite;
 }
@@ -202,12 +214,14 @@ button {
   border-radius: 0.5rem;
   border: 1px solid transparent;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   cursor: pointer;
 }
 
 button.danger {
-  background: var(--error);
+  background: transparent;
+  color: var(--text);
+  border-color: var(--border-strong);
 }
 
 button:disabled {
@@ -215,14 +229,22 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* brightness() is a no-op on a near-black or near-white fill, so hover shifts
+   opacity for the solid button and fills the outlined one instead. */
 button:not(:disabled):hover {
-  filter: brightness(1.08);
+  opacity: 0.85;
+}
+
+button.danger:not(:disabled):hover {
+  opacity: 1;
+  background: var(--surface-2);
+  border-color: var(--text);
 }
 
 button:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--border-strong);
   outline-offset: 2px;
 }
 
@@ -232,10 +254,12 @@ textarea:focus-visible {
 }
 
 .error {
-  color: var(--error);
+  color: var(--text);
   margin: 0;
   padding: 0.625rem 0.875rem;
-  border: 1px solid var(--error);
+  border: 1px solid var(--border-strong);
+  border-left-width: 3px;
   border-radius: 0.5rem;
-  background: color-mix(in srgb, var(--error) 10%, transparent);
+  background: var(--surface-2);
+  font-size: 0.9375rem;
 }
