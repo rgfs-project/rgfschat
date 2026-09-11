@@ -10,6 +10,17 @@ const envSchema = z.object({
   DATA_DIR: z.string().min(1).default('./data'),
   LOG_LEVEL: z.enum(LOG_LEVELS).default('info'),
 
+  // Temporary identity (Phase 3). Replaced by real sessions in Phase 4. This is
+  // the ONLY source of the user-directory segment until then (INV-14); it is
+  // never read from a header, query, body, or route param.
+  LOCAL_USER_ID: z
+    .string()
+    .regex(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      'must be a canonical lowercase UUID'
+    )
+    .default('0a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d'),
+
   // Provider (Phase 2). A single llama.cpp endpoint; multi-provider is Phase 5.
   LLAMA_BASE_URL: z.url().default('http://127.0.0.1:8080'),
   LLAMA_API_KEY: z.string().min(1).optional(),
@@ -25,6 +36,8 @@ export interface Config {
   dataDir: string;
   logLevel: LogLevel;
   isProduction: boolean;
+  /** Canonical lowercase UUID. The only identity source until Phase 4 (INV-14). */
+  localUserId: string;
   provider: ProviderConfig;
 }
 
@@ -61,6 +74,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     PORT,
     DATA_DIR,
     LOG_LEVEL,
+    LOCAL_USER_ID,
     LLAMA_BASE_URL,
     LLAMA_API_KEY,
     PROVIDER_TIMEOUT_MS,
@@ -74,6 +88,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dataDir: resolve(DATA_DIR),
     logLevel: LOG_LEVEL,
     isProduction: NODE_ENV === 'production',
+    localUserId: LOCAL_USER_ID,
     provider: {
       baseUrl: LLAMA_BASE_URL.replace(/\/+$/, ''),
       apiKey: LLAMA_API_KEY,

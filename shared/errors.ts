@@ -16,6 +16,10 @@ export const ERROR_CODES = [
   'PROVIDER_TIMEOUT',
   'MODEL_NOT_FOUND',
   'GENERATION_NOT_FOUND',
+  // Phase 3
+  'CONVERSATION_MALFORMED',
+  'GENERATION_IN_PROGRESS',
+  'CONTEXT_TOO_LARGE',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -31,6 +35,9 @@ export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
   PROVIDER_TIMEOUT: 504,
   MODEL_NOT_FOUND: 400,
   GENERATION_NOT_FOUND: 404,
+  CONVERSATION_MALFORMED: 422,
+  GENERATION_IN_PROGRESS: 409,
+  CONTEXT_TOO_LARGE: 422,
 };
 
 /**

@@ -3,6 +3,8 @@ import { loadConfig } from './config.ts';
 import { GenerationManager } from './generation/manager.ts';
 import { createLogger } from './logger.ts';
 import { LlamaCppProvider } from './provider/llamacpp.ts';
+import { ConversationStore } from './storage/conversations.ts';
+import { StoragePaths } from './storage/paths.ts';
 
 function main(): void {
   let config;
@@ -24,7 +26,17 @@ function main(): void {
     maxOutputTokens: config.provider.maxOutputTokens,
   });
 
+  const store = new ConversationStore({ paths: new StoragePaths(config.dataDir), logger });
+
   const app = createApp({ logger, provider, manager });
+
+  // Prepares the user's directories and sweeps temp files left by a crash
+  // (contracts §2). Failing here is fatal: storage must be usable before the
+  // server accepts a request that would write to it.
+  store.init(config.localUserId).catch((err: unknown) => {
+    logger.error('Storage initialisation failed', { error: err });
+    process.exit(1);
+  });
 
   const server = app.listen(config.port, () => {
     const address = server.address();
