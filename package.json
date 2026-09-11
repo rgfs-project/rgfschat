@@ -22,7 +22,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "verify": "node scripts/verify.mjs",
-    "probe:provider": "tsx --env-file-if-exists=.env scripts/probe-provider.ts"
+    "probe:provider": "tsx --env-file-if-exists=.env scripts/probe-provider.ts",
+    "index:rebuild": "node scripts/rebuild-index.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",
