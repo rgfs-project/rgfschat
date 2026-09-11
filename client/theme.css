@@ -38,6 +38,8 @@
 
   --sidebar-width: 22rem;
   --header-height: 4.25rem;
+  /* The single horizontal inset shared by both header rows. */
+  --gutter: 1.25rem;
   --radius: 0.75rem;
 
   --font-sans:

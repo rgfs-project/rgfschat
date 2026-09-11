@@ -25,6 +25,7 @@ import {
   useSendMessage,
 } from './queries.ts';
 import { useGeneration } from './useGeneration.ts';
+import { useNarrowViewport } from './useNarrowViewport.ts';
 import { useScrollPin } from './useScrollPin.ts';
 
 /** An in-flight generation survives a reload, so its id is parked in storage. */
@@ -132,6 +133,33 @@ export function App({
   const [adminOpen, setAdminOpen] = useState(false);
 
   const [collapsed, setCollapsed] = useState(() => readStored(SIDEBAR_KEY) === 'true');
+
+  /*
+   * A narrow window closes the sidebar, but does not *record* that choice: the
+   * stored preference belongs to the reader, and widening the window again
+   * should return the layout they picked rather than the one the viewport
+   * imposed. So a narrow window gets its own open flag, which starts shut and
+   * only the reader sets.
+   */
+  const narrow = useNarrowViewport();
+  const [narrowOpen, setNarrowOpen] = useState(false);
+  const sidebarOpen = narrow ? narrowOpen : !collapsed;
+
+  const openSidebar = useCallback(() => {
+    if (narrow) setNarrowOpen(true);
+    else setCollapsed(false);
+  }, [narrow]);
+
+  const closeSidebar = useCallback(() => {
+    if (narrow) setNarrowOpen(false);
+    else setCollapsed(true);
+  }, [narrow]);
+
+  // Crossing the breakpoint starts over, so a sidebar opened on a narrow window
+  // is not still open the next time the window becomes narrow.
+  useEffect(() => {
+    setNarrowOpen(false);
+  }, [narrow]);
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
     readStored(THEME_KEY) === 'dark' ? 'dark' : 'light'
   );
@@ -384,9 +412,21 @@ export function App({
     models.isSuccess && groups.length > 0 && groups.every((g) => g.status === 'unavailable');
 
   return (
-    <div className="shell" data-sidebar={collapsed ? 'collapsed' : 'expanded'}>
-      {!collapsed && (
-        <ErrorBoundary region="sidebar">
+    <div
+      className="shell"
+      data-sidebar={sidebarOpen ? 'expanded' : 'collapsed'}
+      data-narrow={narrow ? 'true' : 'false'}
+    >
+      {/* On a narrow window the sidebar covers the page, so it needs a way out
+          that is not the control hidden underneath it. */}
+      {sidebarOpen && narrow && (
+        <div className="scrim" onPointerDown={closeSidebar} aria-hidden="true" />
+      )}
+
+      {/* Always mounted so it can slide; `inert` keeps it out of the tab order
+          and away from assistive technology while it is off-screen. */}
+      <ErrorBoundary region="sidebar">
+        <div className="sidebar-host" inert={!sidebarOpen}>
           <Sidebar
             conversations={list}
             loading={conversations.isPending}
@@ -394,7 +434,7 @@ export function App({
             user={user}
             theme={theme}
             onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
-            onCollapse={() => setCollapsed(true)}
+            onCollapse={closeSidebar}
             onCreate={onCreate}
             onOpen={onSelectConversation}
             onRename={(id, currentTitle) => setDialog({ kind: 'rename', id, title: currentTitle })}
@@ -403,18 +443,24 @@ export function App({
             onOpenAdmin={() => setAdminOpen(true)}
             onSignOut={onSignOut}
           />
-        </ErrorBoundary>
-      )}
+        </div>
+      </ErrorBoundary>
 
       <main className="main">
         <header className="main__header">
-          {collapsed && (
+          {/*
+            On a narrow window this stays put whether the drawer is open or
+            shut, so the title beside it never shifts. On a wide one the
+            sidebar owns the control while it is open, and the header takes it
+            back when it closes.
+          */}
+          {(!sidebarOpen || narrow) && (
             <button
               type="button"
               className="icon-button"
-              onClick={() => setCollapsed(false)}
-              aria-label="Expand sidebar"
-              title="Expand sidebar"
+              onClick={sidebarOpen ? closeSidebar : openSidebar}
+              aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+              title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
             >
               <PanelLeft size={18} />
             </button>
