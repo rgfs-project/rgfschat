@@ -116,19 +116,30 @@ export function conversationRouter({ store, index, userId }: ConversationRoutesO
   );
 
   /**
-   * Deletes a message **and everything after it**.
+   * Deletes a message and its paired reply.
    *
-   * Removing a turn from the middle would leave the remaining history replying
-   * to something that is no longer there, so a delete truncates forward.
+   * A question and its answer are one exchange; later turns are untouched.
    */
   router.delete('/conversations/:id/messages/:messageId', async (req, res) => {
     const id = requireId(req.params.id);
     const messageId = requireId(req.params.messageId);
     const user = userId();
 
-    const updated = await store.deleteMessageAndAfter(user, id, messageId);
-    await index.upsert(user, entryFor(id, updated));
+    const updated = await store.deleteMessagePair(user, id, messageId);
 
+    // Deleting the last exchange leaves nothing to come back to, so the
+    // conversation goes with it rather than lingering as an empty shell. A
+    // conversation that is empty because it was *just created* is untouched —
+    // only a delete can trigger this. Markdown first, then the index entry, so
+    // an orphaned entry is the failure mode rather than a dangling reference.
+    if (updated.messages.length === 0) {
+      await store.delete(user, id);
+      await index.remove(user, id);
+      res.status(204).end();
+      return;
+    }
+
+    await index.upsert(user, entryFor(id, updated));
     res.json(toDto(id, updated));
   });
 

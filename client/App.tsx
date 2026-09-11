@@ -231,7 +231,14 @@ export function App(): React.JSX.Element {
 
       try {
         const detail = await deleteMessage(currentId, messageId);
-        setMessages(detail.messages);
+
+        if (detail === null) {
+          // That was the last exchange, so the conversation is gone too.
+          setCurrentId(null);
+          setMessages([]);
+        } else {
+          setMessages(detail.messages);
+        }
         await refreshList();
       } catch (err) {
         setError(err instanceof ApiError ? err.message : 'Could not delete the message.');

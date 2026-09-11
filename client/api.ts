@@ -102,15 +102,28 @@ export function editMessage(
   );
 }
 
-/** Deletes a message and everything after it. */
-export function deleteMessage(
+/**
+ * Deletes a message and its paired reply.
+ *
+ * Resolves to `null` when that emptied the conversation, which the server then
+ * deletes — the caller should drop it from the list rather than reopen it.
+ */
+export async function deleteMessage(
   conversationId: string,
   messageId: string
-): Promise<ConversationDetail> {
-  return request<ConversationDetail>(
+): Promise<ConversationDetail | null> {
+  const response = await fetch(
     `/api/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}`,
-    { method: 'DELETE' }
+    { method: 'DELETE', headers: { Accept: 'application/json' } }
   );
+
+  if (response.status === 204) return null;
+
+  const body: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw readErrorBody(body) ?? new ApiError('INTERNAL', 'Could not delete the message.');
+  }
+  return body as ConversationDetail;
 }
 
 export function regenerate(

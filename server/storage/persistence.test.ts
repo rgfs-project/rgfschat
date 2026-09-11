@@ -127,7 +127,9 @@ const api = {
     const res = await fetch(`${base}/api/conversations/${conversationId}/messages/${messageId}`, {
       method: 'DELETE',
     });
-    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+    // 204 when that emptied the conversation, which the server then deletes.
+    const body = res.status === 204 ? null : ((await res.json()) as Record<string, unknown>);
+    return { status: res.status, body };
   },
   async regenerate(conversationId: string, model = 'GPT') {
     const res = await fetch(`${base}/api/generations/regenerate`, {
@@ -457,19 +459,72 @@ describe('message editing, deletion, and regeneration', () => {
     expect((await api.editMessage(id, randomUUID(), 'nope')).status).toBe(404);
   });
 
-  it('deleting a message removes everything after it', async () => {
+  it('deleting a user message takes its reply with it and keeps later turns', async () => {
     await boot();
-    const { id, messages } = await twoTurns();
-    expect(messages).toHaveLength(4);
+    const { body } = await api.create('Three turns');
+    const id = body.id as string;
+    for (const question of ['first', 'second', 'third']) {
+      await api.send(id, question);
+      await service.settled(USER, id);
+    }
+    const before = await store.load(USER, id);
+    expect(before.messages).toHaveLength(6);
 
-    // Delete the second user message: it and its answer must both go.
-    const target = messages[2] as { id: string };
+    // Delete the *middle* user message: it and its answer go, the rest stay.
+    const target = before.messages[2] as { id: string };
     const res = await api.deleteMessage(id, target.id);
 
     expect(res.status).toBe(200);
     const after = await store.load(USER, id);
-    expect(after.messages).toHaveLength(2);
-    expect(after.messages.map((m) => m.type)).toEqual(['user', 'assistant']);
+    expect(after.messages).toHaveLength(4);
+    expect(after.messages.map((m) => m.type)).toEqual(['user', 'assistant', 'user', 'assistant']);
+    expect(after.messages.map((m) => m.body)).toEqual([
+      'first',
+      before.messages[1]?.body,
+      'third',
+      before.messages[5]?.body,
+    ]);
+  });
+
+  it('deleting an assistant message leaves the question in place', async () => {
+    await boot();
+    const { id, messages } = await twoTurns();
+
+    const assistant = messages[1] as { id: string };
+    await api.deleteMessage(id, assistant.id);
+
+    const after = await store.load(USER, id);
+    expect(after.messages).toHaveLength(3);
+    expect(after.messages.map((m) => m.type)).toEqual(['user', 'user', 'assistant']);
+  });
+
+  it('deleting the last remaining exchange removes the conversation itself', async () => {
+    await boot();
+    const { body } = await api.create();
+    const id = body.id as string;
+    await api.send(id, 'only question');
+    await service.settled(USER, id);
+
+    const loaded = await store.load(USER, id);
+    const firstMessage = loaded.messages[0] as { id: string };
+
+    const res = await api.deleteMessage(id, firstMessage.id);
+
+    expect(res.status).toBe(204);
+    expect(await store.exists(USER, id)).toBe(false);
+    expect(await api.list()).toEqual([]);
+    expect((await api.get(id)).status).toBe(404);
+  });
+
+  it('does not remove a conversation that is empty because it was just created', async () => {
+    await boot();
+    const { body } = await api.create();
+    const id = body.id as string;
+
+    // Only a delete may remove a conversation; creation must not self-destruct.
+    expect(await store.exists(USER, id)).toBe(true);
+    expect((await api.get(id)).status).toBe(200);
+    expect((await api.list()).map((e) => e.id)).toEqual([id]);
   });
 
   it('regenerate replaces the last assistant turn rather than appending one', async () => {

@@ -235,14 +235,21 @@ export class ConversationStore {
   }
 
   /**
-   * Removes a message, and everything after it, under the lock.
+   * Removes a message and its paired reply, under the lock.
    *
-   * Deleting a turn from the middle would leave the remaining history claiming
-   * a conversation that never happened, so a delete truncates forward. An
-   * assistant block's reasoning travels with it, because reasoning is a field
-   * on that message rather than a separate one.
+   * A user message and the assistant message answering it are one exchange, so
+   * deleting the question takes its answer with it — an orphaned reply would
+   * read as the assistant volunteering something unprompted. Later turns are
+   * kept: the history gains a gap, but nothing the user did not click on is
+   * discarded.
+   *
+   * Deleting an assistant message removes only that message, leaving the
+   * question in place so it can be regenerated or answered again.
+   *
+   * An assistant block's reasoning travels with it automatically, because
+   * reasoning is a field on that message rather than a separate one.
    */
-  async deleteMessageAndAfter(
+  async deleteMessagePair(
     userId: string,
     conversationId: string,
     messageId: string
@@ -250,7 +257,17 @@ export class ConversationStore {
     return this.update(userId, conversationId, (current) => {
       const at = current.messages.findIndex((message) => message.id === messageId);
       if (at === -1) throw AppError.notFound('Message not found.');
-      return { ...current, messages: current.messages.slice(0, at) };
+
+      const target = current.messages[at];
+      const next = current.messages[at + 1];
+      // Only a user message drags a reply with it, and only the one directly
+      // after it — a following `user` message is a separate exchange.
+      const removeCount = target?.type === 'user' && next?.type === 'assistant' ? 2 : 1;
+
+      return {
+        ...current,
+        messages: [...current.messages.slice(0, at), ...current.messages.slice(at + removeCount)],
+      };
     });
   }
 
