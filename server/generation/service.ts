@@ -139,7 +139,6 @@ export class GenerationService {
       generationId,
       assistantMessageId,
       model,
-      firstUserMessage: content,
       hadDefaultTitle: prepared.title === DEFAULT_TITLE,
     });
 
@@ -205,7 +204,6 @@ export class GenerationService {
       generationId,
       assistantMessageId,
       model,
-      firstUserMessage: '',
       // A regenerate never re-titles: the conversation already has its title.
       hadDefaultTitle: false,
     });
@@ -231,7 +229,6 @@ export class GenerationService {
     generationId: string;
     assistantMessageId: string;
     model: string;
-    firstUserMessage: string;
     hadDefaultTitle: boolean;
   }): Promise<void> {
     const { userId, conversationId, key, generationId, model } = context;
@@ -260,11 +257,18 @@ export class GenerationService {
           body: final.content,
         };
 
-        // Auto-title from the first user message once a reply completes, unless
-        // the conversation has been renamed (contracts §3.3).
+        // Auto-title once a reply completes, unless the conversation has been
+        // renamed (contracts §3.3). The title comes from the conversation's
+        // *first* user message, not the one just sent — if an earlier
+        // generation failed, the title still belongs to the question that
+        // opened the conversation.
+        const firstUserMessage = current.messages.find((message) => message.type === 'user');
         const title =
-          context.hadDefaultTitle && final.state === 'completed' && current.title === DEFAULT_TITLE
-            ? deriveTitle(context.firstUserMessage)
+          context.hadDefaultTitle &&
+          final.state === 'completed' &&
+          current.title === DEFAULT_TITLE &&
+          firstUserMessage !== undefined
+            ? deriveTitle(firstUserMessage.body)
             : current.title;
 
         const written = await this.#store.writeUnderLock(userId, conversationId, {

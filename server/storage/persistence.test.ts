@@ -368,6 +368,74 @@ describe('generation persistence', () => {
     expect((await store.load(USER, id)).title).toBe('My own title');
   });
 
+  it('titles from the first user message even when an earlier generation failed', async () => {
+    // A failed run leaves the title at its default, so the next completed run
+    // must still title from the question that opened the conversation
+    // (contracts §3.3), not from the message that happened to succeed.
+    await boot({ failWith: { status: 500, message: 'boom' } });
+    const { body } = await api.create();
+    const id = body.id as string;
+
+    await api.send(id, 'the original question');
+    await service.settled(USER, id);
+    expect((await store.load(USER, id)).title).toBe('New conversation');
+
+    // Swap in a provider that succeeds, keeping the same storage.
+    await mock?.close();
+    mock = await startMockProvider({ contentChunks: ['ok'] });
+    const provider = new LlamaCppProvider(
+      {
+        baseUrl: mock.url,
+        apiKey: undefined,
+        timeoutMs: 5_000,
+        defaultContextTokens: 8_192,
+        maxOutputTokens: 128,
+      },
+      logger
+    );
+    manager = new GenerationManager({ provider, logger, maxOutputTokens: 128 });
+    service = new GenerationService({
+      store,
+      index,
+      manager,
+      provider,
+      logger,
+      defaultContextTokens: 8_192,
+      maxOutputTokens: 128,
+    });
+
+    await service.start(USER, id, 'GPT', 'a later question');
+    await service.settled(USER, id);
+
+    expect((await store.load(USER, id)).title).toBe('the original question');
+  });
+
+  it('deletes the Markdown before the index entry', async () => {
+    await boot();
+    const { body } = await api.create('To be deleted');
+    const id = body.id as string;
+
+    const order: string[] = [];
+    const realDelete = store.delete.bind(store);
+    const realRemove = index.remove.bind(index);
+    store.delete = async (u, c) => {
+      order.push('markdown');
+      return realDelete(u, c);
+    };
+    index.remove = async (u, c) => {
+      order.push('index');
+      return realRemove(u, c);
+    };
+
+    await api.remove(id);
+
+    // Markdown first: an orphaned index entry is recoverable by a rebuild,
+    // a dangling entry pointing at a live file is not.
+    expect(order).toEqual(['markdown', 'index']);
+    store.delete = realDelete;
+    index.remove = realRemove;
+  });
+
   it('discards output for a conversation deleted mid-generation', async () => {
     await boot({ chunkDelayMs: 40 });
     const { body } = await api.create();
