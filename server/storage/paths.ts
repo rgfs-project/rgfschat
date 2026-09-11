@@ -82,6 +82,11 @@ export class StoragePaths {
     return this.#contain(resolve(this.userDir(userId), 'attachments'));
   }
 
+  /** Administrative audit logs, one file per month. */
+  auditDir(): string {
+    return this.#contain(resolve(this.systemDir(), 'audit'));
+  }
+
   systemDir(): string {
     return this.#contain(resolve(this.#root, SYSTEM_DIR));
   }

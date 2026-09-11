@@ -31,6 +31,15 @@ export interface AuthRoutesOptions {
   config: AuthConfig;
   isProduction: boolean;
   logger: Logger;
+  /**
+   * Resolved per request, not captured at boot.
+   *
+   * From Phase 9 an administrator can change the registration mode at runtime,
+   * and a value read once at startup would keep the old answer until a restart
+   * — which is exactly the situation an operator is trying to fix when they
+   * close registration.
+   */
+  registrationMode?: () => 'open' | 'closed';
 }
 
 export function authRouter({
@@ -39,6 +48,7 @@ export function authRouter({
   config,
   isProduction,
   logger,
+  registrationMode = () => config.registrationMode,
 }: AuthRoutesOptions): Router {
   const router = Router();
 
@@ -65,7 +75,7 @@ export function authRouter({
               createdAt: '',
             }),
       csrfToken: req.auth?.csrfToken ?? null,
-      registrationOpen: config.registrationMode === 'open',
+      registrationOpen: registrationMode() === 'open',
     };
     res.json(dto);
   });
@@ -75,7 +85,7 @@ export function authRouter({
     requireSameOrigin(),
     validateBody(credentialsSchema),
     async (req, res) => {
-      if (config.registrationMode !== 'open') {
+      if (registrationMode() !== 'open') {
         throw new AppError('REGISTRATION_CLOSED', 'Registration is closed.');
       }
 

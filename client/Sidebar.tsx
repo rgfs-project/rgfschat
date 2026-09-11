@@ -1,5 +1,16 @@
 import { useMemo, useState } from 'react';
-import { KeyRound, LogOut, Moon, PanelLeft, Pencil, Plus, Search, Sun, Trash2 } from 'lucide-react';
+import {
+  KeyRound,
+  LogOut,
+  Moon,
+  PanelLeft,
+  Pencil,
+  Plus,
+  Search,
+  Shield,
+  Sun,
+  Trash2,
+} from 'lucide-react';
 import type { UserDto } from '@shared/auth.ts';
 import type { ConversationSummary } from './api.ts';
 
@@ -25,6 +36,7 @@ export interface SidebarProps {
   onRename: (id: string, currentTitle: string) => void;
   onDelete: (id: string) => void;
   onChangePassword: () => void;
+  onOpenAdmin: () => void;
   onSignOut: () => void;
 }
 
@@ -55,6 +67,7 @@ export function Sidebar({
   onRename,
   onDelete,
   onChangePassword,
+  onOpenAdmin,
   onSignOut,
 }: SidebarProps): React.JSX.Element {
   const [query, setQuery] = useState('');
@@ -103,6 +116,15 @@ export function Sidebar({
           <Plus size={18} />
           New chat
         </button>
+
+        {/* Shown only to admins as a convenience; `requireAdmin` on the server
+            is what actually protects these routes (INV-24). */}
+        {user.role === 'admin' && (
+          <button type="button" className="nav-button" onClick={onOpenAdmin}>
+            <Shield size={18} />
+            Admin
+          </button>
+        )}
 
         <label className="search">
           <Search size={16} />

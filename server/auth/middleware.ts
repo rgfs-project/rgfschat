@@ -93,6 +93,47 @@ export function requireAuth(): RequestHandler {
   };
 }
 
+/**
+ * Gate for every administrative route (INV-24).
+ *
+ * The role is resolved from the stored user record on each request, never from
+ * anything the client sent and never from a value cached at sign-in. That is
+ * what makes a demotion take effect immediately: an admin demoted while their
+ * session is open is refused on their very next request, rather than keeping
+ * their powers until the session happens to expire.
+ *
+ * UI that hides admin controls is a convenience. This is the enforcement.
+ */
+export function requireAdmin({ users }: Pick<AuthMiddlewareOptions, 'users'>): RequestHandler {
+  return (req, _res, next) => {
+    void (async () => {
+      try {
+        if (req.auth === undefined) {
+          next(new AppError('UNAUTHENTICATED', 'You must sign in to do that.'));
+          return;
+        }
+
+        const user = await users.findById(req.auth.userId);
+        // A user disabled or deleted mid-session is no longer signed in at all,
+        // which is a different answer from "signed in but not permitted".
+        if (user === null || user.status !== 'active') {
+          next(new AppError('UNAUTHENTICATED', 'You must sign in to do that.'));
+          return;
+        }
+
+        if (user.role !== 'admin') {
+          next(new AppError('FORBIDDEN', 'You do not have access to that.'));
+          return;
+        }
+
+        next();
+      } catch (err) {
+        next(err);
+      }
+    })();
+  };
+}
+
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /**

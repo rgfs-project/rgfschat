@@ -7,6 +7,7 @@ import type { GenerationManager } from '../generation/manager.ts';
 import type { GenerationService } from '../generation/service.ts';
 import { validateBody } from '../http/validate.ts';
 import type { ProviderHub } from '../provider/hub.ts';
+import type { SettingsStore } from '../admin/settings.ts';
 
 /** Heartbeat interval. Contracts §5 require at least one every 15 s. */
 const SSE_HEARTBEAT_MS = 10_000;
@@ -33,6 +34,8 @@ export interface GenerationRoutesOptions {
   manager: GenerationManager;
   hub: ProviderHub;
   service: GenerationService;
+  /** Absent in tests that do not exercise model visibility. */
+  settings?: SettingsStore;
 }
 
 /** Identity comes only from the session (INV-14). */
@@ -42,8 +45,27 @@ function ownerOf(req: Request): string {
   return userId;
 }
 
-export function generationRouter({ manager, hub, service }: GenerationRoutesOptions): Router {
+export function generationRouter({
+  manager,
+  hub,
+  service,
+  settings,
+}: GenerationRoutesOptions): Router {
   const router = Router();
+
+  /**
+   * Whether this caller may use a model.
+   *
+   * Hiding is a visibility rule layered *on top of* validation, never instead
+   * of it: a hidden pair is still checked against the catalogue first, so
+   * nothing here weakens INV-18. Administrators are exempt, so an instance
+   * cannot hide every model and leave itself unable to test one.
+   */
+  function hiddenFor(req: Request, providerId: string, modelId: string): boolean {
+    if (settings === undefined) return false;
+    if (req.auth?.role === 'admin') return false;
+    return settings.isHidden(providerId, modelId);
+  }
 
   /** Non-sensitive: never carries baseUrl or apiKey (INV-25). */
   router.get('/providers', async (_req, res) => {
@@ -51,14 +73,26 @@ export function generationRouter({ manager, hub, service }: GenerationRoutesOpti
   });
 
   /** Grouped by provider, with stale/unavailable flags for the UI. */
-  router.get('/models', async (_req, res) => {
-    res.json({ providers: await hub.listModels() });
+  router.get('/models', async (req, res) => {
+    const groups = await hub.listModels();
+    res.json({
+      providers: groups.map((group) => ({
+        ...group,
+        models: group.models.filter((model) => !hiddenFor(req, group.providerId, model.id)),
+      })),
+    });
   });
 
   router.post('/generations', validateBody(createGenerationSchema), async (req, res) => {
     const { conversationId, providerId, model, content } = req.body as z.infer<
       typeof createGenerationSchema
     >;
+
+    // The same answer a model that does not exist gets, so hiding one cannot
+    // be used to discover that it is there.
+    if (hiddenFor(req, providerId, model)) {
+      throw new AppError('MODEL_NOT_FOUND', 'That model is not available.');
+    }
 
     if (!isCanonicalUuid(conversationId)) throw AppError.notFound('Conversation not found.');
 

@@ -6,6 +6,8 @@ import { GenerationManager } from './generation/manager.ts';
 import { createLogger } from './logger.ts';
 import { ProviderHub } from './provider/hub.ts';
 import { ProviderRegistry } from './provider/registry.ts';
+import { AuditLog } from './admin/audit.ts';
+import { SettingsStore } from './admin/settings.ts';
 import { ConversationStore } from './storage/conversations.ts';
 import { ChatIndex } from './storage/index.ts';
 import { StoragePaths } from './storage/paths.ts';
@@ -68,6 +70,19 @@ async function main(): Promise<void> {
     idleTtlMs: config.auth.idleTtlMs,
   });
 
+  /*
+   * Instance settings and the audit log. Settings load before the app is built
+   * so `registrationMode` is already resolved when the first request arrives;
+   * an absent or unreadable file falls back to the environment.
+   */
+  const settings = new SettingsStore({
+    paths,
+    logger,
+    fallbackRegistrationMode: config.auth.registrationMode,
+  });
+  await settings.load();
+  const audit = new AuditLog({ paths, logger });
+
   const app = createApp({
     logger,
     // The server binary lives at dist/server/index.js, so the built client is
@@ -82,6 +97,10 @@ async function main(): Promise<void> {
     sessions,
     authConfig: config.auth,
     isProduction: config.isProduction,
+    registry,
+    settings,
+    audit,
+    policy: config.hostPolicy,
   });
 
   // Prepares the user's directories and sweeps temp files left by a crash

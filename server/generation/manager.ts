@@ -453,6 +453,27 @@ export class GenerationManager {
   }
 
   /**
+   * Cancels every run belonging to one user, returning how many were stopped.
+   *
+   * Needed when an administrator disables, demotes, or deletes someone: their
+   * sessions are revoked, but a generation already in flight would otherwise
+   * keep running and keep writing to their conversations after they have lost
+   * access to them (INV-17). Unlike `cancel`, this takes no generation id —
+   * the caller is acting on the *person*, and does not know what they have
+   * running.
+   */
+  cancelAllForOwner(ownerId: string): number {
+    let cancelled = 0;
+    for (const record of this.#generations.values()) {
+      if (record.ownerId !== ownerId || isTerminal(record.state)) continue;
+      this.#finish(record, 'cancelled');
+      record.abort.abort();
+      cancelled += 1;
+    }
+    return cancelled;
+  }
+
+  /**
    * Subscribes to live events. Returns an unsubscribe function.
    * Unsubscribing never affects the generation itself (INV-06).
    */

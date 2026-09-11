@@ -29,6 +29,8 @@ export const ERROR_CODES = [
   // Phase 5
   'PROVIDER_NOT_FOUND',
   'ENDPOINT_NOT_ALLOWED',
+  // Phase 9
+  'LAST_ADMIN',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -54,6 +56,9 @@ export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
   REGISTRATION_CLOSED: 403,
   PROVIDER_NOT_FOUND: 400,
   ENDPOINT_NOT_ALLOWED: 400,
+  // A conflict with the state of the system, not a malformed request: the
+  // instance must keep at least one way in.
+  LAST_ADMIN: 409,
 };
 
 /**

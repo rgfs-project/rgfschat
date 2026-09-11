@@ -177,9 +177,9 @@ Every invariant is enforced in code and covered by at least one test whose title
 | INV-21 | After a restart, no generation remains non-terminal, and partial output is persisted once                       | 6     | `server/generation/recovery.ts`                                   | `server/generation/streaming.test.ts`                                     |
 | INV-22 | Rendered Markdown never executes script or raw HTML                                                             | 7     | `client/Markdown.tsx` (`skipHtml`, no `rehype-raw`, `safeUrl`)    | `client/Markdown.test.tsx`                                                |
 | INV-23 | A stale response never overwrites newer client state                                                            | 8     | `client/queries.ts` (per-id keys + `AbortSignal`)                 | `client/state.test.tsx`, `e2e/state.spec.ts`                              |
-| INV-24 | Admin authorization is enforced server-side on every admin route                                                | 9     | pending                                                           | pending                                                                   |
-| INV-25 | Secrets are write-only: no API response ever contains a configured secret                                       | 9     | pending                                                           | pending                                                                   |
-| INV-26 | There is always at least one active admin                                                                       | 9     | pending                                                           | pending                                                                   |
+| INV-24 | Admin authorization is enforced server-side on every admin route                                                | 9     | `server/auth/middleware.ts` (`requireAdmin`)                      | `server/routes/admin.test.ts`                                             |
+| INV-25 | Secrets are write-only: no API response ever contains a configured secret                                       | 9     | `server/routes/admin.ts` (`toProviderAdminDto`)                   | `server/routes/admin.test.ts` (secret exposure sweep)                     |
+| INV-26 | There is always at least one active admin                                                                       | 9     | `server/routes/admin.ts` (`assertNotLastAdmin`)                   | `server/routes/admin.test.ts`                                             |
 | INV-27 | Attachment bytes are never served as executable content; media type is sniffed, not trusted                     | 11    | pending                                                           | pending                                                                   |
 | INV-28 | Attachment storage paths never derive from the uploaded filename                                                | 11    | pending                                                           | pending                                                                   |
 
@@ -578,6 +578,95 @@ while rendering costs the reader that pane, not the navigation they need to get
 away from it. The transcript's boundary is keyed on the open conversation, so
 navigating away clears a failure rather than stranding the reader on it.
 
-## 12. Attachments
+## 12. Administration
+
+### Authorization (INV-24)
+
+One `requireAdmin`, mounted on the router rather than on each route, for the
+same reason `requireAuth` is: a route added later cannot end up unprotected
+because someone forgot to repeat the check. It is scoped to `/api/admin` rather
+than `/api` — mounted on the latter it would also intercept anything the earlier
+routers did not match, so a bad method on a conversation route would answer 403
+to a non-admin instead of the 404 it deserves.
+
+The role is resolved from the **stored user record on each request**, never from
+the client and never from a value cached at sign-in. That is what makes a
+demotion take effect immediately: an admin demoted mid-session is refused on
+their very next request. A user disabled or deleted mid-session answers 401
+rather than 403 — they are not signed in at all, which is a different fact from
+being signed in without permission.
+
+UI that hides admin controls is a courtesy. This is the enforcement.
+
+### Reducing access takes effect now (INV-17)
+
+Disabling, demoting, or deleting a user revokes every session **and** cancels
+everything they have running. A generation already in flight would otherwise
+keep writing to conversations its owner no longer has access to.
+`GenerationManager.cancelAllForOwner` exists for this: unlike `cancel`, it takes
+no generation id, because the administrator is acting on the person and does not
+know what they have running.
+
+### Last-admin protection (INV-26)
+
+Counted over _active admins other than the target_, which is what makes one rule
+cover demoting someone else and demoting yourself — the usual way an operator
+locks themselves out. A disabled admin does not count as a way back in. The
+refusal is `LAST_ADMIN` (409): a conflict with the state of the system, not a
+malformed request.
+
+### Secrets are write-only (INV-25)
+
+No response from the admin surface ever contains an `apiKey`. The DTO carries
+`hasApiKey`, which is everything an operator needs and nothing an attacker can
+use. On edit the three cases are mutually exclusive so a write is never
+ambiguous about a credential: `apiKey` replaces it, `clearApiKey: true` removes
+it, and neither keeps what is stored.
+
+This is verified by a **sweep** rather than only by targeted assertions: known
+sentinel values are configured, every route is called as both an admin and a
+non-admin, and the bodies, headers, and captured log stream are searched for
+them. Narrower assertions can only catch the leaks someone thought of.
+
+### Provider writes
+
+Every create and edit re-runs the full SSRF validation (INV-19), not only the
+load-time check, and "test connection" goes through the same guarded client — a
+test using a plain fetch could report success for an endpoint a real generation
+would refuse, which is worse than no test at all. Writes are atomic, then the
+live registry is swapped in-process, so a change takes effect without a restart.
+
+### Settings (`_system/settings.json`)
+
+Every key is optional. An absent file, an absent key, or a file that cannot be
+parsed all mean "fall back to the environment", so an instance that has never
+opened the admin UI behaves exactly as before and a corrupt file degrades rather
+than refusing to boot. `registrationMode` overrides the environment once set,
+and is resolved **per request** — a value read once at startup would keep the old
+answer until a restart, which is exactly the situation an operator is trying to
+fix when they close registration.
+
+Model visibility hides `(providerId, modelId)` pairs from non-admins. It is a
+rule layered _on top of_ validation, never instead of it: a hidden pair is still
+checked against the catalogue, so nothing here weakens INV-18. A hidden model is
+refused with `MODEL_NOT_FOUND` — the same answer a model that does not exist
+gets, so hiding one cannot be used to discover it is there. Admins are exempt,
+so an instance cannot hide every model and leave itself unable to test one.
+
+### Audit log
+
+One JSON object per line in `_system/audit/<yyyy-mm>.jsonl`. Line-delimited so
+an append is a single write with no read-modify-write cycle to lose entries to,
+and so a truncated final line costs one record rather than the file.
+
+Entries carry actor, action, target, timestamp, and outcome — never secrets,
+passwords, or message content. `details` is filtered on the way in by key and
+by type rather than trusted to call sites: the cost of one careless object is a
+credential written to a file that is meant to be safe to hand to whoever
+investigates an incident. Writing an entry never throws; a failure is logged
+instead, because an audit problem must not turn a successful administrative
+action into an error the operator has to guess about.
+
+## 13. Attachments
 
 N/A until Phase 11.

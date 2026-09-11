@@ -4,6 +4,7 @@ import { ArrowDown, PanelLeft } from 'lucide-react';
 import type { UserDto } from '@shared/auth.ts';
 import { ApiError, cancelGeneration } from './api.ts';
 import { Composer } from './Composer.tsx';
+import { AdminPanel } from './AdminPanel.tsx';
 import { ChangePassword } from './ChangePassword.tsx';
 import { Dialog } from './Dialog.tsx';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
@@ -128,6 +129,7 @@ export function App({
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<PendingDialog | null>(null);
   const [changingPassword, setChangingPassword] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
 
   const [collapsed, setCollapsed] = useState(() => readStored(SIDEBAR_KEY) === 'true');
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
@@ -398,6 +400,7 @@ export function App({
             onRename={(id, currentTitle) => setDialog({ kind: 'rename', id, title: currentTitle })}
             onDelete={(id) => setDialog({ kind: 'delete-conversation', id })}
             onChangePassword={() => setChangingPassword(true)}
+            onOpenAdmin={() => setAdminOpen(true)}
             onSignOut={onSignOut}
           />
         </ErrorBoundary>
@@ -527,6 +530,7 @@ export function App({
       </main>
 
       {changingPassword && <ChangePassword onClose={() => setChangingPassword(false)} />}
+      {adminOpen && <AdminPanel user={user} onClose={() => setAdminOpen(false)} />}
 
       {dialog !== null && (
         <Dialog

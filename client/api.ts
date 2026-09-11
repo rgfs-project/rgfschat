@@ -356,3 +356,158 @@ export async function changePassword(currentPassword: string, newPassword: strin
     throw readErrorBody(body) ?? new ApiError('INTERNAL', 'Could not change your password.');
   }
 }
+
+/* --- administration ------------------------------------------------------ */
+
+export interface AdminUserDto extends UserDto {
+  conversationCount: number;
+}
+
+export interface AdminProviderDto {
+  id: string;
+  name: string;
+  kind: 'openai-compatible';
+  baseUrl: string;
+  /** INV-25: whether a key is set, never the key itself. */
+  hasApiKey: boolean;
+  timeoutMs: number;
+  capabilities: { vision?: boolean; reasoning?: boolean };
+  contextTokens?: number;
+}
+
+export interface AdminSettingsDto {
+  settings: {
+    version: number;
+    registrationMode?: 'open' | 'closed';
+    defaultModel?: { providerId: string; modelId: string };
+    hiddenModels?: { providerId: string; modelId: string }[];
+  };
+  resolved: {
+    registrationMode: 'open' | 'closed';
+    defaultModel: { providerId: string; modelId: string } | null;
+    hiddenModels: { providerId: string; modelId: string }[];
+  };
+}
+
+export async function fetchAdminUsers(signal?: AbortSignal): Promise<AdminUserDto[]> {
+  const { users } = await request<{ users: AdminUserDto[] }>(
+    '/api/admin/users',
+    signalInit(signal)
+  );
+  return users;
+}
+
+export function createAdminUser(body: {
+  username: string;
+  password: string;
+  role?: 'user' | 'admin';
+}): Promise<{ user: UserDto }> {
+  return request('/api/admin/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function setAdminUserPassword(id: string, password: string): Promise<unknown> {
+  return request(`/api/admin/users/${encodeURIComponent(id)}/password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  });
+}
+
+export function updateAdminUser(
+  id: string,
+  changes: { role?: 'user' | 'admin'; status?: 'active' | 'disabled' }
+): Promise<{ user: UserDto }> {
+  return request(`/api/admin/users/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(changes),
+  });
+}
+
+export function deleteAdminUser(id: string, username: string): Promise<unknown> {
+  return request(`/api/admin/users/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username }),
+  });
+}
+
+export async function fetchAdminProviders(signal?: AbortSignal): Promise<AdminProviderDto[]> {
+  const { providers } = await request<{ providers: AdminProviderDto[] }>(
+    '/api/admin/providers',
+    signalInit(signal)
+  );
+  return providers;
+}
+
+export interface ProviderWrite {
+  id?: string;
+  name: string;
+  kind: 'openai-compatible';
+  baseUrl: string;
+  apiKey?: string;
+  clearApiKey?: true;
+  timeoutMs: number;
+}
+
+export function createAdminProvider(body: ProviderWrite): Promise<unknown> {
+  return request('/api/admin/providers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateAdminProvider(id: string, body: ProviderWrite): Promise<unknown> {
+  return request(`/api/admin/providers/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteAdminProvider(id: string): Promise<unknown> {
+  return request(`/api/admin/providers/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export function testAdminProvider(body: {
+  baseUrl: string;
+  apiKey?: string;
+}): Promise<{ ok: boolean; modelCount?: number; message?: string }> {
+  return request('/api/admin/providers/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function fetchAdminSettings(signal?: AbortSignal): Promise<AdminSettingsDto> {
+  return request<AdminSettingsDto>('/api/admin/settings', signalInit(signal));
+}
+
+export function updateAdminSettings(body: {
+  registrationMode?: 'open' | 'closed';
+  hiddenModels?: { providerId: string; modelId: string }[];
+}): Promise<AdminSettingsDto> {
+  return request('/api/admin/settings', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export function refreshAdminModels(): Promise<unknown> {
+  return request('/api/admin/models/refresh', { method: 'POST' });
+}
+
+export function rebuildAdminIndex(userId?: string): Promise<{ users: number }> {
+  return request('/api/admin/maintenance/rebuild-index', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(userId === undefined ? {} : { userId }),
+  });
+}

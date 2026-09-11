@@ -95,6 +95,55 @@ export class ProviderHub {
     return this.#entries.size;
   }
 
+  /**
+   * The stored configuration, including secrets.
+   *
+   * For the admin layer only, which needs to carry an existing key forward
+   * through an edit that did not send one. Nothing that returns to a browser
+   * may use this directly — see `toProviderAdminDto`, which drops the key
+   * (INV-25).
+   */
+  entries(): ProviderConfigEntry[] {
+    return [...this.#entries.values()];
+  }
+
+  /**
+   * Probes an endpoint before it is saved.
+   *
+   * Deliberately builds a client the same way a configured provider is built,
+   * so the request goes through the same SSRF-guarded path (INV-19). A test
+   * that used a plain fetch could report success for somewhere a real
+   * generation would be refused, which is worse than no test at all.
+   */
+  async testEndpoint(config: {
+    baseUrl: string;
+    apiKey?: string;
+    timeoutMs: number;
+  }): Promise<{ ok: boolean; modelCount?: number; code?: string; message?: string }> {
+    const probe: ProviderConfigEntry = {
+      id: '__test__',
+      name: 'Connection test',
+      kind: 'openai-compatible',
+      baseUrl: config.baseUrl,
+      timeoutMs: config.timeoutMs,
+      capabilities: {},
+      ...(config.apiKey === undefined ? {} : { apiKey: config.apiKey }),
+    };
+
+    try {
+      const models = await this.#factory(probe).listModels();
+      return { ok: true, modelCount: models.length };
+    } catch (err) {
+      // The operator needs to know why, but the message is the normalized one
+      // from the provider layer, which never carries an upstream body (INV-03).
+      return {
+        ok: false,
+        code: err instanceof AppError ? err.code : 'PROVIDER_UNAVAILABLE',
+        message: err instanceof Error ? err.message : 'Could not reach the provider.',
+      };
+    }
+  }
+
   #require(providerId: string): { entry: ProviderConfigEntry; client: Provider } {
     const entry = this.#entries.get(providerId);
     const client = this.#clients.get(providerId);

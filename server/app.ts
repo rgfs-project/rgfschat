@@ -10,7 +10,12 @@ import { generationRouter } from './routes/generations.ts';
 import { healthRouter } from './routes/health.ts';
 import { conversationRouter } from './routes/conversations.ts';
 import { authRouter } from './routes/auth.ts';
-import { authenticate, requireAuth, requireCsrf } from './auth/middleware.ts';
+import { adminRouter } from './routes/admin.ts';
+import { authenticate, requireAdmin, requireAuth, requireCsrf } from './auth/middleware.ts';
+import type { ProviderRegistry } from './provider/registry.ts';
+import type { SettingsStore } from './admin/settings.ts';
+import type { AuditLog } from './admin/audit.ts';
+import type { HostPolicy } from './provider/ssrf.ts';
 import type { SessionManager } from './auth/sessions.ts';
 import type { UserStore } from './auth/users.ts';
 import type { AuthConfig } from './config.ts';
@@ -36,6 +41,11 @@ export interface AppOptions {
   sessions?: SessionManager;
   authConfig?: AuthConfig;
   isProduction?: boolean;
+  /** Phase 9. Absent in tests that do not exercise the admin surface. */
+  registry?: ProviderRegistry;
+  settings?: SettingsStore;
+  audit?: AuditLog;
+  policy?: HostPolicy;
 }
 
 /**
@@ -57,6 +67,10 @@ export function createApp({
   authConfig,
   clientDir,
   isProduction = false,
+  registry,
+  settings,
+  audit,
+  policy,
 }: AppOptions): Express {
   const app = express();
 
@@ -71,7 +85,19 @@ export function createApp({
     // Resolves the session for every request, including public ones, so
     // `GET /api/auth/session` can describe the caller.
     app.use(authenticate({ sessions, users }));
-    app.use('/api', authRouter({ users, sessions, config: authConfig, isProduction, logger }));
+    app.use(
+      '/api',
+      authRouter({
+        users,
+        sessions,
+        config: authConfig,
+        isProduction,
+        logger,
+        ...(settings === undefined
+          ? {}
+          : { registrationMode: () => settings.resolved().registrationMode }),
+      })
+    );
 
     // Everything below this line requires a session and a CSRF token. Mounting
     // it as a gate rather than per-route means a new route cannot be added
@@ -96,7 +122,51 @@ export function createApp({
   }
 
   if (hub !== undefined && manager !== undefined && service !== undefined) {
-    app.use('/api', generationRouter({ manager, hub, service }));
+    app.use(
+      '/api',
+      generationRouter({ manager, hub, service, ...(settings === undefined ? {} : { settings }) })
+    );
+  }
+
+  /*
+   * Administration, behind one gate.
+   *
+   * `requireAdmin` is mounted on the router rather than on each route, for the
+   * same reason `requireAuth` is: a route added later cannot end up unprotected
+   * by someone forgetting to repeat the check (INV-24).
+   */
+  if (
+    users !== undefined &&
+    sessions !== undefined &&
+    manager !== undefined &&
+    index !== undefined &&
+    hub !== undefined &&
+    registry !== undefined &&
+    settings !== undefined &&
+    audit !== undefined &&
+    policy !== undefined
+  ) {
+    /*
+     * Scoped to the admin prefix, not to `/api`. Mounted on `/api` it would
+     * also intercept anything the earlier routers did not match — so a bad
+     * method on a conversation route would answer 403 to a non-admin instead
+     * of the 404 it deserves.
+     */
+    app.use(
+      '/api/admin',
+      requireAdmin({ users }),
+      adminRouter({
+        users,
+        sessions,
+        manager,
+        index,
+        registry,
+        hub,
+        settings,
+        audit,
+        policy,
+      })
+    );
   }
 
   // Anything under /api that got this far is a genuine unknown route, and must
