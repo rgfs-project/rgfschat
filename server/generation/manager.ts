@@ -8,9 +8,16 @@ import type {
   TerminalState,
 } from '@shared/generation.ts';
 import { isTerminal } from '@shared/generation.ts';
+import type { CheckpointStore } from './checkpoints.ts';
 import { AppError, isAppError } from '../errors/AppError.ts';
 import type { Logger } from '../logger.ts';
 import type { Provider } from '../provider/types.ts';
+
+/** One emitted event, retained for replay. */
+interface EventEnvelope {
+  id: number;
+  event: GenerationEvent;
+}
 
 export interface GenerationManagerOptions {
   /**
@@ -24,11 +31,19 @@ export interface GenerationManagerOptions {
   retentionMs?: number;
   /** Hard cap on retained generations, oldest terminal ones evicted first. */
   maxRetained?: number;
+  /** Events kept per generation for `Last-Event-ID` replay. */
+  replayEvents?: number;
+  /** Minimum interval between checkpoint writes while streaming. */
+  checkpointMs?: number;
+  /** Persists in-flight state so a restart can finish it honestly. */
+  checkpoints?: CheckpointStore;
   now?: () => Date;
 }
 
 interface GenerationRecord {
   id: string;
+  conversationId: string;
+  providerId: string;
   /** Who started it. Anyone else must not be able to observe or cancel it. */
   ownerId: string;
   /** The client this run streams from; different generations may use different providers. */
@@ -45,6 +60,20 @@ interface GenerationRecord {
   abort: AbortController;
   emitter: EventEmitter;
   terminalAt: Date | undefined;
+  /** Bounded replay window; the oldest events fall off the front. */
+  replay: EventEnvelope[];
+  /** When the last checkpoint was written, to throttle the cadence. */
+  lastCheckpointAt: number;
+  checkpointTimer: NodeJS.Timeout | null;
+  /**
+   * Serialises checkpoint writes for this generation.
+   *
+   * Two writes in flight at once race at the final rename, so a `streaming`
+   * write issued just before a `completed` one could land *after* it and
+   * resurrect the older state — which recovery would then treat as an
+   * interrupted run. Chaining keeps them in issue order.
+   */
+  checkpointChain: Promise<void>;
 }
 
 const DEFAULT_RETENTION_MS = 10 * 60 * 1000;
@@ -68,6 +97,9 @@ export class GenerationManager {
   readonly #maxOutputTokens: number;
   readonly #retentionMs: number;
   readonly #maxRetained: number;
+  readonly #replayEvents: number;
+  readonly #checkpointMs: number;
+  readonly #checkpoints: CheckpointStore | undefined;
   readonly #now: () => Date;
 
   constructor({
@@ -76,6 +108,9 @@ export class GenerationManager {
     maxOutputTokens,
     retentionMs = DEFAULT_RETENTION_MS,
     maxRetained = DEFAULT_MAX_RETAINED,
+    replayEvents = 2_000,
+    checkpointMs = 1_000,
+    checkpoints,
     now = () => new Date(),
   }: GenerationManagerOptions) {
     this.#provider = provider;
@@ -83,6 +118,9 @@ export class GenerationManager {
     this.#maxOutputTokens = maxOutputTokens;
     this.#retentionMs = retentionMs;
     this.#maxRetained = maxRetained;
+    this.#replayEvents = replayEvents;
+    this.#checkpointMs = checkpointMs;
+    this.#checkpoints = checkpoints;
     this.#now = now;
   }
 
@@ -96,7 +134,8 @@ export class GenerationManager {
     ownerId: string,
     model: string,
     messages: ChatMessage[],
-    provider?: Provider
+    provider?: Provider,
+    context: { conversationId?: string; providerId?: string } = {}
   ): { generationId: string; assistantMessageId: string } {
     const client = provider ?? this.#provider;
     if (client === undefined) {
@@ -105,6 +144,8 @@ export class GenerationManager {
     const createdAt = this.#now();
     const record: GenerationRecord = {
       id: randomUUID(),
+      conversationId: context.conversationId ?? '',
+      providerId: context.providerId ?? '',
       ownerId,
       provider: client,
       assistantMessageId: randomUUID(),
@@ -119,6 +160,10 @@ export class GenerationManager {
       abort: new AbortController(),
       emitter: new EventEmitter(),
       terminalAt: undefined,
+      replay: [],
+      lastCheckpointAt: 0,
+      checkpointTimer: null,
+      checkpointChain: Promise.resolve(),
     };
 
     // Many observers may attach; none of them should trip the warning.
@@ -126,6 +171,7 @@ export class GenerationManager {
     this.#generations.set(record.id, record);
     this.#evict();
 
+    this.#checkpoint(record, true);
     void this.#run(record, messages);
 
     return { generationId: record.id, assistantMessageId: record.assistantMessageId };
@@ -157,6 +203,9 @@ export class GenerationManager {
           this.#emit(record, { type: 'reasoning', delta: chunk.text });
         }
         record.updatedAt = this.#now();
+        // Throttled: a long reply costs a bounded number of writes, not one
+        // per token.
+        this.#checkpoint(record, false);
       }
 
       this.#finish(record, 'completed');
@@ -204,6 +253,13 @@ export class GenerationManager {
       state,
       ...(errorCode !== undefined ? { errorCode } : {}),
     });
+
+    if (record.checkpointTimer !== null) {
+      clearInterval(record.checkpointTimer);
+      record.checkpointTimer = null;
+    }
+    // A terminal transition must always be recorded, however recent the last write.
+    this.#checkpoint(record, true);
   }
 
   #setState(record: GenerationRecord, state: GenerationState): void {
@@ -211,11 +267,118 @@ export class GenerationManager {
     record.state = state;
     record.updatedAt = this.#now();
     this.#emit(record, { type: 'state', state });
+    this.#checkpoint(record, true);
   }
 
   #emit(record: GenerationRecord, event: GenerationEvent): void {
     record.lastEventId += 1;
-    record.emitter.emit('event', { id: record.lastEventId, event });
+    const envelope: EventEnvelope = { id: record.lastEventId, event };
+
+    // Retain for replay, dropping the oldest once the window is full. The
+    // server guarantees correct replay; clients never deduplicate to compensate.
+    record.replay.push(envelope);
+    if (record.replay.length > this.#replayEvents) record.replay.shift();
+
+    record.emitter.emit('event', envelope);
+  }
+
+  /**
+   * Writes a checkpoint, throttled to the configured cadence.
+   *
+   * `force` is used on every state transition, where the write must not be
+   * skipped however recently the last one happened.
+   */
+  #checkpoint(record: GenerationRecord, force: boolean): void {
+    if (this.#checkpoints === undefined) return;
+
+    const now = Date.now();
+    if (!force && now - record.lastCheckpointAt < this.#checkpointMs) return;
+    record.lastCheckpointAt = now;
+
+    const store = this.#checkpoints;
+    const payload = {
+      generationId: record.id,
+      ownerId: record.ownerId,
+      conversationId: record.conversationId,
+      assistantMessageId: record.assistantMessageId,
+      providerId: record.providerId,
+      model: record.model,
+      state: record.state,
+      content: record.content,
+      reasoning: record.reasoning,
+      lastEventId: record.lastEventId,
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+    };
+
+    record.checkpointChain = record.checkpointChain.then(
+      () =>
+        store.write(payload).catch((err: unknown) => {
+          this.#logger.warn('Failed to write generation checkpoint', {
+            generationId: record.id,
+            error: err instanceof Error ? { name: err.name, message: err.message } : undefined,
+          });
+        }),
+      () => undefined
+    );
+  }
+
+  /** Resolves once every queued checkpoint write for a generation has landed. */
+  async checkpointsFlushed(id: string): Promise<void> {
+    const record = this.#generations.get(id);
+    if (record === undefined) return;
+    await record.checkpointChain;
+  }
+
+  /**
+   * Resolves once no checkpoint write is outstanding for any generation.
+   *
+   * Callers that tear down `DATA_DIR` need this: a write issued a moment ago is
+   * still in flight, and removing the directory underneath it fails.
+   */
+  async allCheckpointsFlushed(): Promise<void> {
+    await Promise.all([...this.#generations.values()].map((record) => record.checkpointChain));
+  }
+
+  /**
+   * Replays from `lastEventId`, or resyncs when that is outside the window.
+   *
+   * Returns the events to send before live delivery begins. A gap is never left
+   * silent: either the missing events are replayed exactly, or a `resync` event
+   * carries the whole state (INV-20).
+   */
+  catchUp(id: string, ownerId: string, lastEventId: number | null): EventEnvelope[] {
+    const record = this.#find(id, ownerId);
+    if (record === undefined) {
+      throw new AppError('GENERATION_NOT_FOUND', 'Generation not found.');
+    }
+
+    const snapshot = toSnapshot(record);
+
+    // A fresh observer gets the current picture and then live events.
+    if (lastEventId === null) {
+      return [{ id: record.lastEventId, event: { type: 'snapshot', snapshot } }];
+    }
+
+    // Exactly up to date: nothing was missed.
+    if (lastEventId === record.lastEventId) return [];
+
+    // An id ahead of anything we issued is not ours — a stale tab from a
+    // previous process, or a fabricated value. Returning nothing would leave
+    // that client silent, so it is treated as unknown and resynced (INV-20).
+    if (lastEventId > record.lastEventId) {
+      return [{ id: record.lastEventId, event: { type: 'resync', snapshot } }];
+    }
+
+    const oldestRetained = record.replay[0]?.id;
+    const canReplay = oldestRetained !== undefined && lastEventId >= oldestRetained - 1;
+
+    if (!canReplay) {
+      // Outside the window, or an id we never issued: hand over everything.
+      return [{ id: record.lastEventId, event: { type: 'resync', snapshot } }];
+    }
+
+    return record.replay.filter((envelope) => envelope.id > lastEventId);
   }
 
   /**
@@ -357,5 +520,6 @@ function toSnapshot(record: GenerationRecord): GenerationSnapshotDto {
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     lastEventId: record.lastEventId,
+    providerId: record.providerId,
   };
 }

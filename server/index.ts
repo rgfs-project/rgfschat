@@ -8,10 +8,12 @@ import { ConversationStore } from './storage/conversations.ts';
 import { ChatIndex } from './storage/index.ts';
 import { StoragePaths } from './storage/paths.ts';
 import { GenerationService } from './generation/service.ts';
+import { CheckpointStore } from './generation/checkpoints.ts';
+import { recoverGenerations } from './generation/recovery.ts';
 import { UserStore } from './auth/users.ts';
 import { SessionManager } from './auth/sessions.ts';
 
-function main(): void {
+async function main(): Promise<void> {
   let config;
   try {
     config = loadConfig();
@@ -32,9 +34,14 @@ function main(): void {
     defaultContextTokens: config.provider.defaultContextTokens,
     maxOutputTokens: config.provider.maxOutputTokens,
   });
+  const checkpoints = new CheckpointStore({ paths: paths0, logger });
   const manager = new GenerationManager({
     logger,
     maxOutputTokens: config.provider.maxOutputTokens,
+    replayEvents: config.streaming.replayEvents,
+    checkpointMs: config.streaming.checkpointMs,
+    retentionMs: config.streaming.retentionMs,
+    checkpoints,
   });
 
   const store = new ConversationStore({ paths: paths0, logger });
@@ -44,6 +51,7 @@ function main(): void {
     index,
     manager,
     hub,
+    checkpoints,
     logger,
     defaultContextTokens: config.provider.defaultContextTokens,
     maxOutputTokens: config.provider.maxOutputTokens,
@@ -109,6 +117,19 @@ function main(): void {
       process.exit(1);
     });
 
+  // Recovery runs to completion before the listener starts: a client must never
+  // be able to read a conversation that is missing an interrupted turn (INV-21).
+  await recoverGenerations({ checkpoints, store, index, logger })
+    .then((result) => {
+      if (result.interrupted + result.alreadyWritten + result.cleared > 0) {
+        logger.info('Generation recovery complete', { ...result });
+      }
+    })
+    .catch((err: unknown) => {
+      logger.error('Generation recovery failed', { error: err });
+      process.exit(1);
+    });
+
   const server = app.listen(config.port, () => {
     const address = server.address();
     const port = typeof address === 'object' && address !== null ? address.port : config.port;
@@ -141,4 +162,4 @@ function main(): void {
   process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
-main();
+await main();

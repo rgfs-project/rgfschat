@@ -30,6 +30,8 @@ const editMessageSchema = z.strictObject({ body: z.string().min(1).max(200_000) 
 export interface ConversationRoutesOptions {
   store: ConversationStore;
   index: ChatIndex;
+  /** Lets a reloading client rediscover the run it was watching. */
+  activeGenerationId?: (userId: string, conversationId: string) => string | null;
 }
 
 /**
@@ -56,17 +58,22 @@ function requireId(raw: unknown): string {
   return raw;
 }
 
-function toDto(id: string, conversation: Conversation) {
+function toDto(id: string, conversation: Conversation, activeGenerationId: string | null = null) {
   return {
     id,
     title: conversation.title,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
     messages: conversation.messages,
+    activeGenerationId,
   };
 }
 
-export function conversationRouter({ store, index }: ConversationRoutesOptions): Router {
+export function conversationRouter({
+  store,
+  index,
+  activeGenerationId,
+}: ConversationRoutesOptions): Router {
   const router = Router();
 
   router.get('/conversations', async (req, res) => {
@@ -87,7 +94,7 @@ export function conversationRouter({ store, index }: ConversationRoutesOptions):
     const id = requireId(req.params.id);
     const user = ownerOf(req);
 
-    res.json(toDto(id, await store.load(user, id)));
+    res.json(toDto(id, await store.load(user, id), activeGenerationId?.(user, id) ?? null));
   });
 
   router.patch('/conversations/:id', validateBody(patchSchema), async (req, res) => {

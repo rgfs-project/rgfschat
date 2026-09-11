@@ -62,6 +62,8 @@ export interface GenerationSnapshotDto {
   updatedAt: string;
   /** Id of the last event emitted, so a client can tell how far it has seen. */
   lastEventId: number;
+  /** Which provider produced it, for reconnection and display. */
+  providerId: string;
 }
 
 /** `POST /api/generations` → 202. All three ids are minted server-side. */
@@ -78,6 +80,12 @@ export interface GenerationAcceptedDto {
  */
 export type GenerationEvent =
   | { type: 'snapshot'; snapshot: GenerationSnapshotDto }
+  /**
+   * Sent when a reconnecting client's `Last-Event-ID` is outside the replay
+   * window, or unrecognised. It carries the full state so the client can
+   * discard what it had and continue — never a silent gap (INV-20).
+   */
+  | { type: 'resync'; snapshot: GenerationSnapshotDto }
   | { type: 'content'; delta: string }
   | { type: 'reasoning'; delta: string }
   | { type: 'state'; state: GenerationState }

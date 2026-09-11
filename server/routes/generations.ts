@@ -92,7 +92,13 @@ export function generationRouter({ manager, hub, service }: GenerationRoutesOpti
     const owner = ownerOf(req);
     // Throws GENERATION_NOT_FOUND before any SSE header is written, so the
     // failure is a normal JSON error rather than an event stream.
-    const snapshot = manager.require(id, owner);
+    manager.require(id, owner);
+
+    // `Last-Event-ID` is the standard EventSource reconnect header; the query
+    // parameter exists because a manual fetch-based client cannot set it.
+    const header = req.get('Last-Event-ID') ?? req.query['lastEventId'];
+    const parsed = typeof header === 'string' ? Number.parseInt(header, 10) : Number.NaN;
+    const lastEventId = Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -107,15 +113,16 @@ export function generationRouter({ manager, hub, service }: GenerationRoutesOpti
       res.write(`id: ${eventId}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
     };
 
-    // A reconnecting client gets the full picture first, then live events.
-    // Replay of individual missed events is Phase 6.
-    write(snapshot.lastEventId, { type: 'snapshot', snapshot });
+    // Either the missed events exactly, or one resync carrying the whole state.
+    // A gap is never left silent (INV-20).
+    for (const envelope of manager.catchUp(id, owner, lastEventId)) {
+      write(envelope.id, envelope.event);
+    }
 
-    if (
-      snapshot.state === 'completed' ||
-      snapshot.errorCode !== undefined ||
-      isDone(snapshot.state)
-    ) {
+    const current = manager.require(id, owner);
+    if (isDone(current.state)) {
+      // Terminal: the catch-up above already carried the outcome, so close
+      // rather than hold a connection that will never produce another event.
       res.end();
       return;
     }

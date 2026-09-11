@@ -71,7 +71,19 @@ export function createApp({
   }
 
   if (store !== undefined && index !== undefined) {
-    app.use('/api', conversationRouter({ store, index }));
+    app.use(
+      '/api',
+      conversationRouter({
+        store,
+        index,
+        ...(service !== undefined
+          ? {
+              activeGenerationId: (userId: string, conversationId: string) =>
+                service.activeGenerationId(userId, conversationId),
+            }
+          : {}),
+      })
+    );
   }
 
   if (hub !== undefined && manager !== undefined && service !== undefined) {

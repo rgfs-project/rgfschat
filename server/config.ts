@@ -34,6 +34,22 @@ const envSchema = z.object({
     .min(60_000)
     .default(7 * 24 * 60 * 60 * 1000),
 
+  // Streaming lifecycle (Phase 6).
+  //
+  // A checkpoint is written on every state transition and at most this often
+  // while streaming, so a long generation costs a bounded number of writes
+  // rather than one per token.
+  GENERATION_CHECKPOINT_MS: z.coerce.number().int().min(100).max(60_000).default(1_000),
+  // Replay window. 2000 events is roughly a long reply's worth of tokens at one
+  // event per chunk, so an ordinary reconnect replays rather than resyncs,
+  // while the memory held per generation stays bounded and small.
+  SSE_REPLAY_EVENTS: z.coerce.number().int().min(1).max(100_000).default(2_000),
+  GENERATION_RETENTION_MS: z.coerce
+    .number()
+    .int()
+    .min(1_000)
+    .default(10 * 60 * 1000),
+
   // SSRF host policy (Phase 5). Private hosts are allowed by default because a
   // local llama.cpp is the primary use case; metadata ranges are blocked
   // regardless of this setting.
@@ -71,7 +87,14 @@ export interface Config {
   auth: AuthConfig;
   /** Outbound SSRF policy, applied on config load and every request (INV-19). */
   hostPolicy: HostPolicy;
+  streaming: StreamingConfig;
   provider: ProviderConfig;
+}
+
+export interface StreamingConfig {
+  checkpointMs: number;
+  replayEvents: number;
+  retentionMs: number;
 }
 
 export interface HostPolicy {
@@ -125,6 +148,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     REGISTRATION_MODE,
     SESSION_ABSOLUTE_TTL_MS,
     SESSION_IDLE_TTL_MS,
+    GENERATION_CHECKPOINT_MS,
+    SSE_REPLAY_EVENTS,
+    GENERATION_RETENTION_MS,
     ALLOW_PRIVATE_PROVIDER_HOSTS,
     PROVIDER_HOST_ALLOWLIST,
     LLAMA_BASE_URL,
@@ -145,6 +171,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       registrationMode: REGISTRATION_MODE,
       absoluteTtlMs: SESSION_ABSOLUTE_TTL_MS,
       idleTtlMs: SESSION_IDLE_TTL_MS,
+    },
+    streaming: {
+      checkpointMs: GENERATION_CHECKPOINT_MS,
+      replayEvents: SSE_REPLAY_EVENTS,
+      retentionMs: GENERATION_RETENTION_MS,
     },
     hostPolicy: {
       allowPrivateHosts: ALLOW_PRIVATE_PROVIDER_HOSTS,

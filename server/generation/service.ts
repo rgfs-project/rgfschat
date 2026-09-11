@@ -9,6 +9,7 @@ import { entryFor, type ChatIndex } from '../storage/index.ts';
 import { conversationKey } from '../storage/locks.ts';
 import type { GenerationManager } from './manager.ts';
 import { assemblePrompt } from './prompt.ts';
+import type { CheckpointStore } from './checkpoints.ts';
 
 /**
  * Binds server-owned generation to canonical storage (contracts §4).
@@ -36,6 +37,7 @@ export interface GenerationServiceOptions {
   index: ChatIndex;
   manager: GenerationManager;
   hub: ProviderHub;
+  checkpoints?: CheckpointStore;
   logger: Logger;
   defaultContextTokens: number;
   maxOutputTokens: number;
@@ -52,6 +54,7 @@ export class GenerationService {
   readonly #index: ChatIndex;
   readonly #manager: GenerationManager;
   readonly #hub: ProviderHub;
+  readonly #checkpoints: CheckpointStore | undefined;
   readonly #logger: Logger;
   readonly #defaultContextTokens: number;
   readonly #maxOutputTokens: number;
@@ -64,6 +67,7 @@ export class GenerationService {
     this.#index = options.index;
     this.#manager = options.manager;
     this.#hub = options.hub;
+    this.#checkpoints = options.checkpoints;
     this.#logger = options.logger;
     this.#defaultContextTokens = options.defaultContextTokens;
     this.#maxOutputTokens = options.maxOutputTokens;
@@ -137,7 +141,8 @@ export class GenerationService {
       userId,
       model,
       prepared.prompt.messages,
-      client
+      client,
+      { conversationId, providerId }
     );
     this.#active.set(key, generationId);
 
@@ -208,7 +213,8 @@ export class GenerationService {
       userId,
       model,
       prepared.prompt.messages,
-      client
+      client,
+      { conversationId, providerId }
     );
     this.#active.set(key, generationId);
 
@@ -294,6 +300,11 @@ export class GenerationService {
           messages: [...current.messages, assistant],
         });
         await this.#index.upsert(userId, entryFor(conversationId, written));
+
+        // The canonical write has landed, so the checkpoint can go. If the
+        // process dies before this line, recovery finds the message already
+        // present and skips it rather than writing twice.
+        await this.#checkpoints?.remove(generationId);
       });
     } catch (err) {
       this.#logger.error('Failed to persist generation output', {
