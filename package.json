@@ -28,6 +28,7 @@
     "express": "^5.1.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "yaml": "^2.9.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
@@ -42,6 +43,7 @@
     "eslint": "^9.20.0",
     "eslint-plugin-react-hooks": "^5.1.0",
     "eslint-plugin-react-refresh": "^0.4.18",
+    "fast-check": "^4.10.0",
     "globals": "^15.14.0",
     "prettier": "^3.4.2",
     "supertest": "^7.0.0",

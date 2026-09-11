@@ -83,7 +83,7 @@ export function App(): React.JSX.Element {
     }
     writeActive(null);
     setGenerationId(null);
-  }, [live.state, live.content, generationId]);
+  }, [live.state, live.content, live.reasoning, generationId]);
 
   useEffect(() => {
     outputRef.current?.scrollTo({ top: outputRef.current.scrollHeight });
