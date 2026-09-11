@@ -27,7 +27,7 @@ test('reloading mid-generation resumes the stream', async ({ app, page }) => {
   await expect(page.locator('.msg--assistant')).toContainText('bridges were');
 
   app.provider.finish();
-  await expect(page.getByRole('button', { name: 'Send' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible();
 
   // One provider request: the reload observed the existing run rather than
   // starting a second one.
@@ -66,7 +66,7 @@ test('a dropped connection reconnects with no duplicated or lost text', async ({
   }
 
   app.provider.finish();
-  await expect(page.getByRole('button', { name: 'Send' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible();
 });
 
 test('cancelling from the UI stops the run and keeps the partial reply', async ({ app, page }) => {
@@ -77,15 +77,15 @@ test('cancelling from the UI stops the run and keeps the partial reply', async (
   app.provider.send('partial answer ');
   await expect(page.locator('.msg--assistant')).toContainText('partial answer');
 
-  await page.getByRole('button', { name: 'Stop' }).click();
+  await page.getByRole('button', { name: 'Stop generating' }).click();
 
   // The composer comes back, and the partial text is kept rather than discarded.
-  await expect(page.getByRole('button', { name: 'Send' })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('.msg--assistant')).toContainText('partial answer');
 
   // Reloading proves it was persisted, not merely left on screen.
   await page.reload();
-  await page.getByRole('button', { name: 'New conversation' }).waitFor();
+  await page.getByRole('button', { name: 'New chat' }).waitFor();
   await page.locator('.conversation__open').first().click();
   await expect(page.locator('.msg--assistant')).toContainText('partial answer');
 });

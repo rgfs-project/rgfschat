@@ -42,7 +42,7 @@ export function SignIn({ registrationOpen, onSignedIn }: SignInProps): React.JSX
   return (
     <main className="signin">
       <form className="signin__card" onSubmit={(e) => void submit(e)}>
-        <h1>Workspace</h1>
+        <h1>ChatUI</h1>
         <p className="muted small">{registering ? 'Create an account.' : 'Sign in to continue.'}</p>
 
         {error !== null && (

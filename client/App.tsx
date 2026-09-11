@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Pencil, Plus, RefreshCw, Square, Trash2, X } from 'lucide-react';
-import type { Message } from '@shared/conversation.ts';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, PanelLeft } from 'lucide-react';
+import type { Message as MessageModel } from '@shared/conversation.ts';
+import type { UserDto } from '@shared/auth.ts';
 import {
   ApiError,
   cancelGeneration,
@@ -17,42 +18,32 @@ import {
   type ConversationSummary,
   type ProviderModelGroup,
 } from './api.ts';
+import { Composer } from './Composer.tsx';
+import { Dialog } from './Dialog.tsx';
+import { Message, StreamingMessage } from './Message.tsx';
+import type { ModelSelection } from './ModelPicker.tsx';
+import { Sidebar } from './Sidebar.tsx';
 import { useGeneration } from './useGeneration.ts';
-
-/**
- * A `<select>` value is a single string, but a model is the pair
- * `(providerId, modelId)`. They are joined with a NUL, which cannot appear in
- * either half, so the pair survives the round trip without being parsed apart
- * by guesswork — model ids are opaque and may contain anything else.
- */
-const PAIR_SEPARATOR = '\u0000';
-
-function toSelection(providerId: string, modelId: string): string {
-  return `${providerId}${PAIR_SEPARATOR}${modelId}`;
-}
-
-function splitSelection(value: string): { providerId: string; model: string } | null {
-  const at = value.indexOf(PAIR_SEPARATOR);
-  if (at === -1) return null;
-  return { providerId: value.slice(0, at), model: value.slice(at + 1) };
-}
-
-/** Prefers a model the provider already has resident, else the first available. */
-function defaultSelection(groups: ProviderModelGroup[]): string {
-  for (const group of groups) {
-    if (group.status !== 'ready') continue;
-    const loaded = group.models.find((model) => model.loaded);
-    if (loaded !== undefined) return toSelection(group.providerId, loaded.id);
-  }
-  for (const group of groups) {
-    const first = group.models[0];
-    if (first !== undefined) return toSelection(group.providerId, first.id);
-  }
-  return '';
-}
+import { useScrollPin } from './useScrollPin.ts';
 
 /** An in-flight generation survives a reload, so its id is parked in storage. */
 const ACTIVE_KEY = 'workspace.activeGeneration';
+const THEME_KEY = 'workspace.theme';
+const SIDEBAR_KEY = 'workspace.sidebarCollapsed';
+/** Last model used overall, the fallback for a conversation with no memory. */
+const LAST_MODEL_KEY = 'workspace.lastModel';
+
+/**
+ * A dialog waiting on the user.
+ *
+ * Held as state rather than resolved inline, because the portalled dialog is
+ * asynchronous where `window.confirm` was blocking: the handler that opens it
+ * has to return, and the work resumes when the user answers.
+ */
+type PendingDialog =
+  | { kind: 'rename'; id: string; title: string }
+  | { kind: 'delete-conversation'; id: string }
+  | { kind: 'delete-message'; id: string };
 
 function readStored(key: string): string | null {
   try {
@@ -71,25 +62,94 @@ function writeStored(key: string, value: string | null): void {
   }
 }
 
-export function App(): React.JSX.Element {
+function parseSelection(raw: string | null): ModelSelection | null {
+  if (raw === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const { providerId, modelId } = parsed as Partial<ModelSelection>;
+    return typeof providerId === 'string' && typeof modelId === 'string'
+      ? { providerId, modelId }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Prefers a model the provider already has resident, else the first available. */
+function defaultSelection(groups: ProviderModelGroup[]): ModelSelection | null {
+  for (const group of groups) {
+    if (group.status !== 'ready') continue;
+    const loaded = group.models.find((model) => model.loaded);
+    if (loaded !== undefined) return { providerId: group.providerId, modelId: loaded.id };
+  }
+  for (const group of groups) {
+    const first = group.models[0];
+    if (first !== undefined) return { providerId: group.providerId, modelId: first.id };
+  }
+  return null;
+}
+
+export function App({
+  user,
+  onSignOut,
+}: {
+  user: UserDto;
+  onSignOut: () => void;
+}): React.JSX.Element {
   const [groups, setGroups] = useState<ProviderModelGroup[]>([]);
-  /** A model is the pair, encoded as `providerId\u0000modelId` for the <select>. */
-  const [selection, setSelection] = useState('');
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<MessageModel[]>([]);
+  const [malformed, setMalformed] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [generationId, setGenerationId] = useState<string | null>(() => readStored(ACTIVE_KEY));
-  /** Id of the assistant message the server will append when the run settles. */
   const [awaitingMessageId, setAwaitingMessageId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  /** Message currently open for inline editing. */
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState('');
+  const [dialog, setDialog] = useState<PendingDialog | null>(null);
+
+  const [collapsed, setCollapsed] = useState(() => readStored(SIDEBAR_KEY) === 'true');
+  const [theme, setTheme] = useState<'light' | 'dark'>(() =>
+    readStored(THEME_KEY) === 'dark' ? 'dark' : 'light'
+  );
+
+  /**
+   * Model choice per conversation.
+   *
+   * Switching back to an older chat should return to the model it was using,
+   * not whatever was picked most recently elsewhere.
+   */
+  const [selectionByConversation, setSelectionByConversation] = useState<
+    Record<string, ModelSelection>
+  >({});
+  const [fallbackSelection, setFallbackSelection] = useState<ModelSelection | null>(() =>
+    parseSelection(readStored(LAST_MODEL_KEY))
+  );
 
   const live = useGeneration(generationId);
   const busy = live.state === 'pending' || live.state === 'streaming';
-  const outputRef = useRef<HTMLDivElement>(null);
+  const scroll = useScrollPin();
+
+  const selection = useMemo(
+    () =>
+      (currentId !== null ? selectionByConversation[currentId] : undefined) ?? fallbackSelection,
+    [currentId, selectionByConversation, fallbackSelection]
+  );
+
+  useEffect(() => {
+    document.documentElement.dataset['theme'] = theme;
+    writeStored(THEME_KEY, theme);
+  }, [theme]);
+
+  useEffect(() => {
+    writeStored(SIDEBAR_KEY, collapsed ? 'true' : 'false');
+  }, [collapsed]);
+
+  const { onContentChange } = scroll;
+  // Content changed: follow the bottom, or offer the jump.
+  useEffect(() => {
+    onContentChange();
+  }, [messages, live.content, live.reasoning, onContentChange]);
 
   const refreshList = useCallback(async () => {
     try {
@@ -99,30 +159,21 @@ export function App(): React.JSX.Element {
     }
   }, []);
 
-  /**
-   * Loads a conversation, optionally waiting for a message the server is still
-   * appending.
-   *
-   * The SSE `done` event marks the end of *generation*; the assistant block is
-   * written to Markdown just after that, under the conversation lock. Reloading
-   * the instant `done` arrives can therefore race the write and show a
-   * conversation that is missing its reply. When we know the id the server will
-   * write, poll briefly for it rather than rendering a half-finished turn.
-   */
   const openConversation = useCallback(async (id: string, awaitMessageId?: string) => {
     setError(null);
     setCurrentId(id);
+    setMalformed(false);
+
     try {
       let detail = await getConversation(id);
 
-      // Resume whatever the server says is still running here. This is what
-      // makes a reload mid-generation pick the stream back up, and it works in
-      // a tab that never started the run.
       if (detail.activeGenerationId !== null) {
         writeStored(ACTIVE_KEY, detail.activeGenerationId);
         setGenerationId(detail.activeGenerationId);
       }
 
+      // The assistant block is written just after the stream ends, so a reload
+      // triggered by `done` can race the write.
       if (awaitMessageId !== undefined) {
         for (let attempt = 0; attempt < 20; attempt += 1) {
           if (detail.messages.some((message) => message.id === awaitMessageId)) break;
@@ -134,11 +185,9 @@ export function App(): React.JSX.Element {
       setMessages(detail.messages);
     } catch (err) {
       setMessages([]);
-      setError(
-        err instanceof ApiError && err.code === 'CONVERSATION_MALFORMED'
-          ? 'This conversation file cannot be read. You can still delete it.'
-          : 'Could not open the conversation.'
-      );
+      const isMalformed = err instanceof ApiError && err.code === 'CONVERSATION_MALFORMED';
+      setMalformed(isMalformed);
+      setError(isMalformed ? null : 'Could not open the conversation.');
     }
   }, []);
 
@@ -149,7 +198,7 @@ export function App(): React.JSX.Element {
       .then((list) => {
         if (controller.signal.aborted) return;
         setGroups(list);
-        setSelection((current) => (current !== '' ? current : defaultSelection(list)));
+        setFallbackSelection((current) => current ?? defaultSelection(list));
       })
       .catch(() => setError('Could not load models.'));
 
@@ -157,25 +206,23 @@ export function App(): React.JSX.Element {
     return () => controller.abort();
   }, [refreshList]);
 
-  // A reload with a remembered generation reopens its conversation, so the
-  // stream is resumed with its history rather than in an empty view.
+  // A reload with a remembered generation reopens its conversation.
   useEffect(() => {
     const remembered = readStored(ACTIVE_KEY);
-    if (remembered === null || currentId !== null) return;
+    if (remembered === null) return;
 
     let cancelled = false;
     void listConversations()
       .then(async (list) => {
         for (const summary of list) {
           if (cancelled) return;
-          const detail = await getConversation(summary.id);
-          if (detail.activeGenerationId === remembered) {
+          const detail = await getConversation(summary.id).catch(() => null);
+          if (detail?.activeGenerationId === remembered) {
             setCurrentId(detail.id);
             setMessages(detail.messages);
             return;
           }
         }
-        // Nothing is running any more; stop pointing at it.
         writeStored(ACTIVE_KEY, null);
       })
       .catch(() => undefined);
@@ -183,16 +230,16 @@ export function App(): React.JSX.Element {
     return () => {
       cancelled = true;
     };
-    // Runs once on mount; `currentId` is read only as a guard.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Mount only.
   }, []);
 
-  // When a generation settles, reload the conversation from the server rather
-  // than patching local state: the Markdown is the record, and it now contains
-  // the assistant message the server appended.
+  // Fold a settled generation back into the stored transcript.
+  const settledRef = useRef<string | null>(null);
   useEffect(() => {
     if (generationId === null) return;
     if (live.state === 'idle' || live.state === 'pending' || live.state === 'streaming') return;
+    if (settledRef.current === generationId) return;
+    settledRef.current = generationId;
 
     if (live.state === 'failed' || live.state === 'timed_out') {
       setError(
@@ -202,25 +249,33 @@ export function App(): React.JSX.Element {
       );
     }
 
+    const pending = awaitingMessageId ?? undefined;
     writeStored(ACTIVE_KEY, null);
     setGenerationId(null);
+    setAwaitingMessageId(null);
 
     if (currentId !== null) {
-      const pending = awaitingMessageId ?? undefined;
-      setAwaitingMessageId(null);
       void openConversation(currentId, pending).then(() => refreshList());
     }
   }, [live.state, generationId, currentId, awaitingMessageId, openConversation, refreshList]);
 
-  useEffect(() => {
-    outputRef.current?.scrollTo({ top: outputRef.current.scrollHeight });
-  }, [live.content, live.reasoning, messages]);
+  const onSelectModel = useCallback(
+    (next: ModelSelection) => {
+      setFallbackSelection(next);
+      writeStored(LAST_MODEL_KEY, JSON.stringify(next));
+      if (currentId !== null) {
+        setSelectionByConversation((current) => ({ ...current, [currentId]: next }));
+      }
+    },
+    [currentId]
+  );
 
   const onCreate = useCallback(async () => {
     setError(null);
     try {
       const created = await createConversation();
       setMessages([]);
+      setMalformed(false);
       setCurrentId(created.id);
       await refreshList();
     } catch {
@@ -228,12 +283,10 @@ export function App(): React.JSX.Element {
     }
   }, [refreshList]);
 
-  const onRename = useCallback(
-    async (id: string, currentTitle: string) => {
-      const next = window.prompt('Rename conversation', currentTitle);
-      if (next === null || next.trim() === '') return;
+  const applyRename = useCallback(
+    async (id: string, nextTitle: string) => {
       try {
-        await renameConversation(id, next.trim());
+        await renameConversation(id, nextTitle);
         await refreshList();
       } catch {
         setError('Could not rename the conversation.');
@@ -242,14 +295,14 @@ export function App(): React.JSX.Element {
     [refreshList]
   );
 
-  const onDelete = useCallback(
+  const onDeleteConversation = useCallback(
     async (id: string) => {
-      if (!window.confirm('Delete this conversation? This cannot be undone.')) return;
       try {
         await deleteConversation(id);
         if (currentId === id) {
           setCurrentId(null);
           setMessages([]);
+          setMalformed(false);
         }
         await refreshList();
       } catch {
@@ -261,53 +314,92 @@ export function App(): React.JSX.Element {
 
   const send = useCallback(async () => {
     const text = prompt.trim();
-    if (text === '' || selection === '' || busy || currentId === null) return;
+    if (text === '' || selection === null || busy) return;
 
     setError(null);
     setPrompt('');
-    // Shown immediately; the server has already persisted it by the time the
-    // request resolves, and the reload after the generation settles replaces it.
-    setMessages((prev) => [...prev, { type: 'user', id: `pending-${Date.now()}`, body: text }]);
 
-    const pair = splitSelection(selection);
-    if (pair === null) return;
+    /*
+     * Typing is the act of starting a conversation, so one is created on the
+     * first send rather than being a precondition for typing at all. Requiring
+     * it up front meant the composer sat disabled behind a "select a
+     * conversation first" placeholder — a dead field explaining its own
+     * deadness, where the obvious thing to do was simply to begin.
+     */
+    let conversationId = currentId;
+    if (conversationId === null) {
+      try {
+        const created = await createConversation();
+        conversationId = created.id;
+        setCurrentId(created.id);
+        setMessages([]);
+        setMalformed(false);
+      } catch {
+        setError('Could not create a conversation.');
+        return;
+      }
+    }
+
+    setMessages((previous) => [
+      ...previous,
+      { type: 'user', id: `pending-${Date.now()}`, body: text },
+    ]);
 
     try {
-      const accepted = await startGeneration(currentId, pair.providerId, pair.model, text);
+      const accepted = await startGeneration(
+        conversationId,
+        selection.providerId,
+        selection.modelId,
+        text
+      );
       writeStored(ACTIVE_KEY, accepted.generationId);
       setAwaitingMessageId(accepted.assistantMessageId);
       setGenerationId(accepted.generationId);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not start the generation.');
-      void openConversation(currentId);
-    }
-  }, [prompt, selection, busy, currentId, openConversation]);
-
-  const onEditSave = useCallback(async () => {
-    if (currentId === null || editingId === null) return;
-    const body = draft.trim();
-    if (body === '') return;
-
-    try {
-      const detail = await editMessage(currentId, editingId, body);
-      setMessages(detail.messages);
-      setEditingId(null);
       await refreshList();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not edit the message.');
+      setError(err instanceof ApiError ? err.message : 'Could not start the generation.');
+      void openConversation(conversationId);
     }
-  }, [currentId, editingId, draft, refreshList]);
+  }, [prompt, selection, busy, currentId, openConversation, refreshList]);
+
+  const onRegenerate = useCallback(async () => {
+    if (currentId === null || selection === null || busy) return;
+
+    setError(null);
+    try {
+      const accepted = await regenerate(currentId, selection.providerId, selection.modelId);
+      writeStored(ACTIVE_KEY, accepted.generationId);
+      setAwaitingMessageId(accepted.assistantMessageId);
+      setGenerationId(accepted.generationId);
+      setMessages((previous) =>
+        previous.at(-1)?.type === 'assistant' ? previous.slice(0, -1) : previous
+      );
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not regenerate.');
+    }
+  }, [currentId, selection, busy]);
+
+  const onEditMessage = useCallback(
+    async (messageId: string, body: string) => {
+      if (currentId === null) return;
+      try {
+        const detail = await editMessage(currentId, messageId, body);
+        setMessages(detail.messages);
+        await refreshList();
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : 'Could not edit the message.');
+      }
+    },
+    [currentId, refreshList]
+  );
 
   const onDeleteMessage = useCallback(
     async (messageId: string) => {
       if (currentId === null) return;
-      if (!window.confirm('Delete this message and everything after it?')) return;
 
       try {
         const detail = await deleteMessage(currentId, messageId);
-
         if (detail === null) {
-          // That was the last exchange, so the conversation is gone too.
           setCurrentId(null);
           setMessages([]);
         } else {
@@ -321,25 +413,6 @@ export function App(): React.JSX.Element {
     [currentId, refreshList]
   );
 
-  const onRegenerate = useCallback(async () => {
-    if (currentId === null || selection === '' || busy) return;
-
-    const pair = splitSelection(selection);
-    if (pair === null) return;
-
-    setError(null);
-    try {
-      const accepted = await regenerate(currentId, pair.providerId, pair.model);
-      writeStored(ACTIVE_KEY, accepted.generationId);
-      setAwaitingMessageId(accepted.assistantMessageId);
-      setGenerationId(accepted.generationId);
-      // The old assistant turn is already gone server-side.
-      setMessages((prev) => (prev.at(-1)?.type === 'assistant' ? prev.slice(0, -1) : prev));
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not regenerate.');
-    }
-  }, [currentId, selection, busy]);
-
   const stop = useCallback(async () => {
     if (generationId === null) return;
     try {
@@ -349,267 +422,175 @@ export function App(): React.JSX.Element {
     }
   }, [generationId]);
 
-  return (
-    <div className="shell">
-      <aside className="sidebar">
-        <div className="sidebar__head">
-          <h1>Workspace</h1>
-          <button
-            type="button"
-            className="icon"
-            title="New conversation"
-            onClick={() => void onCreate()}
-          >
-            <Plus size={18} />
-          </button>
-        </div>
+  const title = conversations.find((c) => c.id === currentId)?.title ?? 'New chat';
+  const showEmptyState = !malformed && messages.length === 0 && !busy;
 
-        <ul className="conversations">
-          {conversations.length === 0 && <li className="muted small">No conversations yet.</li>}
-          {conversations.map((conversation) => (
-            <li
-              key={conversation.id}
-              className={`conversation${conversation.id === currentId ? ' is-current' : ''}`}
-            >
-              <button
-                type="button"
-                className="conversation__open"
-                onClick={() => void openConversation(conversation.id)}
-              >
-                <span className="conversation__title">
-                  {conversation.malformed ? '⚠ ' : ''}
-                  {conversation.title}
-                </span>
-                <span className="conversation__meta">{conversation.messageCount} msg</span>
-              </button>
-              <span className="conversation__actions">
-                {!conversation.malformed && (
-                  <button
-                    type="button"
-                    className="icon"
-                    title="Rename"
-                    aria-label="Rename conversation"
-                    onClick={() => void onRename(conversation.id, conversation.title)}
-                  >
-                    <Pencil size={14} />
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="icon"
-                  title="Delete"
-                  aria-label="Delete conversation"
-                  onClick={() => void onDelete(conversation.id)}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </span>
-            </li>
-          ))}
-        </ul>
-      </aside>
+  return (
+    <div className="shell" data-sidebar={collapsed ? 'collapsed' : 'expanded'}>
+      {!collapsed && (
+        <Sidebar
+          conversations={conversations}
+          currentId={currentId}
+          user={user}
+          theme={theme}
+          onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+          onCollapse={() => setCollapsed(true)}
+          onCreate={() => void onCreate()}
+          onOpen={(id) => void openConversation(id)}
+          onRename={(id, currentTitle) => setDialog({ kind: 'rename', id, title: currentTitle })}
+          onDelete={(id) => setDialog({ kind: 'delete-conversation', id })}
+          onSignOut={onSignOut}
+        />
+      )}
 
       <main className="main">
-        <header className="bar">
-          <label className="field">
-            <span className="sr-only">Model</span>
-            <select
-              value={selection}
-              onChange={(e) => setSelection(e.target.value)}
-              disabled={groups.length === 0 || busy}
+        <header className="main__header">
+          {collapsed && (
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => setCollapsed(false)}
+              aria-label="Expand sidebar"
+              title="Expand sidebar"
             >
-              {groups.length === 0 && <option>Loading models…</option>}
-              {groups.map((group) => (
-                <optgroup
-                  key={group.providerId}
-                  label={
-                    group.providerName +
-                    (group.status === 'unavailable' ? ' — unavailable' : '') +
-                    (group.stale ? ' — stale' : '')
-                  }
-                >
-                  {group.models.length === 0 && (
-                    <option disabled value="">
-                      No models
-                    </option>
-                  )}
-                  {group.models.map((m) => (
-                    <option
-                      key={`${group.providerId}/${m.id}`}
-                      value={toSelection(group.providerId, m.id)}
-                    >
-                      {m.id}
-                      {m.loaded ? ' ●' : ''}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </label>
+              <PanelLeft size={18} />
+            </button>
+          )}
+          <h2 className="main__title">{title}</h2>
         </header>
 
-        {error !== null && (
-          <p role="alert" className="error">
-            {error}
-          </p>
-        )}
+        <div className="transcript" ref={scroll.ref} data-testid="transcript">
+          <div className="transcript__inner">
+            {error !== null && (
+              <p role="alert" className="error-banner">
+                {error}
+              </p>
+            )}
 
-        <div className="output" ref={outputRef}>
-          {currentId === null && (
-            <p className="muted empty">Select a conversation, or create one.</p>
-          )}
-
-          {currentId !== null &&
-            messages.map((message, i) => {
-              const isLast = i === messages.length - 1;
-              const editable = !message.id.startsWith('pending-');
-
-              return (
-                <article key={`${message.id}-${i}`} className={`msg msg--${message.type}`}>
-                  <div className="msg__role">
-                    <span>{message.type}</span>
-
-                    {editable && !busy && (
-                      <span className="msg__actions">
-                        {message.type !== 'assistant' && (
-                          <button
-                            type="button"
-                            className="icon"
-                            title="Edit"
-                            aria-label="Edit message"
-                            onClick={() => {
-                              setEditingId(message.id);
-                              setDraft(message.body);
-                            }}
-                          >
-                            <Pencil size={14} />
-                          </button>
-                        )}
-                        {message.type === 'assistant' && isLast && (
-                          <button
-                            type="button"
-                            className="icon"
-                            title="Regenerate"
-                            aria-label="Regenerate response"
-                            onClick={() => void onRegenerate()}
-                          >
-                            <RefreshCw size={14} />
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="icon"
-                          title="Delete this message and everything after it"
-                          aria-label="Delete message"
-                          onClick={() => void onDeleteMessage(message.id)}
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </span>
-                    )}
-                  </div>
-
-                  {message.type === 'assistant' && message.reasoning !== undefined && (
-                    <details className="reasoning">
-                      <summary>Reasoning</summary>
-                      <div className="reasoning__body">{message.reasoning}</div>
-                    </details>
-                  )}
-
-                  {editingId === message.id ? (
-                    <div className="msg__edit">
-                      <textarea
-                        value={draft}
-                        onChange={(e) => setDraft(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Escape') setEditingId(null);
-                          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void onEditSave();
-                        }}
-                        rows={3}
-                        autoFocus
-                      />
-                      <div className="msg__edit-actions">
-                        <button
-                          type="button"
-                          className="icon"
-                          title="Save"
-                          aria-label="Save edit"
-                          onClick={() => void onEditSave()}
-                        >
-                          <Check size={16} />
-                        </button>
-                        <button
-                          type="button"
-                          className="icon"
-                          title="Cancel"
-                          aria-label="Cancel edit"
-                          onClick={() => setEditingId(null)}
-                        >
-                          <X size={16} />
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="msg__body">{message.body}</div>
-                  )}
-                </article>
-              );
-            })}
-
-          {busy && (
-            <article className="msg msg--assistant">
-              <div className="msg__role">
-                assistant
-                <span className="state">{live.state}</span>
+            {malformed && (
+              <div className="malformed">
+                <h3>This conversation cannot be read</h3>
+                <p className="muted">
+                  Its file on disk is not valid <code>formatVersion: 1</code> Markdown. Nothing has
+                  been changed or repaired — the file is exactly as it was found, so you can inspect
+                  or fix it by hand under <code>data/</code>. Deleting it here is the only action
+                  available.
+                </p>
+                <button
+                  type="button"
+                  className="button-primary"
+                  onClick={() =>
+                    currentId !== null && setDialog({ kind: 'delete-conversation', id: currentId })
+                  }
+                >
+                  Delete conversation
+                </button>
               </div>
-              {live.reasoning !== '' && (
-                <details className="reasoning" open>
-                  <summary>Reasoning</summary>
-                  <div className="reasoning__body">{live.reasoning}</div>
-                </details>
-              )}
-              <div className="msg__body">
-                {live.content}
-                <span className="cursor" aria-hidden="true" />
+            )}
+
+            {showEmptyState && (
+              <div className="empty-state">
+                <h2>What are we testing today?</h2>
+                <p className="muted">{selection?.modelId ?? 'No model selected'}</p>
               </div>
-            </article>
-          )}
+            )}
+
+            {!malformed &&
+              messages.map((message, index) => (
+                <Message
+                  key={`${message.id}-${index}`}
+                  message={message}
+                  isLast={index === messages.length - 1}
+                  busy={busy}
+                  onEdit={(id, body) => void onEditMessage(id, body)}
+                  onDelete={(id) => setDialog({ kind: 'delete-message', id })}
+                  onRegenerate={() => void onRegenerate()}
+                />
+              ))}
+
+            {busy && (
+              <StreamingMessage
+                content={live.content}
+                reasoning={live.reasoning}
+                state={live.state}
+              />
+            )}
+          </div>
         </div>
 
-        <form
-          className="composer"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void send();
-          }}
-        >
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-            placeholder={currentId === null ? 'Select a conversation first…' : 'Send a message…'}
-            rows={2}
-            disabled={busy || currentId === null}
-          />
-          {busy ? (
-            <button type="button" className="danger" onClick={() => void stop()}>
-              <Square size={14} /> Stop
-            </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={prompt.trim() === '' || currentId === null || selection === ''}
-            >
-              Send
-            </button>
-          )}
-        </form>
+        <div className="composer-region">
+          <div className="composer-region__inner">
+            {/* Floats above the composer without displacing it, so the layout
+                does not shift as it comes and goes. */}
+            {scroll.showJumpToLatest && (
+              <button
+                type="button"
+                className="jump-to-latest"
+                onClick={scroll.jumpToLatest}
+                aria-label="Jump to latest"
+                title="Jump to latest"
+              >
+                <ArrowDown size={20} />
+              </button>
+            )}
+
+            <Composer
+              value={prompt}
+              onChange={setPrompt}
+              onSend={() => void send()}
+              onStop={() => void stop()}
+              busy={busy}
+              disabled={malformed}
+              groups={groups}
+              selection={selection}
+              onSelectModel={onSelectModel}
+            />
+            <p className="composer-hint">Enter to send · Shift+Enter for a new line</p>
+          </div>
+        </div>
       </main>
+
+      {dialog !== null && (
+        <Dialog
+          {...dialogProps(dialog)}
+          onCancel={() => setDialog(null)}
+          onConfirm={(value) => {
+            setDialog(null);
+            if (dialog.kind === 'rename') void applyRename(dialog.id, value);
+            if (dialog.kind === 'delete-conversation') void onDeleteConversation(dialog.id);
+            if (dialog.kind === 'delete-message') void onDeleteMessage(dialog.id);
+          }}
+        />
+      )}
     </div>
   );
+}
+
+/** The wording for each dialog, kept out of the render for legibility. */
+function dialogProps(
+  dialog: PendingDialog
+): Omit<React.ComponentProps<typeof Dialog>, 'onConfirm' | 'onCancel'> {
+  switch (dialog.kind) {
+    case 'rename':
+      return {
+        title: 'Rename conversation',
+        defaultValue: dialog.title,
+        fieldLabel: 'Title',
+        confirmLabel: 'Rename',
+      };
+    case 'delete-conversation':
+      return {
+        title: 'Delete this conversation?',
+        body: 'The conversation and every message in it are removed. This cannot be undone.',
+        confirmLabel: 'Delete',
+        destructive: true,
+      };
+    case 'delete-message':
+      return {
+        title: 'Delete this message?',
+        body: 'The reply that followed it is removed too. Deleting the last remaining messages removes the conversation.',
+        confirmLabel: 'Delete',
+        destructive: true,
+      };
+  }
 }

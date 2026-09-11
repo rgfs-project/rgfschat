@@ -1,7 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test as base, type Page } from '@playwright/test';
@@ -210,13 +211,66 @@ export async function signIn(page: Page, baseUrl: string): Promise<void> {
   await page.getByLabel('Username').fill(ADMIN_USERNAME);
   await page.getByLabel('Password').fill(ADMIN_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await page.getByRole('button', { name: 'New conversation' }).waitFor();
+  await page.getByRole('button', { name: 'New chat' }).waitFor();
 }
 
 /** Creates a conversation and sends one message, leaving it mid-stream. */
 export async function startGeneration(page: Page, text: string): Promise<void> {
-  await page.getByRole('button', { name: 'New conversation' }).click();
-  const composer = page.getByPlaceholder('Send a message…');
+  await page.getByRole('button', { name: 'New chat' }).click();
+  const composer = composerField(page);
+  // The composer is disabled until a conversation exists and a model is chosen.
+  await expectEnabled(composer);
   await composer.fill(text);
   await composer.press('Enter');
+}
+
+/** The message field, addressed by its label so the placeholder can change. */
+export function composerField(page: Page) {
+  return page.getByLabel('Message', { exact: true });
+}
+
+async function expectEnabled(locator: ReturnType<typeof composerField>): Promise<void> {
+  await locator.waitFor();
+  for (let i = 0; i < 200; i += 1) {
+    if (await locator.isEnabled()) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error('composer never became enabled');
+}
+
+/**
+ * Grows an existing conversation to `count` user messages by rewriting its file.
+ *
+ * There is no API for appending a message — messages only come from a
+ * generation — and driving 200 generations through the mock provider would take
+ * minutes and test the provider rather than the layout. Writing the file with
+ * the same serializer the server uses keeps the fixture honest: if the format
+ * changed underneath it, this would produce a file the server rejects.
+ */
+export async function seedMessages(dataDir: string, count: number): Promise<void> {
+  const { parseConversation, serializeConversation } =
+    await import('../server/storage/markdown.ts');
+
+  const file = await findOnlyConversationFile(dataDir);
+  const parsed = parseConversation(await readFile(file, 'utf8'));
+  if (!parsed.ok) throw new Error('seed: existing conversation did not parse');
+
+  const messages = Array.from({ length: count }, (_, i) => ({
+    type: 'user' as const,
+    id: randomUUID(),
+    body: `seeded message number ${i}`,
+  }));
+
+  await writeFile(file, serializeConversation({ ...parsed.conversation, messages }), 'utf8');
+}
+
+/** Locates the single chat file under a fresh DATA_DIR. */
+async function findOnlyConversationFile(dataDir: string): Promise<string> {
+  for (const userId of await readdir(dataDir)) {
+    const chats = join(dataDir, userId, 'chats');
+    const entries = await readdir(chats).catch(() => [] as string[]);
+    const first = entries.find((name) => name.endsWith('.md'));
+    if (first !== undefined) return join(chats, first);
+  }
+  throw new Error('seed: no conversation file found');
 }

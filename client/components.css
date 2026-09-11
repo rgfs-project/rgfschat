@@ -1,0 +1,772 @@
+/* --- sidebar list -------------------------------------------------------- */
+
+.sidebar__empty,
+.sidebar__group-label {
+  font-size: 0.8125rem;
+  padding: 0.375rem 0.75rem;
+  margin: 0;
+}
+
+.sidebar__group-label {
+  color: var(--muted);
+  font-weight: 400;
+  margin-top: 0.5rem;
+}
+
+.sidebar__username {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+}
+
+.conversation {
+  display: flex;
+  align-items: center;
+  border-radius: 0.75rem;
+}
+
+.conversation.is-current {
+  background: var(--surface-3);
+}
+
+.conversation__open {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 0.6875rem 0.75rem;
+  font-size: 1rem;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation:not(.is-current):hover {
+  background: var(--surface-2);
+}
+
+.conversation__warning {
+  margin-right: 0.375rem;
+}
+
+.conversation__actions {
+  display: flex;
+  padding-right: 0.25rem;
+  opacity: 0;
+}
+
+.conversation:hover .conversation__actions,
+.conversation:focus-within .conversation__actions {
+  opacity: 1;
+}
+
+/* --- transcript ---------------------------------------------------------- */
+
+/* Centred in the transcript, vertically and horizontally. */
+.empty-state {
+  margin: auto 0;
+  text-align: center;
+}
+
+.empty-state h2 {
+  font-size: 2.75rem;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.75rem;
+}
+
+.empty-state p {
+  font-size: 1.0625rem;
+  margin: 0;
+}
+
+.msg {
+  position: relative;
+  min-width: 0;
+  font-size: 1.0625rem;
+}
+
+/* The user speaks in a bubble; the assistant answers as a document. Only one
+   side needs a container for the alternation to be legible. */
+.msg--user {
+  align-self: flex-end;
+  max-width: 80%;
+  background: var(--surface-2);
+  border-radius: 1.375rem;
+  padding: 0.75rem 1.25rem;
+}
+
+.msg--user .msg__body {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg--assistant {
+  align-self: stretch;
+}
+
+.msg__status {
+  margin: 0.5rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  border-left: 2px solid var(--border-strong);
+  padding-left: 0.625rem;
+}
+
+.msg__empty {
+  margin: 0;
+  font-style: italic;
+}
+
+.msg__actions {
+  display: flex;
+  gap: 0.125rem;
+  margin-top: 0.375rem;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.msg:hover .msg__actions,
+.msg:focus-within .msg__actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .msg__actions,
+  .conversation__actions {
+    opacity: 1;
+  }
+}
+
+.msg__editor {
+  width: 100%;
+  background: var(--raised);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.msg__edit-actions {
+  display: flex;
+  gap: 0.25rem;
+  justify-content: flex-end;
+  margin-top: 0.375rem;
+}
+
+.reasoning {
+  margin-bottom: 0.75rem;
+  border-left: 2px solid var(--border);
+  padding-left: 0.75rem;
+}
+
+.reasoning summary {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.875rem;
+  list-style: none;
+}
+
+.reasoning summary::-webkit-details-marker {
+  display: none;
+}
+
+.reasoning__chevron {
+  transition: transform 120ms ease;
+}
+
+.reasoning[open] .reasoning__chevron {
+  transform: rotate(90deg);
+}
+
+.reasoning__body {
+  white-space: pre-wrap;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.6;
+  margin-top: 0.5rem;
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.cursor {
+  display: inline-block;
+  width: 0.45rem;
+  height: 1.05rem;
+  background: var(--text);
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+.thinking {
+  display: inline-flex;
+  gap: 0.3rem;
+  align-items: center;
+  height: 1.25rem;
+}
+
+.thinking span {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: var(--muted);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.thinking span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.thinking span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cursor,
+  .thinking span {
+    animation: none;
+  }
+}
+
+.malformed {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  background: var(--surface);
+}
+
+.malformed h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+}
+
+.malformed p {
+  margin: 0 0 1rem;
+  line-height: 1.6;
+}
+
+/* Centred just above the composer, anchored to it rather than to the
+   transcript so it keeps the same distance however the transcript scrolls. */
+.jump-to-latest {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: 0.875rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 2px 10px rgb(0 0 0 / 10%);
+}
+
+.jump-to-latest:hover {
+  background: var(--surface-2);
+}
+
+/* --- composer ------------------------------------------------------------ */
+
+/* A raised white card on the canvas, with the controls on a second row so the
+   text field keeps the full width of the box. */
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 1.75rem;
+  background: var(--raised);
+  padding: 1.5rem 1.25rem 1rem;
+}
+
+.composer:focus-within {
+  border-color: var(--border-strong);
+}
+
+.composer__input {
+  width: 100%;
+  border: none;
+  background: none;
+  outline: none;
+  resize: none;
+  font-size: 1rem;
+  line-height: 1.6;
+  /* Holds the box at the reference's resting height before any text is typed. */
+  min-height: 2.75rem;
+  max-height: 12.5rem;
+  overflow-y: auto;
+}
+
+.composer__input::placeholder {
+  color: var(--muted);
+}
+
+/*
+ * These inputs are borderless children of a container that already shows focus
+ * (`.composer:focus-within`, and the pill around each search field). Left to
+ * the global rule they drew a second focus ring *inside* that container.
+ */
+.composer__input:focus-visible,
+.search input:focus-visible,
+.model-menu__search input:focus-visible {
+  outline: none;
+}
+
+.composer__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.composer__send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.375rem;
+  height: 2.375rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  flex: none;
+}
+
+/* Disabled is the resting state of an empty composer, so it gets a real
+   appearance rather than a dimmed version of the filled button. */
+.composer__send:disabled {
+  background: var(--surface-2);
+  color: var(--muted);
+  opacity: 1;
+}
+
+.composer__send:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+/* Stop squares off, so the shape changes with the action and not just the
+   glyph inside it. */
+.composer__send--stop {
+  border-radius: 0.875rem;
+}
+
+.model-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.5rem;
+  color: var(--muted);
+  font-size: 0.9375rem;
+}
+
+.model-trigger:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* --- model menu (portalled) ---------------------------------------------- */
+
+.model-menu {
+  position: fixed;
+  z-index: 100;
+  width: 24rem;
+  max-width: calc(100vw - 2rem);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
+  overflow: hidden;
+}
+
+.model-menu__search {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.75rem 0.875rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.model-menu__search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  outline: none;
+  font-size: 0.9375rem;
+}
+
+.model-menu__list {
+  max-height: 22rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+}
+
+.model-menu__empty {
+  padding: 1rem;
+  margin: 0;
+  text-align: center;
+  font-size: 0.875rem;
+}
+
+.model-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.625rem 0.75rem;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.model-option:hover,
+.model-option[aria-selected='true'] {
+  background: var(--surface-2);
+}
+
+.model-option__name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-option__tags,
+.model-option__provider {
+  color: var(--muted);
+  font-size: 0.8125rem;
+  flex: none;
+}
+
+.model-option__check {
+  margin-left: auto;
+  flex: none;
+}
+
+/* --- markdown ------------------------------------------------------------ */
+
+.markdown {
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote {
+  margin: 0 0 1rem;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: 1.5rem 0 0.75rem;
+  line-height: 1.35;
+}
+
+.markdown h1 {
+  font-size: 1.375rem;
+}
+.markdown h2 {
+  font-size: 1.1875rem;
+}
+.markdown h3 {
+  font-size: 1.0625rem;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 1.5rem;
+}
+
+.markdown li {
+  margin: 0.375rem 0;
+}
+
+.markdown blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 1rem;
+  color: var(--muted);
+}
+
+.markdown a {
+  color: var(--text);
+  text-underline-offset: 2px;
+}
+
+/* A link whose scheme was refused: shown, but inert. */
+.link-blocked {
+  text-decoration: line-through;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.markdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+}
+
+.inline-code {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+  background: var(--surface-2);
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.3rem;
+}
+
+.code-block {
+  border: 1px solid var(--border);
+  border-radius: 0.625rem;
+  overflow: hidden;
+  margin: 0 0 1rem;
+  background: var(--surface);
+}
+
+.code-block__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem 0.5rem 0.25rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.code-block__lang {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
+/* The block scrolls; the page never does. */
+.code-block pre {
+  margin: 0;
+  padding: 0.875rem;
+  overflow-x: auto;
+}
+
+.code-block code {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  white-space: pre;
+}
+
+/* Wide tables scroll inside their own container. */
+.table-scroll {
+  overflow-x: auto;
+  margin: 0 0 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.625rem;
+}
+
+.markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9375rem;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid var(--border);
+  padding: 0.625rem 0.875rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown th {
+  background: var(--surface-2);
+  font-weight: 500;
+}
+
+.markdown table tr > *:first-child {
+  border-left: none;
+}
+.markdown table tr > *:last-child {
+  border-right: none;
+}
+
+.markdown hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.5rem 0;
+}
+
+/* --- sign in and dialogs -------------------------------------------------- */
+
+.signin {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background: var(--bg);
+}
+
+.signin__card,
+.modal__card {
+  width: 100%;
+  max-width: 22rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.75rem;
+}
+
+.signin__card h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 1.5rem;
+  font-weight: 500;
+}
+
+.signin__card .muted {
+  margin: -0.5rem 0 0.25rem;
+  font-size: 0.875rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.field > span {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+/*
+ * Scoped to labelled form fields on purpose. As a bare element selector this
+ * also claimed the search box and the model-menu filter, which are borderless
+ * inputs living inside their own pill — they came out as a white bordered box
+ * nested in a grey one.
+ */
+.field input {
+  background: var(--raised);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9375rem;
+  outline: none;
+}
+
+.signin__card button[type='submit'],
+.modal__card button[type='submit'] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 500;
+}
+
+.signin__card button[type='submit']:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+button.linkish {
+  background: none;
+  border: none;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  padding: 0.25rem;
+  font-size: 0.875rem;
+}
+
+button.linkish:hover {
+  color: var(--text);
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--bg) 80%, transparent);
+  padding: 1.5rem;
+}
+
+.modal__card h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.modal__actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 0.25rem;
+}
+
+/*
+ * Destructive actions are marked by an outline rather than a colour, since the
+ * palette is achromatic and red is not available to carry the warning.
+ */
+/* Specific enough to beat `.modal__card button[type='submit']`, which would
+   otherwise fill it like any other primary action. */
+.modal__card button[type='submit'].button-destructive {
+  background: var(--raised);
+  color: var(--text);
+  border: 1px solid var(--text);
+}
+
+.modal__card button[type='submit'].button-destructive:hover:not(:disabled) {
+  background: var(--text);
+  color: var(--raised);
+  opacity: 1;
+}
+
+/* The backdrop dims what is behind it, so the dialog reads as modal. */
+.modal {
+  backdrop-filter: blur(2px);
+}
+
+.small {
+  font-size: 0.875rem;
+}

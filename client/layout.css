@@ -1,0 +1,202 @@
+/*
+ * Application shell.
+ *
+ * The layout contract, in one place:
+ *
+ *   ┌─ sidebar ────────┬─ main ─────────────────────┐
+ *   │ header    fixed  │ header              fixed  │
+ *   │ actions   fixed  ├────────────────────────────┤
+ *   │ ---------------- │                            │
+ *   │ list    SCROLLS  │ transcript        SCROLLS  │
+ *   │ ---------------- │                            │
+ *   │ footer    fixed  ├────────────────────────────┤
+ *   │                  │ composer            fixed  │
+ *   └──────────────────┴────────────────────────────┘
+ *
+ * There are exactly **two** scroll containers: the conversation list and the
+ * transcript. The document itself never scrolls — `html, body { overflow:
+ * hidden }` below is what enforces that, and every intermediate flex item
+ * carries `min-height: 0` so a child can actually shrink rather than pushing
+ * the page taller. Without that `min-height`, a flex item defaults to
+ * `min-height: auto` and grows to fit its content, which silently hands the
+ * scroll back to the body — the single most common way this layout breaks.
+ */
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+html,
+body {
+  overflow: hidden;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 1fr;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/*
+ * One column, not a zero-width first track.
+ *
+ * The sidebar is unmounted when collapsed, so `main` is the grid's only child.
+ * With a two-track template it auto-places into the *first* track — which a
+ * zero width would make zero wide, collapsing the entire application to
+ * nothing. The track has to go away with the element that filled it.
+ */
+.shell[data-sidebar='collapsed'] {
+  grid-template-columns: 1fr;
+}
+
+/* --- sidebar ------------------------------------------------------------ */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.sidebar__brand,
+.sidebar__actions,
+.sidebar__footer {
+  flex: none; /* fixed regions */
+}
+
+/* --header-height keeps this rule level with the main header's across the seam. */
+.sidebar__brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0 0.875rem 0 1.25rem;
+  height: var(--header-height);
+  border-bottom: 1px solid var(--border);
+}
+
+/* The one place the display face is used, so it reads as a mark rather than
+   as a heading competing with the conversation titles below it. */
+.brand {
+  margin: 0;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 1.5rem;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.sidebar__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0.75rem 0.5rem;
+}
+
+/* The only scrolling part of the sidebar. */
+.sidebar__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.25rem 0.5rem 0.75rem;
+}
+
+.sidebar__footer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+/* --- main --------------------------------------------------------------- */
+
+.main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.main__header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0 1.5rem;
+  height: var(--header-height);
+  border-bottom: 1px solid var(--border);
+}
+
+.main__title {
+  font-size: 1rem;
+  font-weight: 400;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The transcript: the other scroll container. */
+.transcript {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+  /* Stops a streaming reply from making the browser fight the scroll anchor. */
+  overflow-anchor: none;
+}
+
+/*
+ * One measure for the transcript and the composer, so the composer sits
+ * directly under the column of text rather than drifting wider than it.
+ *
+ * 63rem is measured off the design: the column occupies ~62% of the area beside
+ * the sidebar, wider than a typical prose measure, because the assistant's
+ * answers are meant to read as full-width documents rather than a narrow
+ * centred column.
+ */
+.transcript__inner,
+.composer-region__inner {
+  max-width: 63rem;
+  margin: 0 auto;
+}
+
+.transcript__inner {
+  padding: 2.5rem 1.25rem 2rem;
+  display: flex;
+  flex-direction: column;
+  /* Fills the scroll port even when nearly empty, so the empty state's
+     `margin: auto` has a full column height to centre itself within. */
+  min-height: 100%;
+  /* Turns are separated by whitespace alone — there are no dividers or
+     speaker labels, so the gap is the only thing marking the boundary. */
+  gap: 2.75rem;
+}
+
+.composer-region {
+  flex: none;
+  padding: 0 1.25rem 0.875rem;
+}
+
+/* Positioning context for the jump-to-latest control above it. */
+.composer-region__inner {
+  position: relative;
+}
+
+.composer-hint {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin: 0.5rem 0 0;
+}

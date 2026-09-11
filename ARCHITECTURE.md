@@ -175,7 +175,7 @@ Every invariant is enforced in code and covered by at least one test whose title
 | INV-19 | Every provider endpoint passes SSRF validation on create/edit and at request time                               | 5     | `server/provider/ssrf.ts`                                         | `server/provider/ssrf.test.ts`                                            |
 | INV-20 | SSE replay never silently skips events; a too-old `Last-Event-ID` triggers a full resync                        | 6     | `server/generation/manager.ts` (`catchUp`)                        | `server/generation/streaming.test.ts`, `e2e/streaming.spec.ts`            |
 | INV-21 | After a restart, no generation remains non-terminal, and partial output is persisted once                       | 6     | `server/generation/recovery.ts`                                   | `server/generation/streaming.test.ts`                                     |
-| INV-22 | Rendered Markdown never executes script or raw HTML                                                             | 7     | pending                                                           | pending                                                                   |
+| INV-22 | Rendered Markdown never executes script or raw HTML                                                             | 7     | `client/Markdown.tsx` (`skipHtml`, no `rehype-raw`, `safeUrl`)    | `client/Markdown.test.tsx`                                                |
 | INV-23 | A stale response never overwrites newer client state                                                            | 8     | pending                                                           | pending                                                                   |
 | INV-24 | Admin authorization is enforced server-side on every admin route                                                | 9     | pending                                                           | pending                                                                   |
 | INV-25 | Secrets are write-only: no API response ever contains a configured secret                                       | 9     | pending                                                           | pending                                                                   |
@@ -452,6 +452,62 @@ static host. `/api` is matched first and keeps its canonical JSON 404s; the
 fallback is GET/HEAD only, so a mistyped POST still fails loudly instead of
 returning HTML.
 
-## 11. Attachments
+## 11. Client rendering
+
+### Markdown (INV-22)
+
+Model output is untrusted. It may contain `<script>`, an `<img onerror=…>`, or a
+`javascript:` link — either because the model was steered into emitting one, or because it is
+faithfully quoting a document that contains one. Rendering runs `react-markdown` +
+`remark-gfm` with **two independent defences**:
+
+1. **Raw HTML is never parsed.** `rehype-raw` is deliberately not a dependency and `skipHtml`
+   is set, so `<script>alert(1)</script>` is text to display, not markup to build. This is a
+   property of what is _installed_, not of a filter that could be misconfigured.
+2. **URL schemes are filtered.** Markdown link syntax can carry `javascript:` or `data:` with
+   no HTML involved, so every `href` and `src` passes an allow-list
+   (`http`, `https`, `mailto`, `tel`). Control characters are stripped _before_ the scheme is
+   read, because browsers resolve `java\nscript:` as `javascript:`. A refused link keeps its
+   text and loses its href, so the reader still sees what was written. Permitted links get
+   `rel="noopener noreferrer"`.
+
+Rendering never alters what is stored: this is a view of the Markdown, and the file on disk
+keeps whatever the model actually wrote.
+
+Code fences scroll inside their own block and tables inside their own container, so neither
+can make the page scroll horizontally.
+
+### Layout
+
+Exactly **two** scroll containers: the conversation list and the transcript. The document
+never scrolls (`html, body { overflow: hidden }`), and every intermediate flex item carries
+`min-height: 0` — without it a flex item defaults to `min-height: auto`, grows to fit its
+content, and silently hands the scroll back to the body.
+
+Overlays — the model menu and dialogs — render through a portal to `document.body`. The
+composer is a rounded, overflow-clipped box, so a menu rendered inside it would be cut off at
+its edge; portalling puts it outside every ancestor's overflow and stacking context.
+
+When the sidebar collapses its grid **track** is removed, not set to zero width: the sidebar
+is unmounted, so with a two-track template `main` would auto-place into the first track and a
+zero width would collapse the whole application to nothing.
+
+### Scroll intent
+
+New content follows the bottom only while the user is pinned there (within 48px). The hard
+part is telling a user's scroll from one we caused, since a streaming reply changes
+`scrollHeight` constantly and every `scrollTo` fires `scroll` too.
+
+Origin is decided by **position, not by time**. An instant `scrollTo` moves `scrollTop`
+synchronously but dispatches its event later, so the position is already final when the event
+arrives: if it matches where we sent it, the event is ours. An earlier time-window approach
+ignored _every_ scroll inside the window, which meant a user scrolling in the moment after a
+token arrived was mistaken for us and dragged back to the bottom. A smooth scroll still needs
+a window, since it emits a run of intermediate positions — but it only happens on an explicit
+"jump to latest", where the user has just asked to go to the bottom.
+
+Unpinned, arriving content raises a "jump to latest" control instead of moving the viewport.
+
+## 12. Attachments
 
 N/A until Phase 11.

@@ -1,0 +1,255 @@
+/*
+ * Fonts are vendored through Fontsource rather than linked from Google's CDN.
+ * This is a self-hosted application that is expected to run against a local
+ * model on a machine that may have no internet at all, so a stylesheet that
+ * phones home on every load would be both a privacy leak and an offline
+ * failure. Both faces are OFL-1.1.
+ */
+@import '@fontsource/google-sans/400.css';
+@import '@fontsource/google-sans/500.css';
+@import '@fontsource/google-sans/600.css';
+@import '@fontsource-variable/playfair';
+
+/*
+ * Monochrome. Every value is strictly achromatic (R = G = B), anchored on pure
+ * black and pure white — no tint in any channel. Meaning that colour used to
+ * carry (primary vs destructive, error states) is carried by contrast, fill,
+ * and border weight instead, which also keeps it legible to anyone who
+ * wouldn't have distinguished the hues in the first place.
+ */
+/*
+ * Three ground levels, because the design layers them: the sidebar sits
+ * *below* the canvas and the composer, model menu and cards sit *above* it.
+ * On a flat white page the composer has no edge of its own and dissolves into
+ * the canvas, so the canvas is held just off white to give it one.
+ */
+:root {
+  --bg: #fafafa;
+  --raised: #ffffff;
+  --surface: #f2f2f2;
+  --surface-2: #e9e9e9;
+  --surface-3: #dedede;
+  --border: #e4e4e4;
+  --border-strong: #8a8a8a;
+  --text: #121212;
+  --muted: #6b6b6b;
+  --accent: #121212;
+  --on-accent: #ffffff;
+
+  --sidebar-width: 22rem;
+  --header-height: 4.25rem;
+  --radius: 0.75rem;
+
+  --font-sans:
+    'Google Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Playfair Variable', 'Playfair Display', Georgia, serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  color-scheme: light dark;
+  font-family: var(--font-sans);
+  font-synthesis-weight: none;
+}
+
+:root[data-theme='dark'] {
+  --bg: #0d0d0d;
+  --raised: #171717;
+  --surface: #0a0a0a;
+  --surface-2: #1f1f1f;
+  --surface-3: #2b2b2b;
+  --border: #242424;
+  --border-strong: #6b6b6b;
+  --text: #f2f2f2;
+  --muted: #9a9a9a;
+  --accent: #f2f2f2;
+  --on-accent: #0a0a0a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/*
+ * Scrollbars are hidden wherever the application scrolls.
+ *
+ * Only the painted bar goes: every one of these keeps `overflow: auto`, so
+ * wheel, trackpad, keyboard and touch scrolling all still work — `overflow:
+ * hidden` would have taken the scrolling with it. The transcript's own
+ * affordance is the jump-to-latest control, which appears as soon as the
+ * reader moves away from the bottom.
+ */
+.transcript,
+.sidebar__list,
+.model-menu__list,
+.reasoning__body,
+.code-block pre,
+.table-scroll,
+.composer__input,
+.msg__editor {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* older Edge */
+}
+
+.transcript::-webkit-scrollbar,
+.sidebar__list::-webkit-scrollbar,
+.model-menu__list::-webkit-scrollbar,
+.reasoning__body::-webkit-scrollbar,
+.code-block pre::-webkit-scrollbar,
+.table-scroll::-webkit-scrollbar,
+.composer__input::-webkit-scrollbar,
+.msg__editor::-webkit-scrollbar {
+  display: none; /* Chrome, Safari */
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- controls ----------------------------------------------------------- */
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: none;
+  border-radius: 0.5rem;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--border-strong);
+  outline-offset: 2px;
+}
+
+/** A quiet square button, used for icons throughout. */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  color: var(--muted);
+  flex: none;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/** The filled, high-contrast action. */
+.button-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 500;
+}
+
+.button-primary:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+/** A full-width row that reads as navigation, not a control. */
+.nav-button {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  width: 100%;
+  padding: 0.6875rem 0.75rem;
+  border-radius: 0.75rem;
+  text-align: left;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.nav-button:hover {
+  background: var(--surface-2);
+}
+
+/* A filled pill, not a bordered field — the design gives search the same
+   weight as the nav rows above it rather than making it look editable. */
+.search {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5625rem 0.75rem;
+  background: var(--surface-2);
+  border: 1px solid transparent;
+  border-radius: 0.75rem;
+  color: var(--muted);
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  outline: none;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.search input::placeholder {
+  color: var(--muted);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  flex: none;
+}
+
+.error-banner {
+  margin: 0 0 0.75rem;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid var(--border-strong);
+  border-left-width: 3px;
+  border-radius: 0.5rem;
+  background: var(--surface-2);
+  font-size: 0.9375rem;
+}

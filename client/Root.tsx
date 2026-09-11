@@ -63,8 +63,8 @@ export function Root(): React.JSX.Element {
 
   return (
     <>
-      <App />
-      <div className="account">
+      <App user={user} onSignOut={() => void onSignOut()} />
+      <div className="account" hidden>
         <span className="account__name">{user.username}</span>
         <button
           type="button"
