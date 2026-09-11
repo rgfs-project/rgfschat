@@ -26,6 +26,9 @@ export const ERROR_CODES = [
   'CSRF_INVALID',
   'CONFLICT',
   'REGISTRATION_CLOSED',
+  // Phase 5
+  'PROVIDER_NOT_FOUND',
+  'ENDPOINT_NOT_ALLOWED',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -49,6 +52,8 @@ export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
   CSRF_INVALID: 403,
   CONFLICT: 409,
   REGISTRATION_CLOSED: 403,
+  PROVIDER_NOT_FOUND: 400,
+  ENDPOINT_NOT_ALLOWED: 400,
 };
 
 /**

@@ -2,6 +2,9 @@ import type { ChatMessage, ModelDto, Modality } from '@shared/generation.ts';
 import type { ProviderConfig } from '../config.ts';
 import { AppError } from '../errors/AppError.ts';
 import type { Logger } from '../logger.ts';
+import { safeFetch, SsrfError, type HostPolicy, type Resolver } from './ssrf.ts';
+import type { Response as UndiciResponse } from 'undici';
+import { DEFAULT_HOST_POLICY } from './ssrf.ts';
 import type { ChatRequest, Provider, ProviderChunk } from './types.ts';
 
 /**
@@ -17,16 +20,25 @@ import type { ChatRequest, Provider, ProviderChunk } from './types.ts';
  *     to its API key file, and must never be forwarded (§2, INV-04)
  */
 export class LlamaCppProvider implements Provider {
-  readonly name = 'llamacpp';
-
   readonly #config: ProviderConfig;
   readonly #logger: Logger;
   /** Lazily filled; never warmed eagerly, because probing loads models (§3). */
   readonly #contextLengths = new Map<string, number>();
+  readonly #policy: HostPolicy;
+  readonly #resolver: Resolver | undefined;
+  /** Identifies this instance in conversation metadata; defaults for Phase 2-4. */
+  readonly name: string;
 
-  constructor(config: ProviderConfig, logger: Logger) {
+  constructor(
+    config: ProviderConfig,
+    logger: Logger,
+    options: { policy?: HostPolicy; resolver?: Resolver; name?: string } = {}
+  ) {
     this.#config = config;
     this.#logger = logger;
+    this.#policy = options.policy ?? DEFAULT_HOST_POLICY;
+    this.#resolver = options.resolver;
+    this.name = options.name ?? 'llamacpp';
   }
 
   #headers(extra: Record<string, string> = {}): Record<string, string> {
@@ -41,13 +53,29 @@ export class LlamaCppProvider implements Provider {
    * Performs a request with a timeout, mapping transport failures to canonical
    * codes. The upstream response body is never attached to the thrown error.
    */
-  async #fetch(path: string, init: RequestInit & { signal?: AbortSignal }): Promise<Response> {
+  async #fetch(
+    path: string,
+    init: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal }
+  ): Promise<{ response: UndiciResponse; release: () => void }> {
     const timeout = AbortSignal.timeout(this.#config.timeoutMs);
     const signal = init.signal !== undefined ? AbortSignal.any([init.signal, timeout]) : timeout;
 
     try {
-      return await fetch(`${this.#config.baseUrl}${path}`, { ...init, signal });
+      // Every outbound request is re-validated and pinned, not just the one
+      // that was checked at config load (INV-19).
+      return await safeFetch(
+        new URL(`${this.#config.baseUrl}${path}`),
+        { ...init, signal },
+        {
+          policy: this.#policy,
+          ...(this.#resolver !== undefined ? { resolver: this.#resolver } : {}),
+        }
+      );
     } catch (err) {
+      if (err instanceof SsrfError) {
+        this.#logger.warn('Provider endpoint rejected by SSRF policy', { reason: err.reason });
+        throw new AppError('ENDPOINT_NOT_ALLOWED', 'That provider endpoint is not permitted.');
+      }
       // A caller-initiated abort is not a provider failure; let it propagate so
       // cancellation is not misreported as an upstream error.
       if (init.signal?.aborted === true) throw err;
@@ -64,7 +92,7 @@ export class LlamaCppProvider implements Provider {
    * Normalizes an upstream error response. The upstream `message` is read only
    * to classify it, and is never included in what we throw (INV-04).
    */
-  async #normalizeError(response: Response, model?: string): Promise<AppError> {
+  async #normalizeError(response: UndiciResponse, model?: string): Promise<AppError> {
     let upstreamType = '';
     let upstreamMessage = '';
     try {
@@ -98,19 +126,21 @@ export class LlamaCppProvider implements Provider {
   }
 
   async listModels(signal?: AbortSignal): Promise<ModelDto[]> {
-    const response = await this.#fetch('/v1/models', {
+    const { response, release } = await this.#fetch('/v1/models', {
       headers: this.#headers(),
       ...(signal !== undefined ? { signal } : {}),
     });
 
-    if (!response.ok) throw await this.#normalizeError(response);
-
     let body: unknown;
     try {
+      if (!response.ok) throw await this.#normalizeError(response);
       body = await response.json();
-    } catch {
+    } catch (err) {
+      release();
+      if (err instanceof AppError) throw err;
       throw new AppError('PROVIDER_ERROR', 'The model provider returned an unreadable response.');
     }
+    release();
 
     const data = (body as { data?: unknown } | null)?.data;
     if (!Array.isArray(data)) {
@@ -152,7 +182,7 @@ export class LlamaCppProvider implements Provider {
     maxOutputTokens,
     signal,
   }: ChatRequest): AsyncIterable<ProviderChunk> {
-    const response = await this.#fetch('/v1/chat/completions', {
+    const { response, release } = await this.#fetch('/v1/chat/completions', {
       method: 'POST',
       headers: this.#headers({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
@@ -165,12 +195,18 @@ export class LlamaCppProvider implements Provider {
       signal,
     });
 
-    if (!response.ok) throw await this.#normalizeError(response, model);
+    if (!response.ok) {
+      const error = await this.#normalizeError(response, model);
+      release();
+      throw error;
+    }
     if (response.body === null) {
+      release();
       throw new AppError('PROVIDER_ERROR', 'The model provider returned an empty stream.');
     }
 
-    const reader = response.body.getReader();
+    // undici types the body loosely; the runtime value is a web ReadableStream.
+    const reader = (response.body as ReadableStream<Uint8Array>).getReader();
     const decoder = new TextDecoder();
     let buffer = '';
 
@@ -192,8 +228,10 @@ export class LlamaCppProvider implements Provider {
         }
       }
     } finally {
-      // Releasing the lock lets the abort actually tear down the socket.
+      // Releasing the lock lets the abort actually tear down the socket, and
+      // the dispatcher is only closed once the body is finished with.
       reader.cancel().catch(() => undefined);
+      release();
     }
   }
 
