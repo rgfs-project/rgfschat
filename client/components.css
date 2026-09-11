@@ -797,24 +797,32 @@
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  padding: 0.625rem 1rem;
+  padding: var(--button-padding);
   background: var(--accent);
   color: var(--on-accent);
-  font-weight: 500;
+  font-size: var(--button-font-size);
 }
 
 .signin__card button[type='submit']:hover:not(:disabled) {
   opacity: 0.88;
 }
 
+/*
+ * A quiet, low-commitment action — cancel, or a secondary route out.
+ *
+ * No underline: sitting beside two real buttons it does not need to advertise
+ * that it is clickable, and the rule only added noise to a row that is already
+ * three controls wide. The colour lift on hover carries that instead.
+ */
 button.linkish {
   background: none;
-  border: none;
+  /* Transparent rather than none: the bordered buttons beside it are 2px
+     taller otherwise, and the row stops lining up. */
+  border: 1px solid transparent;
   color: var(--muted);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  padding: 0.25rem;
-  font-size: 0.875rem;
+  padding: var(--button-padding);
+  font-size: var(--button-font-size);
+  transition: color var(--motion-fast) var(--ease-out);
 }
 
 button.linkish:hover {
@@ -1057,11 +1065,12 @@ button.linkish:hover {
 .admin__form-actions button:not(.button-primary):not(.linkish) {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.375rem;
-  padding: 0.4rem 0.75rem;
+  padding: var(--button-padding);
   border: 1px solid var(--border-strong);
   border-radius: 0.5rem;
-  font-size: 0.875rem;
+  font-size: var(--button-font-size);
 }
 
 .admin__actions {

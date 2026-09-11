@@ -48,6 +48,10 @@
    * markdown, or the transcript: animating content that is already streaming in
    * fights the reader, and a body that fades on every token is unreadable.
    */
+  /* One size for every button, so a row of them lines up. */
+  --button-font-size: 0.875rem;
+  --button-padding: 0.5rem 0.875rem;
+
   --motion-fast: 120ms;
   --motion: 180ms;
   /* Long enough to read as a cross-fade rather than a stutter. */
@@ -267,18 +271,24 @@ select:focus-visible,
   transform: scale(0.96);
 }
 
-/** The filled, high-contrast action. */
+/**
+ * The filled, high-contrast action.
+ *
+ * Shares its metrics with every other button so a row of them lines up. It
+ * previously set no `font-size` and inherited the 16px body text, and carried
+ * a heavier weight besides — so it read as both larger and bolder than the
+ * secondary button beside it. The filled background is what marks it as
+ * primary; size and weight do not need to say it a second time.
+ */
 .button-primary {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.5rem;
-  padding: 0.5rem 0.875rem;
+  padding: var(--button-padding);
   background: var(--accent);
   color: var(--on-accent);
-  font-weight: 500;
-}
-
-.button-primary {
+  font-size: var(--button-font-size);
   transition:
     opacity var(--motion-fast) var(--ease-out),
     transform var(--motion-fast) var(--ease-out);
