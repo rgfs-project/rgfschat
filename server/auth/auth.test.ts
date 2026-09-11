@@ -10,6 +10,8 @@ import { GenerationManager } from '../generation/manager.ts';
 import { GenerationService } from '../generation/service.ts';
 import { createLogger } from '../logger.ts';
 import { LlamaCppProvider } from '../provider/llamacpp.ts';
+import { ProviderHub } from '../provider/hub.ts';
+import { DEFAULT_HOST_POLICY } from '../provider/ssrf.ts';
 import { startMockProvider, type MockProvider } from '../provider/mockServer.ts';
 import { ConversationStore } from '../storage/conversations.ts';
 import { ChatIndex } from '../storage/index.ts';
@@ -30,6 +32,7 @@ let users: UserStore;
 let sessions: SessionManager;
 let store: ConversationStore;
 let provider: LlamaCppProvider;
+let hub: ProviderHub;
 
 async function boot(registrationMode: 'closed' | 'open' = 'closed'): Promise<void> {
   dataDir = await mkdtemp(join(tmpdir(), 'workspace-auth-'));
@@ -57,11 +60,28 @@ async function boot(registrationMode: 'closed' | 'open' = 'closed'): Promise<voi
     logger
   );
   manager = new GenerationManager({ provider, logger, maxOutputTokens: 128 });
+  hub = new ProviderHub({
+    logger,
+    policy: DEFAULT_HOST_POLICY,
+    defaultContextTokens: 8_192,
+    maxOutputTokens: 128,
+    factory: () => provider,
+  });
+  hub.setProviders([
+    {
+      id: 'local',
+      name: 'Local',
+      kind: 'openai-compatible',
+      baseUrl: mock?.url ?? 'http://127.0.0.1:1',
+      timeoutMs: 5_000,
+      capabilities: {},
+    },
+  ]);
   service = new GenerationService({
     store,
     index,
     manager,
-    provider,
+    hub,
     logger,
     defaultContextTokens: 8_192,
     maxOutputTokens: 128,
@@ -69,7 +89,7 @@ async function boot(registrationMode: 'closed' | 'open' = 'closed'): Promise<voi
 
   const app = createApp({
     logger,
-    provider,
+    hub,
     manager,
     store,
     index,
@@ -361,7 +381,7 @@ describe('authorization', () => {
       store,
       index: new ChatIndex({ store, logger }),
       ...(service === undefined ? {} : { service }),
-      provider,
+      hub,
       ...(manager === undefined ? {} : { manager }),
       authConfig: { registrationMode: 'closed', absoluteTtlMs: 1, idleTtlMs: 1 },
     });
@@ -527,7 +547,12 @@ describe('INV-15: users cannot reach each other', () => {
       await ada.call('/api/generations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId: created.id, model: 'GPT', content: 'hello' }),
+        body: JSON.stringify({
+          conversationId: created.id,
+          providerId: 'local',
+          model: 'GPT',
+          content: 'hello',
+        }),
       })
     ).json()) as { generationId: string };
 

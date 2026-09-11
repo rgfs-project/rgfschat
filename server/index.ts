@@ -2,7 +2,8 @@ import { createApp } from './app.ts';
 import { loadConfig } from './config.ts';
 import { GenerationManager } from './generation/manager.ts';
 import { createLogger } from './logger.ts';
-import { LlamaCppProvider } from './provider/llamacpp.ts';
+import { ProviderHub } from './provider/hub.ts';
+import { ProviderRegistry } from './provider/registry.ts';
 import { ConversationStore } from './storage/conversations.ts';
 import { ChatIndex } from './storage/index.ts';
 import { StoragePaths } from './storage/paths.ts';
@@ -23,20 +24,26 @@ function main(): void {
 
   const logger = createLogger({ level: config.logLevel });
 
-  const provider = new LlamaCppProvider(config.provider, logger);
+  const paths0 = new StoragePaths(config.dataDir);
+  const registry = new ProviderRegistry({ paths: paths0, logger, policy: config.hostPolicy });
+  const hub = new ProviderHub({
+    logger,
+    policy: config.hostPolicy,
+    defaultContextTokens: config.provider.defaultContextTokens,
+    maxOutputTokens: config.provider.maxOutputTokens,
+  });
   const manager = new GenerationManager({
-    provider,
     logger,
     maxOutputTokens: config.provider.maxOutputTokens,
   });
 
-  const store = new ConversationStore({ paths: new StoragePaths(config.dataDir), logger });
+  const store = new ConversationStore({ paths: paths0, logger });
   const index = new ChatIndex({ store, logger });
   const service = new GenerationService({
     store,
     index,
     manager,
-    provider,
+    hub,
     logger,
     defaultContextTokens: config.provider.defaultContextTokens,
     maxOutputTokens: config.provider.maxOutputTokens,
@@ -53,7 +60,7 @@ function main(): void {
 
   const app = createApp({
     logger,
-    provider,
+    hub,
     manager,
     store,
     index,
@@ -71,6 +78,25 @@ function main(): void {
   // left dirty by a crash (INV-11).
   // Storage for a user is prepared on demand now that accounts exist; startup
   // only sweeps expired sessions and warns when there is no account yet.
+  // Providers load from _system/providers.json, bootstrapping from the
+  // environment on first run. Discovery is warmed in the background so a
+  // provider that is down cannot delay startup.
+  registry
+    .load({
+      baseUrl: config.provider.baseUrl,
+      ...(config.provider.apiKey !== undefined ? { apiKey: config.provider.apiKey } : {}),
+      timeoutMs: config.provider.timeoutMs,
+    })
+    .then((result) => {
+      hub.setProviders(result.providers);
+      hub.warm();
+      logger.info('Providers loaded', {
+        count: result.providers.length,
+        rejected: result.rejected.length,
+      });
+    })
+    .catch((err: unknown) => logger.error('Provider configuration failed to load', { error: err }));
+
   sessions
     .cleanupExpired()
     .then(async () => {

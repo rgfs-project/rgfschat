@@ -4,10 +4,10 @@ A self-hosted chat workspace. Conversations are plain Markdown files on disk, ge
 owned by the server, and the model provider is replaceable.
 
 This repository is built in phases against a project contract kept outside the repository.
-**Phase 4** is complete: the foundation and HTTP
-conventions, a llama.cpp provider with server-owned generations and SSE streaming, canonical
-Markdown persistence with a rebuildable index, and accounts with sessions, CSRF protection,
-and per-user isolation.
+**Phase 5** is complete: the foundation and HTTP
+conventions, server-owned generations with SSE streaming, canonical Markdown persistence with
+a rebuildable index, accounts with sessions and CSRF protection, and multiple model providers
+with SSRF-protected discovery.
 
 ## Prerequisites
 
@@ -142,6 +142,54 @@ npm run user:create -- --username ada --admin --adopt-local-data
 ```
 
 Set `REGISTRATION_MODE=open` to let people sign themselves up.
+
+## Providers
+
+Providers live in `data/_system/providers.json`, created on first run from `LLAMA_BASE_URL`
+and `LLAMA_API_KEY`. After that the file is authoritative — edit it and restart. (Editing
+from the admin UI arrives in Phase 9.)
+
+```json
+{
+  "version": 1,
+  "providers": [
+    {
+      "id": "local",
+      "name": "Local llama.cpp",
+      "kind": "openai-compatible",
+      "baseUrl": "http://127.0.0.1:8080",
+      "apiKey": "optional-bearer-token",
+      "timeoutMs": 120000,
+      "capabilities": { "vision": true },
+      "contextTokens": 131072
+    }
+  ]
+}
+```
+
+> **This file holds secrets.** `apiKey` is stored in plaintext, so the file is written 0600
+> and **any backup of `data/` must be treated as secret**. It never leaves the server: the
+> API returns only `id`, `name`, `status`, and capabilities.
+
+An invalid entry is disabled and logged rather than crashing startup, so one bad provider
+cannot make the application unbootable. A provider that is unreachable shows as _unavailable_
+and the others keep working; if discovery fails after having succeeded, the last known model
+list stays selectable and is marked _stale_.
+
+### Outbound request safety
+
+Provider endpoints are checked before **every** request, not just when configured. Cloud
+metadata and link-local addresses are blocked unconditionally, DNS is resolved and the
+connection pinned to a checked address (which defeats DNS rebinding), and redirects are never
+followed.
+
+| Variable                       | Default   | Purpose                                                                                    |
+| ------------------------------ | --------- | ------------------------------------------------------------------------------------------ |
+| `ALLOW_PRIVATE_PROVIDER_HOSTS` | `true`    | Allow `127.0.0.1`, LAN, and other private ranges. Metadata ranges stay blocked either way. |
+| `PROVIDER_HOST_ALLOWLIST`      | _(empty)_ | Comma-separated hostnames; when set, nothing else may be used.                             |
+
+Set `ALLOW_PRIVATE_PROVIDER_HOSTS=false` if every provider is remote and you want the
+strictest posture.
 
 ## Your data
 

@@ -13,7 +13,11 @@ import type { Logger } from '../logger.ts';
 import type { Provider } from '../provider/types.ts';
 
 export interface GenerationManagerOptions {
-  provider: Provider;
+  /**
+   * Fallback client for callers that do not pass one per generation.
+   * From Phase 5 the service supplies the client for the selected provider.
+   */
+  provider?: Provider;
   logger: Logger;
   maxOutputTokens: number;
   /** How long a terminal generation stays observable before eviction. */
@@ -27,6 +31,8 @@ interface GenerationRecord {
   id: string;
   /** Who started it. Anyone else must not be able to observe or cancel it. */
   ownerId: string;
+  /** The client this run streams from; different generations may use different providers. */
+  provider: Provider;
   assistantMessageId: string;
   model: string;
   state: GenerationState;
@@ -57,7 +63,7 @@ const DEFAULT_MAX_RETAINED = 100;
  */
 export class GenerationManager {
   readonly #generations = new Map<string, GenerationRecord>();
-  readonly #provider: Provider;
+  readonly #provider: Provider | undefined;
   readonly #logger: Logger;
   readonly #maxOutputTokens: number;
   readonly #retentionMs: number;
@@ -89,12 +95,18 @@ export class GenerationManager {
   start(
     ownerId: string,
     model: string,
-    messages: ChatMessage[]
+    messages: ChatMessage[],
+    provider?: Provider
   ): { generationId: string; assistantMessageId: string } {
+    const client = provider ?? this.#provider;
+    if (client === undefined) {
+      throw AppError.internal('No provider client for this generation');
+    }
     const createdAt = this.#now();
     const record: GenerationRecord = {
       id: randomUUID(),
       ownerId,
+      provider: client,
       assistantMessageId: randomUUID(),
       model,
       state: 'pending',
@@ -121,7 +133,9 @@ export class GenerationManager {
 
   async #run(record: GenerationRecord, messages: ChatMessage[]): Promise<void> {
     try {
-      const stream = this.#provider.streamChat({
+      // The record's own client, so a generation is unaffected by another
+      // running against a different provider.
+      const stream = record.provider.streamChat({
         model: record.model,
         messages,
         maxOutputTokens: this.#maxOutputTokens,

@@ -6,15 +6,18 @@ import { AppError } from '../errors/AppError.ts';
 import type { GenerationManager } from '../generation/manager.ts';
 import type { GenerationService } from '../generation/service.ts';
 import { validateBody } from '../http/validate.ts';
-import type { Provider } from '../provider/types.ts';
+import type { ProviderHub } from '../provider/hub.ts';
 
 /** Heartbeat interval. Contracts §5 require at least one every 15 s. */
 const SSE_HEARTBEAT_MS = 10_000;
 
 // From Phase 3 the client sends only the new user message; the server assembles
 // history from canonical storage (contracts §4).
+// A model is identified by the pair (providerId, modelId); ids are opaque and
+// never parsed, and the pair is validated server-side (INV-18).
 const createGenerationSchema = z.strictObject({
   conversationId: z.string().min(1).max(200),
+  providerId: z.string().min(1).max(64),
   model: z.string().min(1).max(200),
   content: z.string().min(1).max(200_000),
 });
@@ -22,12 +25,13 @@ const createGenerationSchema = z.strictObject({
 /** Re-runs the last turn; no new user message is added. */
 const regenerateSchema = z.strictObject({
   conversationId: z.string().min(1).max(200),
+  providerId: z.string().min(1).max(64),
   model: z.string().min(1).max(200),
 });
 
 export interface GenerationRoutesOptions {
   manager: GenerationManager;
-  provider: Provider;
+  hub: ProviderHub;
   service: GenerationService;
 }
 
@@ -38,44 +42,41 @@ function ownerOf(req: Request): string {
   return userId;
 }
 
-export function generationRouter({ manager, provider, service }: GenerationRoutesOptions): Router {
+export function generationRouter({ manager, hub, service }: GenerationRoutesOptions): Router {
   const router = Router();
 
+  /** Non-sensitive: never carries baseUrl or apiKey (INV-25). */
+  router.get('/providers', async (_req, res) => {
+    res.json({ providers: await hub.listProviders() });
+  });
+
+  /** Grouped by provider, with stale/unavailable flags for the UI. */
   router.get('/models', async (_req, res) => {
-    const models = await provider.listModels();
-    res.json({ models });
+    res.json({ providers: await hub.listModels() });
   });
 
   router.post('/generations', validateBody(createGenerationSchema), async (req, res) => {
-    const { conversationId, model, content } = req.body as z.infer<typeof createGenerationSchema>;
+    const { conversationId, providerId, model, content } = req.body as z.infer<
+      typeof createGenerationSchema
+    >;
 
     if (!isCanonicalUuid(conversationId)) throw AppError.notFound('Conversation not found.');
 
-    // The model is validated against the discovered list before anything is
-    // minted or persisted, so an unknown model never creates a generation.
-    const models = await provider.listModels();
-    if (!models.some((candidate) => candidate.id === model)) {
-      throw new AppError('MODEL_NOT_FOUND', 'The requested model is not available.');
-    }
-
+    // The pair is validated inside the service, against the server-side
+    // catalog, before anything is minted or persisted.
     // Returns only once the user message is durable (INV-08).
-    const result = await service.start(ownerOf(req), conversationId, model, content);
+    const result = await service.start(ownerOf(req), conversationId, providerId, model, content);
 
     const dto: GenerationAcceptedDto = result;
     res.status(202).json(dto);
   });
 
   router.post('/generations/regenerate', validateBody(regenerateSchema), async (req, res) => {
-    const { conversationId, model } = req.body as z.infer<typeof regenerateSchema>;
+    const { conversationId, providerId, model } = req.body as z.infer<typeof regenerateSchema>;
 
     if (!isCanonicalUuid(conversationId)) throw AppError.notFound('Conversation not found.');
 
-    const models = await provider.listModels();
-    if (!models.some((candidate) => candidate.id === model)) {
-      throw new AppError('MODEL_NOT_FOUND', 'The requested model is not available.');
-    }
-
-    res.status(202).json(await service.regenerate(ownerOf(req), conversationId, model));
+    res.status(202).json(await service.regenerate(ownerOf(req), conversationId, providerId, model));
   });
 
   router.get('/generations/:id', (req, res) => {

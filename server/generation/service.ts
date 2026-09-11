@@ -3,7 +3,7 @@ import { deriveTitle, DEFAULT_TITLE, type AssistantMessage } from '@shared/conve
 import type { GenerationState, TerminalState } from '@shared/generation.ts';
 import { AppError } from '../errors/AppError.ts';
 import type { Logger } from '../logger.ts';
-import type { Provider } from '../provider/types.ts';
+import type { ProviderHub } from '../provider/hub.ts';
 import type { ConversationStore } from '../storage/conversations.ts';
 import { entryFor, type ChatIndex } from '../storage/index.ts';
 import { conversationKey } from '../storage/locks.ts';
@@ -35,7 +35,7 @@ export interface GenerationServiceOptions {
   store: ConversationStore;
   index: ChatIndex;
   manager: GenerationManager;
-  provider: Provider;
+  hub: ProviderHub;
   logger: Logger;
   defaultContextTokens: number;
   maxOutputTokens: number;
@@ -51,7 +51,7 @@ export class GenerationService {
   readonly #store: ConversationStore;
   readonly #index: ChatIndex;
   readonly #manager: GenerationManager;
-  readonly #provider: Provider;
+  readonly #hub: ProviderHub;
   readonly #logger: Logger;
   readonly #defaultContextTokens: number;
   readonly #maxOutputTokens: number;
@@ -63,7 +63,7 @@ export class GenerationService {
     this.#store = options.store;
     this.#index = options.index;
     this.#manager = options.manager;
-    this.#provider = options.provider;
+    this.#hub = options.hub;
     this.#logger = options.logger;
     this.#defaultContextTokens = options.defaultContextTokens;
     this.#maxOutputTokens = options.maxOutputTokens;
@@ -80,10 +80,16 @@ export class GenerationService {
   async start(
     userId: string,
     conversationId: string,
+    providerId: string,
     model: string,
     content: string
   ): Promise<StartResult> {
     const key = conversationKey(userId, conversationId);
+
+    // The pair is validated against the server-side catalog before anything is
+    // minted or persisted (INV-18). A model valid on another provider is not
+    // valid here.
+    const { entry, client } = await this.#hub.resolveModel(providerId, model);
 
     const prepared = await this.#store.locks.run(key, async () => {
       if (this.#active.has(key)) {
@@ -109,7 +115,8 @@ export class GenerationService {
       // it before writing anything, so an over-budget request fails without
       // leaving a persisted message that was never answered.
       const prompt = assemblePrompt(next, {
-        contextTokens: this.#provider.contextLength(model) ?? this.#defaultContextTokens,
+        contextTokens:
+          client.contextLength(model) ?? entry.contextTokens ?? this.#defaultContextTokens,
         maxOutputTokens: this.#maxOutputTokens,
       });
 
@@ -129,7 +136,8 @@ export class GenerationService {
     const { generationId, assistantMessageId } = this.#manager.start(
       userId,
       model,
-      prepared.prompt.messages
+      prepared.prompt.messages,
+      client
     );
     this.#active.set(key, generationId);
 
@@ -139,6 +147,7 @@ export class GenerationService {
       key,
       generationId,
       assistantMessageId,
+      providerId,
       model,
       hadDefaultTitle: prepared.title === DEFAULT_TITLE,
     });
@@ -157,9 +166,11 @@ export class GenerationService {
   async regenerate(
     userId: string,
     conversationId: string,
+    providerId: string,
     model: string
   ): Promise<{ generationId: string; assistantMessageId: string }> {
     const key = conversationKey(userId, conversationId);
+    const { entry, client } = await this.#hub.resolveModel(providerId, model);
 
     const prepared = await this.#store.locks.run(key, async () => {
       if (this.#active.has(key)) {
@@ -182,7 +193,8 @@ export class GenerationService {
 
       const next = { ...current, messages: trimmed };
       const prompt = assemblePrompt(next, {
-        contextTokens: this.#provider.contextLength(model) ?? this.#defaultContextTokens,
+        contextTokens:
+          client.contextLength(model) ?? entry.contextTokens ?? this.#defaultContextTokens,
         maxOutputTokens: this.#maxOutputTokens,
       });
 
@@ -195,7 +207,8 @@ export class GenerationService {
     const { generationId, assistantMessageId } = this.#manager.start(
       userId,
       model,
-      prepared.prompt.messages
+      prepared.prompt.messages,
+      client
     );
     this.#active.set(key, generationId);
 
@@ -205,6 +218,7 @@ export class GenerationService {
       key,
       generationId,
       assistantMessageId,
+      providerId,
       model,
       // A regenerate never re-titles: the conversation already has its title.
       hadDefaultTitle: false,
@@ -230,10 +244,11 @@ export class GenerationService {
     key: string;
     generationId: string;
     assistantMessageId: string;
+    providerId: string;
     model: string;
     hadDefaultTitle: boolean;
   }): Promise<void> {
-    const { userId, conversationId, key, generationId, model } = context;
+    const { userId, conversationId, key, generationId, providerId, model } = context;
 
     try {
       const final = await this.#manager.whenTerminal(generationId);
@@ -253,7 +268,7 @@ export class GenerationService {
           type: 'assistant',
           id: context.assistantMessageId,
           status: STATUS_FOR_STATE[final.state],
-          provider: this.#provider.name,
+          provider: providerId,
           model,
           ...(final.reasoning !== '' ? { reasoning: final.reasoning } : {}),
           body: final.content,

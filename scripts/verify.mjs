@@ -390,17 +390,36 @@ async function main() {
 
     // 4. A real generation, start to finish, over real HTTP and SSE.
     const models = await (await afetch(`${baseUrl}/api/models`)).json();
+    const group = models.providers?.[0];
     check(
-      'models are listed',
-      Array.isArray(models.models) && models.models.length > 0,
-      JSON.stringify(models)
+      'models are listed, grouped by provider',
+      Array.isArray(models.providers) && (group?.models?.length ?? 0) > 0,
+      JSON.stringify(models).slice(0, 200)
     );
     check(
-      'INV-04: no credential or upstream payload in the model list',
+      'INV-04/25: no credential, endpoint, or upstream payload in the model list',
       !JSON.stringify(models).includes(PROVIDER_KEY) &&
         !JSON.stringify(models).includes('api-key-file') &&
+        !JSON.stringify(models).includes('apiKey') &&
+        !JSON.stringify(models).includes('baseUrl') &&
         !JSON.stringify(models).includes('.gguf'),
       JSON.stringify(models).slice(0, 200)
+    );
+
+    const providers = await (await afetch(`${baseUrl}/api/providers`)).json();
+    check(
+      'providers are listed with a status',
+      Array.isArray(providers.providers) &&
+        providers.providers.length > 0 &&
+        typeof providers.providers[0].status === 'string',
+      JSON.stringify(providers).slice(0, 200)
+    );
+    check(
+      'INV-25: the provider listing carries no secret or endpoint',
+      !JSON.stringify(providers).includes(PROVIDER_KEY) &&
+        !JSON.stringify(providers).includes('apiKey') &&
+        !JSON.stringify(providers).includes('baseUrl'),
+      JSON.stringify(providers).slice(0, 200)
     );
 
     // From Phase 3 a generation belongs to a persisted conversation, and the
@@ -418,7 +437,8 @@ async function main() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         conversationId: firstConversation.id,
-        model: models.models[0].id,
+        providerId: group.providerId,
+        model: group.models[0].id,
         content: 'hello',
       }),
     });
@@ -475,6 +495,7 @@ async function main() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         conversationId: firstConversation.id,
+        providerId: group.providerId,
         model: 'nope',
         content: 'x',
       }),
@@ -484,6 +505,23 @@ async function main() {
       'unknown model is rejected with MODEL_NOT_FOUND',
       unknownModel.status === 400 && unknownBody.error?.code === 'MODEL_NOT_FOUND',
       JSON.stringify(unknownBody)
+    );
+
+    const unknownProvider = await afetch(`${baseUrl}/api/generations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversationId: firstConversation.id,
+        providerId: 'no-such-provider',
+        model: group.models[0].id,
+        content: 'x',
+      }),
+    });
+    const unknownProviderBody = await unknownProvider.json();
+    check(
+      'INV-18: an unknown provider is rejected',
+      unknownProvider.status === 400 && unknownProviderBody.error?.code === 'PROVIDER_NOT_FOUND',
+      JSON.stringify(unknownProviderBody)
     );
 
     // 5. Persistence (Phase 3), end to end against the built server.
@@ -511,7 +549,12 @@ async function main() {
         const res = await afetch(`${baseUrl}/api/generations`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ conversationId: id, model: 'Mock Model', content }),
+          body: JSON.stringify({
+            conversationId: id,
+            providerId: group.providerId,
+            model: 'Mock Model',
+            content,
+          }),
         });
         return { status: res.status, body: await res.json() };
       },

@@ -65,6 +65,66 @@ describe('LlamaCppProvider.listModels', () => {
     }
   });
 
+  describe('unexpected model list shapes', () => {
+    it('rejects a body that is not a model list', async () => {
+      for (const payload of [
+        {},
+        { data: null },
+        { data: 'not an array' },
+        { data: { id: 'not-an-array' } },
+        [],
+        'plain text',
+      ]) {
+        const p = await provider({ modelsPayload: payload });
+        await expect(p.listModels(), JSON.stringify(payload)).rejects.toMatchObject({
+          code: 'PROVIDER_ERROR',
+        });
+        await mock?.close();
+        mock = undefined;
+      }
+    });
+
+    it('rejects a body that is not valid JSON at all', async () => {
+      const p = await provider({ modelsPayload: '{ this is not json' });
+
+      await expect(p.listModels()).rejects.toMatchObject({ code: 'PROVIDER_ERROR' });
+    });
+
+    it('skips individual entries that have no usable id, keeping the rest', async () => {
+      // A provider that adds a field we do not understand must not break
+      // discovery; only an entry with no id is unusable.
+      const p = await provider({
+        modelsPayload: {
+          object: 'list',
+          data: [
+            { id: 'good-one', architecture: { input_modalities: ['text'] } },
+            { id: '' },
+            { id: 42 },
+            { noIdAtAll: true },
+            null,
+            { id: 'good-two', surprising_new_field: { nested: true } },
+          ],
+        },
+      });
+
+      const models = await p.listModels();
+
+      expect(models.map((m) => m.id)).toEqual(['good-one', 'good-two']);
+      // An entry with no declared modalities still gets a sane default.
+      expect(models[1]?.inputModalities).toEqual(['text']);
+    });
+
+    it('ignores modality values it does not recognise', async () => {
+      const p = await provider({
+        modelsPayload: {
+          data: [{ id: 'm', architecture: { input_modalities: ['text', 'hologram', 7, null] } }],
+        },
+      });
+
+      expect((await p.listModels())[0]?.inputModalities).toEqual(['text']);
+    });
+  });
+
   it('preserves model ids containing spaces', async () => {
     const p = await provider({ models: ['Qwen Max', 'North Mini'] });
 

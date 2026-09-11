@@ -3,7 +3,7 @@ import { JSON_BODY_LIMIT } from './config.ts';
 import type { GenerationManager } from './generation/manager.ts';
 import type { Logger } from './logger.ts';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.ts';
-import type { Provider } from './provider/types.ts';
+import type { ProviderHub } from './provider/hub.ts';
 import { generationRouter } from './routes/generations.ts';
 import { healthRouter } from './routes/health.ts';
 import { conversationRouter } from './routes/conversations.ts';
@@ -19,7 +19,7 @@ import type { GenerationService } from './generation/service.ts';
 export interface AppOptions {
   logger: Logger;
   /** Omitted in Phase 1-style tests that only exercise health and the error contract. */
-  provider?: Provider;
+  hub?: ProviderHub;
   manager?: GenerationManager;
   store?: ConversationStore;
   index?: ChatIndex;
@@ -39,7 +39,7 @@ export interface AppOptions {
  */
 export function createApp({
   logger,
-  provider,
+  hub,
   manager,
   store,
   index,
@@ -74,8 +74,8 @@ export function createApp({
     app.use('/api', conversationRouter({ store, index }));
   }
 
-  if (provider !== undefined && manager !== undefined && service !== undefined) {
-    app.use('/api', generationRouter({ manager, provider, service }));
+  if (hub !== undefined && manager !== undefined && service !== undefined) {
+    app.use('/api', generationRouter({ manager, hub, service }));
   }
 
   app.use(notFoundHandler());

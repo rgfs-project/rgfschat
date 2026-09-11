@@ -10,6 +10,9 @@ import { GenerationManager } from '../generation/manager.ts';
 import { GenerationService } from '../generation/service.ts';
 import { createLogger } from '../logger.ts';
 import { LlamaCppProvider } from '../provider/llamacpp.ts';
+import { ProviderHub } from '../provider/hub.ts';
+import { DEFAULT_HOST_POLICY } from '../provider/ssrf.ts';
+import { EchoProvider } from '../provider/echoProvider.ts';
 import { startMockProvider, type MockProvider } from '../provider/mockServer.ts';
 import { ConversationStore } from './conversations.ts';
 import { ChatIndex, type ChatIndexEntry } from './index.ts';
@@ -41,6 +44,7 @@ let index: ChatIndex;
 let service: GenerationService;
 let manager: GenerationManager;
 let mock: MockProvider | undefined;
+let hub: ProviderHub;
 let server: Server | undefined;
 let base: string;
 
@@ -57,11 +61,28 @@ async function boot(options: Parameters<typeof startMockProvider>[0] = {}): Prom
     logger
   );
   manager = new GenerationManager({ provider, logger, maxOutputTokens: 128 });
+  hub = new ProviderHub({
+    logger,
+    policy: DEFAULT_HOST_POLICY,
+    defaultContextTokens: 8_192,
+    maxOutputTokens: 128,
+    factory: () => provider,
+  });
+  hub.setProviders([
+    {
+      id: 'local',
+      name: 'Local',
+      kind: 'openai-compatible',
+      baseUrl: mock?.url ?? 'http://127.0.0.1:1',
+      timeoutMs: 5_000,
+      capabilities: {},
+    },
+  ]);
   service = new GenerationService({
     store,
     index,
     manager,
-    provider,
+    hub,
     logger,
     defaultContextTokens: 8_192,
     maxOutputTokens: 128,
@@ -82,7 +103,7 @@ async function boot(options: Parameters<typeof startMockProvider>[0] = {}): Prom
 
   const app = createApp({
     logger,
-    provider,
+    hub,
     manager,
     store,
     index,
@@ -167,15 +188,15 @@ const api = {
     const res = await afetch(`${base}/api/generations/regenerate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ conversationId, model }),
+      body: JSON.stringify({ conversationId, providerId: 'local', model }),
     });
     return { status: res.status, body: (await res.json()) as Record<string, string> };
   },
-  async send(conversationId: string, content: string, model = 'GPT') {
+  async send(conversationId: string, content: string, model = 'GPT', providerId = 'local') {
     const res = await afetch(`${base}/api/generations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ conversationId, model, content }),
+      body: JSON.stringify({ conversationId, providerId, model, content }),
     });
     return { status: res.status, body: (await res.json()) as Record<string, string> };
   },
@@ -335,7 +356,7 @@ describe('generation persistence', () => {
     expect(assistants).toHaveLength(1);
     expect(assistants[0]).toMatchObject({
       status: 'complete',
-      provider: 'llamacpp',
+      provider: 'local',
       model: 'GPT',
       reasoning: 'thinking',
       body: 'Hi there',
@@ -426,17 +447,34 @@ describe('generation persistence', () => {
       logger
     );
     manager = new GenerationManager({ provider, logger, maxOutputTokens: 128 });
+    hub = new ProviderHub({
+      logger,
+      policy: DEFAULT_HOST_POLICY,
+      defaultContextTokens: 8_192,
+      maxOutputTokens: 128,
+      factory: () => provider,
+    });
+    hub.setProviders([
+      {
+        id: 'local',
+        name: 'Local',
+        kind: 'openai-compatible',
+        baseUrl: mock?.url ?? 'http://127.0.0.1:1',
+        timeoutMs: 5_000,
+        capabilities: {},
+      },
+    ]);
     service = new GenerationService({
       store,
       index,
       manager,
-      provider,
+      hub,
       logger,
       defaultContextTokens: 8_192,
       maxOutputTokens: 128,
     });
 
-    await service.start(USER, id, 'GPT', 'a later question');
+    await service.start(USER, id, 'local', 'GPT', 'a later question');
     await service.settled(USER, id);
 
     expect((await store.load(USER, id)).title).toBe('the original question');
@@ -689,5 +727,158 @@ describe('message editing, deletion, and regeneration', () => {
 
     expect((await api.editMessage(id, '../../etc/passwd', 'x')).status).toBe(404);
     expect((await api.deleteMessage(id, 'not-a-uuid')).status).toBe(404);
+  });
+});
+
+describe('conversations stay provider independent (contracts §4)', () => {
+  /** Two providers with distinct models, both reachable from one conversation. */
+  async function bootTwoProviders(): Promise<void> {
+    const alpha = new EchoProvider({
+      name: 'alpha',
+      models: [{ id: 'alpha-1', inputModalities: ['text'], loaded: true }],
+      reply: () => ({ content: 'from alpha' }),
+    });
+    const beta = new EchoProvider({
+      name: 'beta',
+      models: [{ id: 'beta-1', inputModalities: ['text'], loaded: true }],
+      reply: () => ({ content: 'from beta' }),
+    });
+
+    manager = new GenerationManager({ logger, maxOutputTokens: 128 });
+    hub = new ProviderHub({
+      logger,
+      policy: DEFAULT_HOST_POLICY,
+      defaultContextTokens: 8_192,
+      maxOutputTokens: 128,
+      factory: (config) => (config.id === 'alpha' ? alpha : beta),
+    });
+    hub.setProviders([
+      {
+        id: 'alpha',
+        name: 'Alpha',
+        kind: 'openai-compatible',
+        baseUrl: 'http://127.0.0.1:1',
+        timeoutMs: 5_000,
+        capabilities: {},
+      },
+      {
+        id: 'beta',
+        name: 'Beta',
+        kind: 'openai-compatible',
+        baseUrl: 'http://127.0.0.1:2',
+        timeoutMs: 5_000,
+        capabilities: {},
+      },
+    ]);
+
+    service = new GenerationService({
+      store,
+      index,
+      manager,
+      hub,
+      logger,
+      defaultContextTokens: 8_192,
+      maxOutputTokens: 128,
+    });
+
+    const users = new UserStore({ paths: store.paths, logger, argon2Options: ARGON2_TEST_OPTIONS });
+    const sessions = new SessionManager({
+      paths: store.paths,
+      logger,
+      absoluteTtlMs: 3_600_000,
+      idleTtlMs: 3_600_000,
+    });
+    await users.create({ username: 'tester', password: 'correct horse battery', id: USER });
+
+    const app = createApp({
+      logger,
+      hub,
+      manager,
+      store,
+      index,
+      service,
+      users,
+      sessions,
+      authConfig: { registrationMode: 'closed', absoluteTtlMs: 3_600_000, idleTtlMs: 3_600_000 },
+    });
+    server = app.listen(0, '127.0.0.1');
+    await new Promise<void>((resolve) => server?.once('listening', resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    client = await signIn(base, sessions, USER);
+  }
+
+  it('records the provider and model that actually produced each turn', async () => {
+    await bootTwoProviders();
+    const { body } = await api.create('Mixed providers');
+    const id = body.id as string;
+
+    const first = await api.send(id, 'first question', 'alpha-1', 'alpha');
+    expect(first.status, JSON.stringify(first.body)).toBe(202);
+    await service.settled(USER, id);
+    const second = await api.send(id, 'second question', 'beta-1', 'beta');
+    expect(second.status, JSON.stringify(second.body)).toBe(202);
+    await service.settled(USER, id);
+
+    const conversation = await store.load(USER, id);
+    const assistants = conversation.messages.filter((m) => m.type === 'assistant');
+
+    expect(assistants).toHaveLength(2);
+    expect(assistants[0]).toMatchObject({
+      provider: 'alpha',
+      model: 'alpha-1',
+      body: 'from alpha',
+    });
+    expect(assistants[1]).toMatchObject({ provider: 'beta', model: 'beta-1', body: 'from beta' });
+  });
+
+  it('INV-18: refuses a model that belongs to the other provider', async () => {
+    await bootTwoProviders();
+    const { body } = await api.create();
+    const id = body.id as string;
+
+    // alpha-1 is real, but not on beta. The browser saying so is not enough.
+    const wrong = await api.send(id, 'hello', 'alpha-1', 'beta');
+    expect(wrong.status).toBe(400);
+    expect(wrong.body).toMatchObject({ error: { code: 'MODEL_NOT_FOUND' } });
+
+    const unknownProvider = await api.send(id, 'hello', 'alpha-1', 'ghost');
+    expect(unknownProvider.status).toBe(400);
+    expect(unknownProvider.body).toMatchObject({ error: { code: 'PROVIDER_NOT_FOUND' } });
+  });
+
+  it('removing a provider leaves existing conversations readable and intact', async () => {
+    await bootTwoProviders();
+    const { body } = await api.create('Survives removal');
+    const id = body.id as string;
+
+    const sent = await api.send(id, 'answered by beta', 'beta-1', 'beta');
+    expect(sent.status, JSON.stringify(sent.body)).toBe(202);
+    await service.settled(USER, id);
+
+    const before = await readFile(paths.conversationFile(USER, id), 'utf8');
+
+    // Beta disappears from configuration entirely.
+    hub.setProviders([
+      {
+        id: 'alpha',
+        name: 'Alpha',
+        kind: 'openai-compatible',
+        baseUrl: 'http://127.0.0.1:1',
+        timeoutMs: 5_000,
+        capabilities: {},
+      },
+    ]);
+
+    // The file is untouched, still names beta, and still loads.
+    expect(await readFile(paths.conversationFile(USER, id), 'utf8')).toBe(before);
+    const loaded = await store.load(USER, id);
+    expect(loaded.messages.filter((m) => m.type === 'assistant')[0]).toMatchObject({
+      provider: 'beta',
+    });
+    expect((await api.get(id)).status).toBe(200);
+
+    // It just cannot be selected for a new generation any more.
+    const attempt = await api.send(id, 'again', 'beta-1', 'beta');
+    expect(attempt.status).toBe(400);
   });
 });

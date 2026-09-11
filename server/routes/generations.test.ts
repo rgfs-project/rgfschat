@@ -9,6 +9,8 @@ import { createApp } from '../app.ts';
 import { GenerationManager } from '../generation/manager.ts';
 import { createLogger } from '../logger.ts';
 import { LlamaCppProvider } from '../provider/llamacpp.ts';
+import { ProviderHub } from '../provider/hub.ts';
+import { DEFAULT_HOST_POLICY } from '../provider/ssrf.ts';
 import {
   startMockProvider,
   type MockProvider,
@@ -44,6 +46,7 @@ let manager: GenerationManager | undefined;
 let dataDir: string | undefined;
 let store: ConversationStore | undefined;
 let service: GenerationService | undefined;
+let hub: ProviderHub;
 
 afterEach(async () => {
   // Generation output is persisted after the terminal state, so removing the
@@ -81,6 +84,23 @@ async function boot(options: MockProviderOptions = {}, apiKey?: string): Promise
     logger
   );
   manager = new GenerationManager({ provider, logger, maxOutputTokens: 128 });
+  hub = new ProviderHub({
+    logger,
+    policy: DEFAULT_HOST_POLICY,
+    defaultContextTokens: 8_192,
+    maxOutputTokens: 128,
+    factory: () => provider,
+  });
+  hub.setProviders([
+    {
+      id: 'local',
+      name: 'Local',
+      kind: 'openai-compatible',
+      baseUrl: mock?.url ?? 'http://127.0.0.1:1',
+      timeoutMs: 5_000,
+      capabilities: {},
+    },
+  ]);
 
   dataDir = await mkdtemp(join(tmpdir(), 'workspace-gen-'));
   store = new ConversationStore({ paths: new StoragePaths(dataDir), logger });
@@ -90,7 +110,7 @@ async function boot(options: MockProviderOptions = {}, apiKey?: string): Promise
     store,
     index,
     manager,
-    provider,
+    hub,
     logger,
     defaultContextTokens: 8_192,
     maxOutputTokens: 128,
@@ -111,7 +131,7 @@ async function boot(options: MockProviderOptions = {}, apiKey?: string): Promise
 
   const app = createApp({
     logger,
-    provider,
+    hub,
     manager,
     store,
     index,
@@ -144,7 +164,7 @@ async function startGeneration(base: string, model = 'GPT', conversationId?: str
   const response = await afetch(`${base}/api/generations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ conversationId: id, model, content: 'hi' }),
+    body: JSON.stringify({ conversationId: id, providerId: 'local', model, content: 'hi' }),
   });
   return { status: response.status, body: (await response.json()) as Record<string, string> };
 }
@@ -214,10 +234,14 @@ describe('GET /api/models', () => {
     const base = await boot();
 
     const response = await afetch(`${base}/api/models`);
-    const body = (await response.json()) as { models: unknown[] };
+    const body = (await response.json()) as {
+      providers: { providerId: string; models: unknown[] }[];
+    };
 
     expect(response.status).toBe(200);
-    expect(body.models).toHaveLength(2);
+    expect(body.providers).toHaveLength(1);
+    expect(body.providers[0]?.providerId).toBe('local');
+    expect(body.providers[0]?.models).toHaveLength(2);
   });
 
   it('INV-04: never exposes credentials or raw provider payloads', async () => {
@@ -254,7 +278,12 @@ describe('POST /api/generations', () => {
     const response = await afetch(`${base}/api/generations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ conversationId, model: 'no-such-model', content: 'hi' }),
+      body: JSON.stringify({
+        conversationId,
+        providerId: 'local',
+        model: 'no-such-model',
+        content: 'hi',
+      }),
     });
     const body = (await response.json()) as { error: { code: string } };
 
@@ -270,7 +299,13 @@ describe('POST /api/generations', () => {
     const extra = await afetch(`${base}/api/generations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ conversationId, model: 'GPT', content: 'hi', temperature: 0.9 }),
+      body: JSON.stringify({
+        conversationId,
+        providerId: 'local',
+        model: 'GPT',
+        content: 'hi',
+        temperature: 0.9,
+      }),
     });
     expect(extra.status).toBe(400);
     expect(((await extra.json()) as { error: { code: string } }).error.code).toBe('VALIDATION');
@@ -281,6 +316,7 @@ describe('POST /api/generations', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         conversationId,
+        providerId: 'local',
         model: 'GPT',
         messages: [{ role: 'user', content: 'hi' }],
       }),

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Pencil, Plus, RefreshCw, Square, Trash2, X } from 'lucide-react';
 import type { Message } from '@shared/conversation.ts';
-import type { ModelDto } from '@shared/generation.ts';
 import {
   ApiError,
   cancelGeneration,
@@ -16,8 +15,41 @@ import {
   renameConversation,
   startGeneration,
   type ConversationSummary,
+  type ProviderModelGroup,
 } from './api.ts';
 import { useGeneration } from './useGeneration.ts';
+
+/**
+ * A `<select>` value is a single string, but a model is the pair
+ * `(providerId, modelId)`. They are joined with a NUL, which cannot appear in
+ * either half, so the pair survives the round trip without being parsed apart
+ * by guesswork — model ids are opaque and may contain anything else.
+ */
+const PAIR_SEPARATOR = '\u0000';
+
+function toSelection(providerId: string, modelId: string): string {
+  return `${providerId}${PAIR_SEPARATOR}${modelId}`;
+}
+
+function splitSelection(value: string): { providerId: string; model: string } | null {
+  const at = value.indexOf(PAIR_SEPARATOR);
+  if (at === -1) return null;
+  return { providerId: value.slice(0, at), model: value.slice(at + 1) };
+}
+
+/** Prefers a model the provider already has resident, else the first available. */
+function defaultSelection(groups: ProviderModelGroup[]): string {
+  for (const group of groups) {
+    if (group.status !== 'ready') continue;
+    const loaded = group.models.find((model) => model.loaded);
+    if (loaded !== undefined) return toSelection(group.providerId, loaded.id);
+  }
+  for (const group of groups) {
+    const first = group.models[0];
+    if (first !== undefined) return toSelection(group.providerId, first.id);
+  }
+  return '';
+}
 
 /** An in-flight generation survives a reload, so its id is parked in storage. */
 const ACTIVE_KEY = 'workspace.activeGeneration';
@@ -40,8 +72,9 @@ function writeStored(key: string, value: string | null): void {
 }
 
 export function App(): React.JSX.Element {
-  const [models, setModels] = useState<ModelDto[]>([]);
-  const [model, setModel] = useState('');
+  const [groups, setGroups] = useState<ProviderModelGroup[]>([]);
+  /** A model is the pair, encoded as `providerId\u0000modelId` for the <select>. */
+  const [selection, setSelection] = useState('');
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -107,8 +140,8 @@ export function App(): React.JSX.Element {
     fetchModels()
       .then((list) => {
         if (controller.signal.aborted) return;
-        setModels(list);
-        setModel((current) => current || (list.find((m) => m.loaded) ?? list[0])?.id || '');
+        setGroups(list);
+        setSelection((current) => (current !== '' ? current : defaultSelection(list)));
       })
       .catch(() => setError('Could not load models.'));
 
@@ -190,7 +223,7 @@ export function App(): React.JSX.Element {
 
   const send = useCallback(async () => {
     const text = prompt.trim();
-    if (text === '' || model === '' || busy || currentId === null) return;
+    if (text === '' || selection === '' || busy || currentId === null) return;
 
     setError(null);
     setPrompt('');
@@ -198,8 +231,11 @@ export function App(): React.JSX.Element {
     // request resolves, and the reload after the generation settles replaces it.
     setMessages((prev) => [...prev, { type: 'user', id: `pending-${Date.now()}`, body: text }]);
 
+    const pair = splitSelection(selection);
+    if (pair === null) return;
+
     try {
-      const accepted = await startGeneration(currentId, model, text);
+      const accepted = await startGeneration(currentId, pair.providerId, pair.model, text);
       writeStored(ACTIVE_KEY, accepted.generationId);
       setAwaitingMessageId(accepted.assistantMessageId);
       setGenerationId(accepted.generationId);
@@ -207,7 +243,7 @@ export function App(): React.JSX.Element {
       setError(err instanceof ApiError ? err.message : 'Could not start the generation.');
       void openConversation(currentId);
     }
-  }, [prompt, model, busy, currentId, openConversation]);
+  }, [prompt, selection, busy, currentId, openConversation]);
 
   const onEditSave = useCallback(async () => {
     if (currentId === null || editingId === null) return;
@@ -248,11 +284,14 @@ export function App(): React.JSX.Element {
   );
 
   const onRegenerate = useCallback(async () => {
-    if (currentId === null || model === '' || busy) return;
+    if (currentId === null || selection === '' || busy) return;
+
+    const pair = splitSelection(selection);
+    if (pair === null) return;
 
     setError(null);
     try {
-      const accepted = await regenerate(currentId, model);
+      const accepted = await regenerate(currentId, pair.providerId, pair.model);
       writeStored(ACTIVE_KEY, accepted.generationId);
       setAwaitingMessageId(accepted.assistantMessageId);
       setGenerationId(accepted.generationId);
@@ -261,7 +300,7 @@ export function App(): React.JSX.Element {
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not regenerate.');
     }
-  }, [currentId, model, busy]);
+  }, [currentId, selection, busy]);
 
   const stop = useCallback(async () => {
     if (generationId === null) return;
@@ -337,16 +376,35 @@ export function App(): React.JSX.Element {
           <label className="field">
             <span className="sr-only">Model</span>
             <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              disabled={models.length === 0 || busy}
+              value={selection}
+              onChange={(e) => setSelection(e.target.value)}
+              disabled={groups.length === 0 || busy}
             >
-              {models.length === 0 && <option>Loading models…</option>}
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.id}
-                  {m.loaded ? ' ●' : ''}
-                </option>
+              {groups.length === 0 && <option>Loading models…</option>}
+              {groups.map((group) => (
+                <optgroup
+                  key={group.providerId}
+                  label={
+                    group.providerName +
+                    (group.status === 'unavailable' ? ' — unavailable' : '') +
+                    (group.stale ? ' — stale' : '')
+                  }
+                >
+                  {group.models.length === 0 && (
+                    <option disabled value="">
+                      No models
+                    </option>
+                  )}
+                  {group.models.map((m) => (
+                    <option
+                      key={`${group.providerId}/${m.id}`}
+                      value={toSelection(group.providerId, m.id)}
+                    >
+                      {m.id}
+                      {m.loaded ? ' ●' : ''}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
             </select>
           </label>
@@ -505,7 +563,10 @@ export function App(): React.JSX.Element {
               <Square size={14} /> Stop
             </button>
           ) : (
-            <button type="submit" disabled={prompt.trim() === '' || currentId === null}>
+            <button
+              type="submit"
+              disabled={prompt.trim() === '' || currentId === null || selection === ''}
+            >
               Send
             </button>
           )}

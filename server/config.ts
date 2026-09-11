@@ -34,6 +34,23 @@ const envSchema = z.object({
     .min(60_000)
     .default(7 * 24 * 60 * 60 * 1000),
 
+  // SSRF host policy (Phase 5). Private hosts are allowed by default because a
+  // local llama.cpp is the primary use case; metadata ranges are blocked
+  // regardless of this setting.
+  ALLOW_PRIVATE_PROVIDER_HOSTS: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((value) => value === 'true'),
+  PROVIDER_HOST_ALLOWLIST: z
+    .string()
+    .default('')
+    .transform((value) =>
+      value
+        .split(',')
+        .map((host) => host.trim())
+        .filter((host) => host !== '')
+    ),
+
   // Provider (Phase 2). A single llama.cpp endpoint; multi-provider is Phase 5.
   LLAMA_BASE_URL: z.url().default('http://127.0.0.1:8080'),
   LLAMA_API_KEY: z.string().min(1).optional(),
@@ -52,7 +69,14 @@ export interface Config {
   /** Canonical lowercase UUID. Used only by `user:create --adopt-local-data`. */
   localUserId: string;
   auth: AuthConfig;
+  /** Outbound SSRF policy, applied on config load and every request (INV-19). */
+  hostPolicy: HostPolicy;
   provider: ProviderConfig;
+}
+
+export interface HostPolicy {
+  allowPrivateHosts: boolean;
+  hostAllowlist: string[];
 }
 
 export interface AuthConfig {
@@ -101,6 +125,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     REGISTRATION_MODE,
     SESSION_ABSOLUTE_TTL_MS,
     SESSION_IDLE_TTL_MS,
+    ALLOW_PRIVATE_PROVIDER_HOSTS,
+    PROVIDER_HOST_ALLOWLIST,
     LLAMA_BASE_URL,
     LLAMA_API_KEY,
     PROVIDER_TIMEOUT_MS,
@@ -119,6 +145,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       registrationMode: REGISTRATION_MODE,
       absoluteTtlMs: SESSION_ABSOLUTE_TTL_MS,
       idleTtlMs: SESSION_IDLE_TTL_MS,
+    },
+    hostPolicy: {
+      allowPrivateHosts: ALLOW_PRIVATE_PROVIDER_HOSTS,
+      hostAllowlist: PROVIDER_HOST_ALLOWLIST,
     },
     provider: {
       baseUrl: LLAMA_BASE_URL.replace(/\/+$/, ''),

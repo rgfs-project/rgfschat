@@ -150,7 +150,12 @@ export class LlamaCppProvider implements Provider {
     // Explicit mapping: everything not named here is dropped, including
     // `status.args` and `status.preset` (INV-04).
     const models: ModelDto[] = [];
-    for (const raw of data as Record<string, unknown>[]) {
+    for (const candidate of data as unknown[]) {
+      // A provider is free to return anything; a null or non-object entry must
+      // be skipped rather than crash discovery for every other model.
+      if (typeof candidate !== 'object' || candidate === null) continue;
+      const raw = candidate as Record<string, unknown>;
+
       const id = raw['id'];
       if (typeof id !== 'string' || id.length === 0) continue;
 

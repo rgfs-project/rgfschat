@@ -29,6 +29,8 @@ export interface MockProviderOptions {
   hang?: boolean;
   /** Require this bearer token; respond 401 otherwise. */
   requireApiKey?: string;
+  /** Replaces the whole /v1/models body, to exercise malformed shapes. */
+  modelsPayload?: unknown;
 }
 
 export interface MockProvider {
@@ -52,6 +54,7 @@ export async function startMockProvider(options: MockProviderOptions = {}): Prom
     errorMidStream = false,
     hang = false,
     requireApiKey,
+    modelsPayload,
   } = options;
 
   const requests: MockProvider['requests'] = [];
@@ -87,6 +90,12 @@ export async function startMockProvider(options: MockProviderOptions = {}): Prom
 
       if (req.url?.startsWith('/v1/models') === true) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
+        if (modelsPayload !== undefined) {
+          res.end(
+            typeof modelsPayload === 'string' ? modelsPayload : JSON.stringify(modelsPayload)
+          );
+          return;
+        }
         res.end(
           JSON.stringify({
             object: 'list',

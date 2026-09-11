@@ -1,5 +1,5 @@
 import type { HealthDto } from '@shared/api.ts';
-import type { GenerationAcceptedDto, GenerationSnapshotDto, ModelDto } from '@shared/generation.ts';
+import type { GenerationAcceptedDto, GenerationSnapshotDto } from '@shared/generation.ts';
 import type { Message } from '@shared/conversation.ts';
 
 export interface ConversationSummary {
@@ -90,21 +90,35 @@ export function fetchHealth(): Promise<HealthDto> {
   return request<HealthDto>('/api/health');
 }
 
-export async function fetchModels(): Promise<ModelDto[]> {
-  const { models } = await request<{ models: ModelDto[] }>('/api/models');
-  return models;
+/** Models grouped by provider, with the flags the selector needs. */
+export interface ProviderModelGroup {
+  providerId: string;
+  providerName: string;
+  status: 'ready' | 'unavailable';
+  /** The list is from an earlier successful fetch; the latest attempt failed. */
+  stale: boolean;
+  models: { id: string; inputModalities: string[]; loaded: boolean }[];
 }
 
-/** The server assembles history from storage; only the new message is sent. */
+export async function fetchModels(): Promise<ProviderModelGroup[]> {
+  const { providers } = await request<{ providers: ProviderModelGroup[] }>('/api/models');
+  return providers;
+}
+
+/**
+ * The server assembles history from storage; only the new message is sent.
+ * A model is identified by its `(providerId, model)` pair.
+ */
 export function startGeneration(
   conversationId: string,
+  providerId: string,
   model: string,
   content: string
 ): Promise<GenerationAcceptedDto> {
   return request<GenerationAcceptedDto>('/api/generations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ conversationId, model, content }),
+    body: JSON.stringify({ conversationId, providerId, model, content }),
   });
 }
 
@@ -149,6 +163,7 @@ export async function deleteMessage(
 
 export function regenerate(
   conversationId: string,
+  providerId: string,
   model: string
 ): Promise<{ generationId: string; assistantMessageId: string }> {
   return request<{ generationId: string; assistantMessageId: string }>(
@@ -156,7 +171,7 @@ export function regenerate(
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ conversationId, model }),
+      body: JSON.stringify({ conversationId, providerId, model }),
     }
   );
 }
