@@ -115,6 +115,28 @@ const api = {
     const res = await fetch(`${base}/api/conversations/${id}`, { method: 'DELETE' });
     return res.status;
   },
+  async editMessage(conversationId: string, messageId: string, body: string) {
+    const res = await fetch(`${base}/api/conversations/${conversationId}/messages/${messageId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    });
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  },
+  async deleteMessage(conversationId: string, messageId: string) {
+    const res = await fetch(`${base}/api/conversations/${conversationId}/messages/${messageId}`, {
+      method: 'DELETE',
+    });
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  },
+  async regenerate(conversationId: string, model = 'GPT') {
+    const res = await fetch(`${base}/api/generations/regenerate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversationId, model }),
+    });
+    return { status: res.status, body: (await res.json()) as Record<string, string> };
+  },
   async send(conversationId: string, content: string, model = 'GPT') {
     const res = await fetch(`${base}/api/generations`, {
       method: 'POST',
@@ -378,5 +400,139 @@ describe('generation persistence', () => {
     expect(loaded.messages.filter((m) => m.type === 'user')[0]?.body).toBe('remember me');
     expect(loaded.messages.filter((m) => m.type === 'assistant')).toHaveLength(1);
     expect((await freshIndex.list(USER)).map((e) => e.id)).toEqual([id]);
+  });
+});
+
+describe('message editing, deletion, and regeneration', () => {
+  /** Builds a conversation with two complete turns. */
+  async function twoTurns(): Promise<{ id: string; messages: { id: string; type: string }[] }> {
+    const { body } = await api.create('Fixed title');
+    const id = body.id as string;
+    await api.send(id, 'first question');
+    await service.settled(USER, id);
+    await api.send(id, 'second question');
+    await service.settled(USER, id);
+
+    const loaded = await store.load(USER, id);
+    return { id, messages: loaded.messages.map((m) => ({ id: m.id, type: m.type })) };
+  }
+
+  it('edits a message body and leaves everything else untouched', async () => {
+    await boot();
+    const { id, messages } = await twoTurns();
+    const target = messages[0] as { id: string };
+
+    const before = await store.load(USER, id);
+    const res = await api.editMessage(id, target.id, 'an edited question');
+
+    expect(res.status).toBe(200);
+    const after = await store.load(USER, id);
+    expect(after.messages[0]?.body).toBe('an edited question');
+    expect(after.messages).toHaveLength(before.messages.length);
+    // Ids, types, and recorded assistant metadata are records of what happened.
+    expect(after.messages.map((m) => m.id)).toEqual(before.messages.map((m) => m.id));
+    expect(after.messages.map((m) => m.type)).toEqual(before.messages.map((m) => m.type));
+    expect(after.createdAt).toBe(before.createdAt);
+  });
+
+  it('rejects an edit that would empty a message, and unknown fields', async () => {
+    await boot();
+    const { id, messages } = await twoTurns();
+    const target = messages[0] as { id: string };
+
+    expect((await api.editMessage(id, target.id, '')).status).toBe(400);
+
+    const extra = await fetch(`${base}/api/conversations/${id}/messages/${target.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: 'x', type: 'system' }),
+    });
+    expect(extra.status).toBe(400);
+  });
+
+  it('404s editing a message that does not exist', async () => {
+    await boot();
+    const { id } = await twoTurns();
+
+    expect((await api.editMessage(id, randomUUID(), 'nope')).status).toBe(404);
+  });
+
+  it('deleting a message removes everything after it', async () => {
+    await boot();
+    const { id, messages } = await twoTurns();
+    expect(messages).toHaveLength(4);
+
+    // Delete the second user message: it and its answer must both go.
+    const target = messages[2] as { id: string };
+    const res = await api.deleteMessage(id, target.id);
+
+    expect(res.status).toBe(200);
+    const after = await store.load(USER, id);
+    expect(after.messages).toHaveLength(2);
+    expect(after.messages.map((m) => m.type)).toEqual(['user', 'assistant']);
+  });
+
+  it('regenerate replaces the last assistant turn rather than appending one', async () => {
+    await boot();
+    const { id, messages } = await twoTurns();
+    const originalAssistantId = messages[3]?.id;
+
+    const res = await api.regenerate(id);
+    expect(res.status).toBe(202);
+    await service.settled(USER, id);
+
+    const after = await store.load(USER, id);
+    expect(after.messages).toHaveLength(4);
+    expect(after.messages.at(-1)?.type).toBe('assistant');
+    // A new assistant message, not the old one kept alongside a new one.
+    expect(after.messages.at(-1)?.id).not.toBe(originalAssistantId);
+    expect(after.messages.filter((m) => m.type === 'assistant')).toHaveLength(2);
+  });
+
+  it('regenerate does not re-title a conversation', async () => {
+    await boot();
+    const { id } = await twoTurns();
+
+    await api.regenerate(id);
+    await service.settled(USER, id);
+
+    expect((await store.load(USER, id)).title).toBe('Fixed title');
+  });
+
+  it('refuses to regenerate when there is no user message to answer', async () => {
+    await boot();
+    const { body } = await api.create();
+    const id = body.id as string;
+
+    expect((await api.regenerate(id)).status).toBe(400);
+  });
+
+  it('INV-13: refuses to regenerate while a generation is in flight', async () => {
+    await boot({ chunkDelayMs: 60 });
+    const { body } = await api.create();
+    const id = body.id as string;
+    await api.send(id, 'first');
+
+    expect((await api.regenerate(id)).status).toBe(409);
+    await service.settled(USER, id);
+  });
+
+  it('INV-10: refuses to edit or delete a message in a malformed conversation', async () => {
+    await boot();
+    const bad = randomUUID();
+    const corrupt = '---\nformatVersion: 9\n---\n';
+    await writeFile(paths.conversationFile(USER, bad), corrupt);
+
+    expect((await api.editMessage(bad, randomUUID(), 'x')).status).toBe(422);
+    expect((await api.deleteMessage(bad, randomUUID())).status).toBe(422);
+    expect(await readFile(paths.conversationFile(USER, bad), 'utf8')).toBe(corrupt);
+  });
+
+  it('INV-12: rejects a non-canonical message id without touching the filesystem', async () => {
+    await boot();
+    const { id } = await twoTurns();
+
+    expect((await api.editMessage(id, '../../etc/passwd', 'x')).status).toBe(404);
+    expect((await api.deleteMessage(id, 'not-a-uuid')).status).toBe(404);
   });
 });

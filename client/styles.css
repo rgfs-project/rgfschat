@@ -378,3 +378,65 @@ button.icon:hover {
   font-size: 0.875rem;
   padding: 0.5rem 0.625rem;
 }
+
+/* --- message actions --- */
+
+.msg__role {
+  justify-content: space-between;
+}
+
+.msg__actions {
+  display: flex;
+  gap: 0.125rem;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.msg:hover .msg__actions,
+.msg:focus-within .msg__actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  /* No hover on touch, so actions stay visible. */
+  .msg__actions {
+    opacity: 1;
+  }
+}
+
+button.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+}
+
+.msg__edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.msg__edit textarea {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.625rem;
+  font: inherit;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.msg__edit-actions {
+  display: flex;
+  gap: 0.25rem;
+  justify-content: flex-end;
+}
+
+button.danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}

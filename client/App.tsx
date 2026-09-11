@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Check, Pencil, Plus, RefreshCw, Square, Trash2, X } from 'lucide-react';
 import type { Message } from '@shared/conversation.ts';
 import type { ModelDto } from '@shared/generation.ts';
 import {
@@ -6,9 +7,12 @@ import {
   cancelGeneration,
   createConversation,
   deleteConversation,
+  deleteMessage,
+  editMessage,
   fetchModels,
   getConversation,
   listConversations,
+  regenerate,
   renameConversation,
   startGeneration,
   type ConversationSummary,
@@ -46,6 +50,9 @@ export function App(): React.JSX.Element {
   /** Id of the assistant message the server will append when the run settles. */
   const [awaitingMessageId, setAwaitingMessageId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Message currently open for inline editing. */
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
 
   const live = useGeneration(generationId);
   const busy = live.state === 'pending' || live.state === 'streaming';
@@ -202,6 +209,53 @@ export function App(): React.JSX.Element {
     }
   }, [prompt, model, busy, currentId, openConversation]);
 
+  const onEditSave = useCallback(async () => {
+    if (currentId === null || editingId === null) return;
+    const body = draft.trim();
+    if (body === '') return;
+
+    try {
+      const detail = await editMessage(currentId, editingId, body);
+      setMessages(detail.messages);
+      setEditingId(null);
+      await refreshList();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not edit the message.');
+    }
+  }, [currentId, editingId, draft, refreshList]);
+
+  const onDeleteMessage = useCallback(
+    async (messageId: string) => {
+      if (currentId === null) return;
+      if (!window.confirm('Delete this message and everything after it?')) return;
+
+      try {
+        const detail = await deleteMessage(currentId, messageId);
+        setMessages(detail.messages);
+        await refreshList();
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : 'Could not delete the message.');
+      }
+    },
+    [currentId, refreshList]
+  );
+
+  const onRegenerate = useCallback(async () => {
+    if (currentId === null || model === '' || busy) return;
+
+    setError(null);
+    try {
+      const accepted = await regenerate(currentId, model);
+      writeStored(ACTIVE_KEY, accepted.generationId);
+      setAwaitingMessageId(accepted.assistantMessageId);
+      setGenerationId(accepted.generationId);
+      // The old assistant turn is already gone server-side.
+      setMessages((prev) => (prev.at(-1)?.type === 'assistant' ? prev.slice(0, -1) : prev));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not regenerate.');
+    }
+  }, [currentId, model, busy]);
+
   const stop = useCallback(async () => {
     if (generationId === null) return;
     try {
@@ -216,8 +270,13 @@ export function App(): React.JSX.Element {
       <aside className="sidebar">
         <div className="sidebar__head">
           <h1>Workspace</h1>
-          <button type="button" onClick={() => void onCreate()}>
-            New
+          <button
+            type="button"
+            className="icon"
+            title="New conversation"
+            onClick={() => void onCreate()}
+          >
+            <Plus size={18} />
           </button>
         </div>
 
@@ -245,18 +304,20 @@ export function App(): React.JSX.Element {
                     type="button"
                     className="icon"
                     title="Rename"
+                    aria-label="Rename conversation"
                     onClick={() => void onRename(conversation.id, conversation.title)}
                   >
-                    ✎
+                    <Pencil size={14} />
                   </button>
                 )}
                 <button
                   type="button"
                   className="icon"
                   title="Delete"
+                  aria-label="Delete conversation"
                   onClick={() => void onDelete(conversation.id)}
                 >
-                  ✕
+                  <Trash2 size={14} />
                 </button>
               </span>
             </li>
@@ -296,18 +357,101 @@ export function App(): React.JSX.Element {
           )}
 
           {currentId !== null &&
-            messages.map((message, i) => (
-              <article key={`${message.id}-${i}`} className={`msg msg--${message.type}`}>
-                <div className="msg__role">{message.type}</div>
-                {message.type === 'assistant' && message.reasoning !== undefined && (
-                  <details className="reasoning">
-                    <summary>Reasoning</summary>
-                    <div className="reasoning__body">{message.reasoning}</div>
-                  </details>
-                )}
-                <div className="msg__body">{message.body}</div>
-              </article>
-            ))}
+            messages.map((message, i) => {
+              const isLast = i === messages.length - 1;
+              const editable = !message.id.startsWith('pending-');
+
+              return (
+                <article key={`${message.id}-${i}`} className={`msg msg--${message.type}`}>
+                  <div className="msg__role">
+                    <span>{message.type}</span>
+
+                    {editable && !busy && (
+                      <span className="msg__actions">
+                        {message.type !== 'assistant' && (
+                          <button
+                            type="button"
+                            className="icon"
+                            title="Edit"
+                            aria-label="Edit message"
+                            onClick={() => {
+                              setEditingId(message.id);
+                              setDraft(message.body);
+                            }}
+                          >
+                            <Pencil size={14} />
+                          </button>
+                        )}
+                        {message.type === 'assistant' && isLast && (
+                          <button
+                            type="button"
+                            className="icon"
+                            title="Regenerate"
+                            aria-label="Regenerate response"
+                            onClick={() => void onRegenerate()}
+                          >
+                            <RefreshCw size={14} />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="icon"
+                          title="Delete this message and everything after it"
+                          aria-label="Delete message"
+                          onClick={() => void onDeleteMessage(message.id)}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </span>
+                    )}
+                  </div>
+
+                  {message.type === 'assistant' && message.reasoning !== undefined && (
+                    <details className="reasoning">
+                      <summary>Reasoning</summary>
+                      <div className="reasoning__body">{message.reasoning}</div>
+                    </details>
+                  )}
+
+                  {editingId === message.id ? (
+                    <div className="msg__edit">
+                      <textarea
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') setEditingId(null);
+                          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void onEditSave();
+                        }}
+                        rows={3}
+                        autoFocus
+                      />
+                      <div className="msg__edit-actions">
+                        <button
+                          type="button"
+                          className="icon"
+                          title="Save"
+                          aria-label="Save edit"
+                          onClick={() => void onEditSave()}
+                        >
+                          <Check size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon"
+                          title="Cancel"
+                          aria-label="Cancel edit"
+                          onClick={() => setEditingId(null)}
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="msg__body">{message.body}</div>
+                  )}
+                </article>
+              );
+            })}
 
           {busy && (
             <article className="msg msg--assistant">
@@ -351,7 +495,7 @@ export function App(): React.JSX.Element {
           />
           {busy ? (
             <button type="button" className="danger" onClick={() => void stop()}>
-              Stop
+              <Square size={14} /> Stop
             </button>
           ) : (
             <button type="submit" disabled={prompt.trim() === '' || currentId === null}>

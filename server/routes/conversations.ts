@@ -25,6 +25,7 @@ const titleSchema = z
 // a client that sends either is rejected rather than silently ignored.
 const createSchema = z.strictObject({ title: titleSchema.optional() });
 const patchSchema = z.strictObject({ title: titleSchema });
+const editMessageSchema = z.strictObject({ body: z.string().min(1).max(200_000) });
 
 export interface ConversationRoutesOptions {
   store: ConversationStore;
@@ -87,6 +88,45 @@ export function conversationRouter({ store, index, userId }: ConversationRoutesO
     // conversation (contracts §3.3); `titleLocked` is tracked by the generation
     // service, which is the only thing that would otherwise auto-title.
     const updated = await store.update(user, id, (current) => ({ ...current, title }));
+    await index.upsert(user, entryFor(id, updated));
+
+    res.json(toDto(id, updated));
+  });
+
+  /**
+   * Edits a message body.
+   *
+   * Only the body changes: ids, types, and an assistant block's recorded
+   * status/provider/model describe what actually happened and are not rewritten.
+   */
+  router.patch(
+    '/conversations/:id/messages/:messageId',
+    validateBody(editMessageSchema),
+    async (req, res) => {
+      const id = requireId(req.params.id);
+      const messageId = requireId(req.params.messageId);
+      const { body } = req.body as z.infer<typeof editMessageSchema>;
+      const user = userId();
+
+      const updated = await store.editMessageBody(user, id, messageId, body);
+      await index.upsert(user, entryFor(id, updated));
+
+      res.json(toDto(id, updated));
+    }
+  );
+
+  /**
+   * Deletes a message **and everything after it**.
+   *
+   * Removing a turn from the middle would leave the remaining history replying
+   * to something that is no longer there, so a delete truncates forward.
+   */
+  router.delete('/conversations/:id/messages/:messageId', async (req, res) => {
+    const id = requireId(req.params.id);
+    const messageId = requireId(req.params.messageId);
+    const user = userId();
+
+    const updated = await store.deleteMessageAndAfter(user, id, messageId);
     await index.upsert(user, entryFor(id, updated));
 
     res.json(toDto(id, updated));

@@ -146,6 +146,73 @@ export class GenerationService {
     return { generationId, userMessageId: prepared.userMessageId, assistantMessageId };
   }
 
+  /**
+   * Re-runs the last assistant turn.
+   *
+   * The trailing assistant message is dropped first, so the model is asked the
+   * same question rather than being shown its own previous answer and asked to
+   * continue. Everything runs under the conversation lock, so it cannot
+   * interleave with a send (INV-13).
+   */
+  async regenerate(
+    userId: string,
+    conversationId: string,
+    model: string
+  ): Promise<{ generationId: string; assistantMessageId: string }> {
+    const key = conversationKey(userId, conversationId);
+
+    const prepared = await this.#store.locks.run(key, async () => {
+      if (this.#active.has(key)) {
+        throw new AppError(
+          'GENERATION_IN_PROGRESS',
+          'This conversation already has a generation in progress.'
+        );
+      }
+
+      const current = await this.#store.load(userId, conversationId);
+
+      const trimmed =
+        current.messages.at(-1)?.type === 'assistant'
+          ? current.messages.slice(0, -1)
+          : current.messages;
+
+      if (trimmed.at(-1)?.type !== 'user') {
+        throw AppError.validation('There is no user message to regenerate from.');
+      }
+
+      const next = { ...current, messages: trimmed };
+      const prompt = assemblePrompt(next, {
+        contextTokens: this.#provider.contextLength(model) ?? this.#defaultContextTokens,
+        maxOutputTokens: this.#maxOutputTokens,
+      });
+
+      const written = await this.#store.writeUnderLock(userId, conversationId, next);
+      await this.#index.upsert(userId, entryFor(conversationId, written));
+
+      return { prompt, title: written.title };
+    });
+
+    const { generationId, assistantMessageId } = this.#manager.start(
+      model,
+      prepared.prompt.messages
+    );
+    this.#active.set(key, generationId);
+
+    void this.#persistOnTerminal({
+      userId,
+      conversationId,
+      key,
+      generationId,
+      assistantMessageId,
+      model,
+      firstUserMessage: '',
+      // A regenerate never re-titles: the conversation already has its title.
+      hadDefaultTitle: false,
+    });
+
+    return { generationId, assistantMessageId };
+  }
+
   /** Whether a conversation currently has a non-terminal generation. */
   activeGenerationId(userId: string, conversationId: string): string | null {
     return this.#active.get(conversationKey(userId, conversationId)) ?? null;

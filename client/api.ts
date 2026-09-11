@@ -87,6 +87,46 @@ export function startGeneration(
   });
 }
 
+export function editMessage(
+  conversationId: string,
+  messageId: string,
+  body: string
+): Promise<ConversationDetail> {
+  return request<ConversationDetail>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    }
+  );
+}
+
+/** Deletes a message and everything after it. */
+export function deleteMessage(
+  conversationId: string,
+  messageId: string
+): Promise<ConversationDetail> {
+  return request<ConversationDetail>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}`,
+    { method: 'DELETE' }
+  );
+}
+
+export function regenerate(
+  conversationId: string,
+  model: string
+): Promise<{ generationId: string; assistantMessageId: string }> {
+  return request<{ generationId: string; assistantMessageId: string }>(
+    '/api/generations/regenerate',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversationId, model }),
+    }
+  );
+}
+
 export async function listConversations(): Promise<ConversationSummary[]> {
   const { conversations } = await request<{ conversations: ConversationSummary[] }>(
     '/api/conversations'

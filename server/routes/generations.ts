@@ -19,6 +19,12 @@ const createGenerationSchema = z.strictObject({
   content: z.string().min(1).max(200_000),
 });
 
+/** Re-runs the last turn; no new user message is added. */
+const regenerateSchema = z.strictObject({
+  conversationId: z.string().min(1).max(200),
+  model: z.string().min(1).max(200),
+});
+
 export interface GenerationRoutesOptions {
   manager: GenerationManager;
   provider: Provider;
@@ -56,6 +62,19 @@ export function generationRouter({
 
     const dto: GenerationAcceptedDto = result;
     res.status(202).json(dto);
+  });
+
+  router.post('/generations/regenerate', validateBody(regenerateSchema), async (req, res) => {
+    const { conversationId, model } = req.body as z.infer<typeof regenerateSchema>;
+
+    if (!isCanonicalUuid(conversationId)) throw AppError.notFound('Conversation not found.');
+
+    const models = await provider.listModels();
+    if (!models.some((candidate) => candidate.id === model)) {
+      throw new AppError('MODEL_NOT_FOUND', 'The requested model is not available.');
+    }
+
+    res.status(202).json(await service.regenerate(userId(), conversationId, model));
   });
 
   router.get('/generations/:id', (req, res) => {

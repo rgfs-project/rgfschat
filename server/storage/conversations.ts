@@ -210,6 +210,51 @@ export class ConversationStore {
   }
 
   /**
+   * Replaces one message's body under the lock.
+   *
+   * Editing is confined to the body: ids, types, and an assistant block's
+   * status/provider/model are records of what happened and are not rewritten.
+   */
+  async editMessageBody(
+    userId: string,
+    conversationId: string,
+    messageId: string,
+    body: string
+  ): Promise<Conversation> {
+    return this.update(userId, conversationId, (current) => {
+      if (!current.messages.some((message) => message.id === messageId)) {
+        throw AppError.notFound('Message not found.');
+      }
+      return {
+        ...current,
+        messages: current.messages.map((message) =>
+          message.id === messageId ? { ...message, body } : message
+        ),
+      };
+    });
+  }
+
+  /**
+   * Removes a message, and everything after it, under the lock.
+   *
+   * Deleting a turn from the middle would leave the remaining history claiming
+   * a conversation that never happened, so a delete truncates forward. An
+   * assistant block's reasoning travels with it, because reasoning is a field
+   * on that message rather than a separate one.
+   */
+  async deleteMessageAndAfter(
+    userId: string,
+    conversationId: string,
+    messageId: string
+  ): Promise<Conversation> {
+    return this.update(userId, conversationId, (current) => {
+      const at = current.messages.findIndex((message) => message.id === messageId);
+      if (at === -1) throw AppError.notFound('Message not found.');
+      return { ...current, messages: current.messages.slice(0, at) };
+    });
+  }
+
+  /**
    * Deletes the canonical Markdown under the lock. Allowed even when the file
    * is malformed (INV-10). The caller removes the index entry afterwards:
    * Markdown first, so an orphaned index entry is the failure mode rather than
