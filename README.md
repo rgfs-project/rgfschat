@@ -3,7 +3,8 @@
 A self-hosted chat workspace. Conversations are plain Markdown files on disk, generation is
 owned by the server, and the model provider is replaceable.
 
-This repository is built in phases (`.Phases/`). **Phase 2** is complete: the foundation and
+This repository is built in phases against a project contract kept outside the repository.
+**Phase 2** is complete: the foundation and
 HTTP conventions, plus a llama.cpp provider, server-owned generations, and SSE streaming.
 Conversations are not yet persisted — that is Phase 3.
 
@@ -113,13 +114,13 @@ server/     Express 5 API
 shared/     Types used by both, imported as @shared/*
 scripts/    dev, build-server, verify, probe-provider
 docs/       provider-notes.md — observed provider behaviour
-data/       Persistent boundary — git-ignored except .gitkeep
-.Phases/    Phase prompts and the shared contracts
+data/       Persistent boundary — committed empty; contents are never tracked
 ```
 
 ## Architecture intent
 
-The shape of the system is fixed by `.Phases/00-contracts.md`, which every phase defers to.
+The shape of the system is fixed by the project contract (`00-contracts.md`), kept outside
+this repository, which every phase defers to.
 The load-bearing decisions:
 
 - **Markdown is canonical.** Conversations are files a user can read, diff, and back up.

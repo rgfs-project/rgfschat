@@ -1,8 +1,9 @@
 # Architecture
 
-The authoritative specification is [`.Phases/00-contracts.md`](.Phases/00-contracts.md).
+The authoritative specification is the project contract (`00-contracts.md`), which is
+maintained **outside this repository** alongside the phase prompts that drive the build.
 This document records what is **actually built** and where each invariant is enforced.
-If this file and the contracts disagree, the contracts win and the discrepancy is a bug.
+If this file and the contract disagree, the contract wins and the discrepancy is a bug.
 
 Current state: **Phase 2 complete.**
 

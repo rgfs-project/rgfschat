@@ -1,7 +1,7 @@
 /**
  * Canonical error contract (contracts §5).
  *
- * The full code table is defined in `.Phases/00-contracts.md`. Each phase adds
+ * The full code table is defined in the project contract (§5). Each phase adds
  * only the codes it actually uses; Phase 1 introduces the four below.
  */
 export const ERROR_CODES = [

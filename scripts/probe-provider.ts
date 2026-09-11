@@ -2,7 +2,7 @@
 /**
  * Provider probe — verify, do not assume.
  *
- * Phase 2 of `.Phases/` requires that the provider implementation be written
+ * The project contract requires that the provider implementation be written
  * against observed behaviour rather than against what the OpenAI spec or the
  * llama.cpp README imply. This script talks to a live `llama-server` and prints
  * a report; the findings are transcribed into `docs/provider-notes.md`, with

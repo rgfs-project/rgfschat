@@ -5,17 +5,35 @@ node_modules/
 dist/
 coverage/
 
-# Environment
+# Environment — secrets live here and are never committed
 .env
 .env.*
 !.env.example
 
-# Persistent data (contracts §1) — the directory is a boundary, its contents are never committed
+# Persistent data — the directory is a boundary (contracts §1); the folder is
+# committed empty via .gitkeep and none of its runtime contents are ever tracked
 data/*
 !data/.gitkeep
 
-# Editor / OS
-.DS_Store
-*.log
+# Project specification and phase prompts. These drive the build but are not
+# part of the deliverable and must never be published with it.
+.Phases/
+phases/
+
+# Local tool, editor, and workspace configuration — machine-specific
+.claude/
 .vscode/
 .idea/
+*.code-workspace
+
+# Test and automation artifacts
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+*.tmp
+
+# OS / logs
+.DS_Store
+Thumbs.db
+*.log
