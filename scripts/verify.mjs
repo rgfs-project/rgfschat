@@ -21,6 +21,59 @@ const STARTUP_TIMEOUT_MS = 15_000;
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 const PROVIDER_KEY = 'verify-provider-key-do-not-log';
 const LOCAL_USER_ID = '0a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d';
+const ADMIN_PASSWORD = 'verify-admin-passphrase';
+const SESSION_COOKIE = 'workspace_session';
+
+/** Everything below the auth gate needs a session cookie and a CSRF token. */
+let auth = null;
+
+function authHeaders(extra = {}) {
+  if (auth === null) return extra;
+  return { Cookie: `${SESSION_COOKIE}=${auth.token}`, 'X-CSRF-Token': auth.csrf, ...extra };
+}
+
+/** Authenticated fetch: the only way the checks below reach the API. */
+function afetch(url, init = {}) {
+  return fetch(url, { ...init, headers: authHeaders(init.headers ?? {}) });
+}
+
+function cookieValue(setCookie, name) {
+  for (const part of (setCookie ?? '').split(';')) {
+    const eq = part.indexOf('=');
+    if (eq !== -1 && part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim();
+  }
+  return null;
+}
+
+/** Creates an account through the real CLI, with the password on stdin. */
+function createAccount(dataDir, username, extraArgs = []) {
+  const result = spawnSync(
+    'npx',
+    ['tsx', 'server/scripts/createUser.ts', '--username', username, ...extraArgs],
+    {
+      input: `${ADMIN_PASSWORD}\n`,
+      env: { ...process.env, DATA_DIR: dataDir, LOCAL_USER_ID, LOG_LEVEL: 'error' },
+      encoding: 'utf8',
+    }
+  );
+  return result;
+}
+
+async function signIn(baseUrl, username) {
+  const response = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin' },
+    body: JSON.stringify({ username, password: ADMIN_PASSWORD }),
+  });
+  if (!response.ok) return null;
+
+  const body = await response.json();
+  return {
+    token: cookieValue(response.headers.get('set-cookie'), SESSION_COOKIE),
+    csrf: body.csrfToken,
+    userId: body.user.id,
+  };
+}
 
 let failures = 0;
 
@@ -174,7 +227,7 @@ async function startMockProvider({ chunkDelayMs = 0 } = {}) {
 
 /** Reads an SSE stream to its end, returning parsed events and accumulated text. */
 async function readStream(url) {
-  const response = await fetch(url);
+  const response = await afetch(url);
   const events = [];
   const ids = [];
   let content = '';
@@ -274,8 +327,54 @@ async function main() {
       `got ${JSON.stringify(healthBody)}`
     );
 
-    // 2. Unknown route → canonical 404.
-    const missing = await fetch(`${baseUrl}/api/does-not-exist`);
+    // 2. Authentication (Phase 4), before anything protected is reachable.
+    console.log('\n   auth:');
+    const anonymous = await fetch(`${baseUrl}/api/conversations`);
+    check(
+      'protected routes reject an anonymous caller',
+      anonymous.status === 401,
+      `got ${anonymous.status}`
+    );
+
+    const created = createAccount(dataDir, 'verifyadmin', ['--admin', '--adopt-local-data']);
+    check(
+      'first admin is created by the CLI with the password on stdin',
+      created.status === 0,
+      created.stderr
+    );
+
+    const rejectedArgv = createAccount(dataDir, 'argvuser', ['--password', 'secret']);
+    check(
+      'the CLI refuses a password passed in argv',
+      rejectedArgv.status !== 0 && /not supported/.test(rejectedArgv.stderr ?? ''),
+      rejectedArgv.stderr
+    );
+
+    auth = await signIn(baseUrl, 'verifyadmin');
+    check(
+      'sign-in returns a session and a CSRF token',
+      auth?.token !== null && auth?.csrf !== undefined
+    );
+    check(
+      'the adopted account owns the Phase 3 data directory',
+      auth?.userId === LOCAL_USER_ID,
+      `got ${auth?.userId}`
+    );
+
+    const noCsrf = await fetch(`${baseUrl}/api/conversations`, {
+      method: 'POST',
+      headers: { Cookie: `${SESSION_COOKIE}=${auth.token}`, 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    check(
+      'INV-16: a state-changing request without a CSRF token is rejected',
+      noCsrf.status === 403,
+      `got ${noCsrf.status}`
+    );
+
+    // 3. Unknown route → canonical 404 (for an authenticated caller; an
+    //    anonymous one is stopped by the auth gate first).
+    const missing = await afetch(`${baseUrl}/api/does-not-exist`);
     const missingBody = await missing.json();
     check('unknown route responds 404', missing.status === 404, `got ${missing.status}`);
     check(
@@ -289,8 +388,8 @@ async function main() {
       `got ${JSON.stringify(missingBody)}`
     );
 
-    // 3. A real generation, start to finish, over real HTTP and SSE.
-    const models = await (await fetch(`${baseUrl}/api/models`)).json();
+    // 4. A real generation, start to finish, over real HTTP and SSE.
+    const models = await (await afetch(`${baseUrl}/api/models`)).json();
     check(
       'models are listed',
       Array.isArray(models.models) && models.models.length > 0,
@@ -307,14 +406,14 @@ async function main() {
     // From Phase 3 a generation belongs to a persisted conversation, and the
     // client sends only the new message.
     const firstConversation = await (
-      await fetch(`${baseUrl}/api/conversations`, {
+      await afetch(`${baseUrl}/api/conversations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{}',
       })
     ).json();
 
-    const started = await fetch(`${baseUrl}/api/generations`, {
+    const started = await afetch(`${baseUrl}/api/generations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -363,7 +462,7 @@ async function main() {
     );
 
     const snapshot = await (
-      await fetch(`${baseUrl}/api/generations/${accepted.generationId}`)
+      await afetch(`${baseUrl}/api/generations/${accepted.generationId}`)
     ).json();
     check(
       're-observable after completion',
@@ -371,7 +470,7 @@ async function main() {
       JSON.stringify(snapshot)
     );
 
-    const unknownModel = await fetch(`${baseUrl}/api/generations`, {
+    const unknownModel = await afetch(`${baseUrl}/api/generations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -387,7 +486,7 @@ async function main() {
       JSON.stringify(unknownBody)
     );
 
-    // 4. Persistence (Phase 3), end to end against the built server.
+    // 5. Persistence (Phase 3), end to end against the built server.
     console.log('\n   persistence:');
     const chatsDir = join(dataDir, LOCAL_USER_ID, 'chats');
     const indexFile = join(dataDir, LOCAL_USER_ID, 'index', 'chats.json');
@@ -395,21 +494,21 @@ async function main() {
     const api = {
       create: async () =>
         (
-          await fetch(`${baseUrl}/api/conversations`, {
+          await afetch(`${baseUrl}/api/conversations`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: '{}',
           })
         ).json(),
-      list: async () => (await (await fetch(`${baseUrl}/api/conversations`)).json()).conversations,
+      list: async () => (await (await afetch(`${baseUrl}/api/conversations`)).json()).conversations,
       get: async (id) => {
-        const res = await fetch(`${baseUrl}/api/conversations/${id}`);
+        const res = await afetch(`${baseUrl}/api/conversations/${id}`);
         return { status: res.status, body: await res.json() };
       },
       remove: async (id) =>
-        (await fetch(`${baseUrl}/api/conversations/${id}`, { method: 'DELETE' })).status,
+        (await afetch(`${baseUrl}/api/conversations/${id}`, { method: 'DELETE' })).status,
       send: async (id, content) => {
-        const res = await fetch(`${baseUrl}/api/generations`, {
+        const res = await afetch(`${baseUrl}/api/generations`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ conversationId: id, model: 'Mock Model', content }),
@@ -527,7 +626,52 @@ async function main() {
       !(await readdir(chatsDir)).includes(`${other.id}.md`)
     );
 
-    // 5. Clean shutdown.
+    // 6. Multi-user isolation and logout.
+    console.log('\n   isolation:');
+    const ownConversation = await (
+      await afetch(`${baseUrl}/api/conversations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Admin only' }),
+      })
+    ).json();
+
+    const second = createAccount(dataDir, 'seconduser');
+    check('a second account is created', second.status === 0, second.stderr);
+
+    const adminAuth = auth;
+    auth = await signIn(baseUrl, 'seconduser');
+    check('the second user can sign in', auth?.token !== null);
+
+    const otherList = await (await afetch(`${baseUrl}/api/conversations`)).json();
+    check(
+      "INV-15: a second user sees none of the first user's conversations",
+      Array.isArray(otherList.conversations) && otherList.conversations.length === 0,
+      JSON.stringify(otherList)
+    );
+    const cross = await afetch(`${baseUrl}/api/conversations/${ownConversation.id}`);
+    check(
+      "INV-15: another user's conversation is 404, never 403",
+      cross.status === 404,
+      `got ${cross.status}`
+    );
+
+    const loggedOut = await afetch(`${baseUrl}/api/auth/logout`, { method: 'POST' });
+    check('logout succeeds', loggedOut.status === 204, `got ${loggedOut.status}`);
+    const afterLogout = await afetch(`${baseUrl}/api/conversations`);
+    check(
+      'a destroyed session no longer authenticates',
+      afterLogout.status === 401,
+      `got ${afterLogout.status}`
+    );
+
+    auth = adminAuth;
+    check(
+      'the first user still has their conversation',
+      (await afetch(`${baseUrl}/api/conversations/${ownConversation.id}`)).status === 200
+    );
+
+    // 7. Clean shutdown.
     child.kill('SIGTERM');
     const exited = await Promise.race([
       waitForExit(child),

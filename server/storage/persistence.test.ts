@@ -14,9 +14,25 @@ import { startMockProvider, type MockProvider } from '../provider/mockServer.ts'
 import { ConversationStore } from './conversations.ts';
 import { ChatIndex, type ChatIndexEntry } from './index.ts';
 import { StoragePaths } from './paths.ts';
+import { ARGON2_TEST_OPTIONS, UserStore } from '../auth/users.ts';
+import { SessionManager } from '../auth/sessions.ts';
+import { signIn, type TestClient } from '../auth/testClient.ts';
 
 const logger = createLogger({ level: 'silent', write: () => {} });
 const USER = '0a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d';
+
+/** Every protected route needs a session cookie and a CSRF token. */
+let client: TestClient | undefined;
+const afetch = (url: string, init: RequestInit = {}): Promise<Response> =>
+  fetch(url, {
+    ...init,
+    headers: {
+      ...(client === undefined
+        ? {}
+        : { Cookie: `workspace_session=${client.token}`, 'X-CSRF-Token': client.csrfToken }),
+      ...init.headers,
+    },
+  });
 
 let dataDir: string;
 let paths: StoragePaths;
@@ -51,6 +67,19 @@ async function boot(options: Parameters<typeof startMockProvider>[0] = {}): Prom
     maxOutputTokens: 128,
   });
 
+  const users = new UserStore({
+    paths: store.paths,
+    logger,
+    argon2Options: ARGON2_TEST_OPTIONS,
+  });
+  const sessions = new SessionManager({
+    paths: store.paths,
+    logger,
+    absoluteTtlMs: 60 * 60 * 1000,
+    idleTtlMs: 60 * 60 * 1000,
+  });
+  await users.create({ username: 'tester', password: 'correct horse battery', id: USER });
+
   const app = createApp({
     logger,
     provider,
@@ -58,11 +87,14 @@ async function boot(options: Parameters<typeof startMockProvider>[0] = {}): Prom
     store,
     index,
     service,
-    userId: () => USER,
+    users,
+    sessions,
+    authConfig: { registrationMode: 'closed', absoluteTtlMs: 3_600_000, idleTtlMs: 3_600_000 },
   });
   server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server?.once('listening', resolve));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  client = await signIn(base, sessions, USER);
 }
 
 beforeEach(async () => {
@@ -88,7 +120,7 @@ afterEach(async () => {
 
 const api = {
   async create(title?: string) {
-    const res = await fetch(`${base}/api/conversations`, {
+    const res = await afetch(`${base}/api/conversations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(title === undefined ? {} : { title }),
@@ -96,15 +128,15 @@ const api = {
     return { status: res.status, body: (await res.json()) as Record<string, unknown> };
   },
   async list() {
-    const res = await fetch(`${base}/api/conversations`);
+    const res = await afetch(`${base}/api/conversations`);
     return ((await res.json()) as { conversations: ChatIndexEntry[] }).conversations;
   },
   async get(id: string) {
-    const res = await fetch(`${base}/api/conversations/${id}`);
+    const res = await afetch(`${base}/api/conversations/${id}`);
     return { status: res.status, body: (await res.json()) as Record<string, unknown> };
   },
   async patch(id: string, body: unknown) {
-    const res = await fetch(`${base}/api/conversations/${id}`, {
+    const res = await afetch(`${base}/api/conversations/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -112,11 +144,11 @@ const api = {
     return { status: res.status, body: (await res.json().catch(() => null)) as never };
   },
   async remove(id: string) {
-    const res = await fetch(`${base}/api/conversations/${id}`, { method: 'DELETE' });
+    const res = await afetch(`${base}/api/conversations/${id}`, { method: 'DELETE' });
     return res.status;
   },
   async editMessage(conversationId: string, messageId: string, body: string) {
-    const res = await fetch(`${base}/api/conversations/${conversationId}/messages/${messageId}`, {
+    const res = await afetch(`${base}/api/conversations/${conversationId}/messages/${messageId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ body }),
@@ -124,7 +156,7 @@ const api = {
     return { status: res.status, body: (await res.json()) as Record<string, unknown> };
   },
   async deleteMessage(conversationId: string, messageId: string) {
-    const res = await fetch(`${base}/api/conversations/${conversationId}/messages/${messageId}`, {
+    const res = await afetch(`${base}/api/conversations/${conversationId}/messages/${messageId}`, {
       method: 'DELETE',
     });
     // 204 when that emptied the conversation, which the server then deletes.
@@ -132,7 +164,7 @@ const api = {
     return { status: res.status, body };
   },
   async regenerate(conversationId: string, model = 'GPT') {
-    const res = await fetch(`${base}/api/generations/regenerate`, {
+    const res = await afetch(`${base}/api/generations/regenerate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ conversationId, model }),
@@ -140,7 +172,7 @@ const api = {
     return { status: res.status, body: (await res.json()) as Record<string, string> };
   },
   async send(conversationId: string, content: string, model = 'GPT') {
-    const res = await fetch(`${base}/api/generations`, {
+    const res = await afetch(`${base}/api/generations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ conversationId, model, content }),
@@ -170,7 +202,7 @@ describe('conversations API', () => {
   });
 
   it('INV-02: rejects client-supplied timestamps and unknown fields', async () => {
-    const res = await fetch(`${base}/api/conversations`, {
+    const res = await afetch(`${base}/api/conversations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: 'x', createdAt: '1999-01-01T00:00:00.000Z' }),
@@ -512,7 +544,7 @@ describe('message editing, deletion, and regeneration', () => {
 
     expect((await api.editMessage(id, target.id, '')).status).toBe(400);
 
-    const extra = await fetch(`${base}/api/conversations/${id}/messages/${target.id}`, {
+    const extra = await afetch(`${base}/api/conversations/${id}/messages/${target.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ body: 'x', type: 'system' }),

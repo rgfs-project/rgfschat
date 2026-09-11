@@ -25,6 +25,8 @@ export interface GenerationManagerOptions {
 
 interface GenerationRecord {
   id: string;
+  /** Who started it. Anyone else must not be able to observe or cancel it. */
+  ownerId: string;
   assistantMessageId: string;
   model: string;
   state: GenerationState;
@@ -85,12 +87,14 @@ export class GenerationManager {
    * provider call is deliberately not awaited.
    */
   start(
+    ownerId: string,
     model: string,
     messages: ChatMessage[]
   ): { generationId: string; assistantMessageId: string } {
     const createdAt = this.#now();
     const record: GenerationRecord = {
       id: randomUUID(),
+      ownerId,
       assistantMessageId: randomUUID(),
       model,
       state: 'pending',
@@ -229,22 +233,34 @@ export class GenerationManager {
     });
   }
 
-  get(id: string): GenerationSnapshotDto | null {
+  /**
+   * Looks up a generation for a specific owner.
+   *
+   * A generation belonging to someone else is reported as absent rather than
+   * forbidden, so a probe cannot distinguish "not yours" from "does not exist"
+   * (INV-15).
+   */
+  #find(id: string, ownerId: string): GenerationRecord | undefined {
     const record = this.#generations.get(id);
+    return record?.ownerId === ownerId ? record : undefined;
+  }
+
+  get(id: string, ownerId: string): GenerationSnapshotDto | null {
+    const record = this.#find(id, ownerId);
     return record === undefined ? null : toSnapshot(record);
   }
 
   /** Throws `GENERATION_NOT_FOUND` rather than returning null, for route use. */
-  require(id: string): GenerationSnapshotDto {
-    const snapshot = this.get(id);
+  require(id: string, ownerId: string): GenerationSnapshotDto {
+    const snapshot = this.get(id, ownerId);
     if (snapshot === null) {
       throw new AppError('GENERATION_NOT_FOUND', 'Generation not found.');
     }
     return snapshot;
   }
 
-  cancel(id: string): GenerationSnapshotDto {
-    const record = this.#generations.get(id);
+  cancel(id: string, ownerId: string): GenerationSnapshotDto {
+    const record = this.#find(id, ownerId);
     if (record === undefined) {
       throw new AppError('GENERATION_NOT_FOUND', 'Generation not found.');
     }
@@ -265,9 +281,10 @@ export class GenerationManager {
    */
   subscribe(
     id: string,
+    ownerId: string,
     listener: (envelope: { id: number; event: GenerationEvent }) => void
   ): () => void {
-    const record = this.#generations.get(id);
+    const record = this.#find(id, ownerId);
     if (record === undefined) {
       throw new AppError('GENERATION_NOT_FOUND', 'Generation not found.');
     }

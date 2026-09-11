@@ -21,6 +21,19 @@ const envSchema = z.object({
     )
     .default('0a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d'),
 
+  // Auth (Phase 4).
+  REGISTRATION_MODE: z.enum(['closed', 'open']).default('closed'),
+  SESSION_ABSOLUTE_TTL_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .default(30 * 24 * 60 * 60 * 1000),
+  SESSION_IDLE_TTL_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .default(7 * 24 * 60 * 60 * 1000),
+
   // Provider (Phase 2). A single llama.cpp endpoint; multi-provider is Phase 5.
   LLAMA_BASE_URL: z.url().default('http://127.0.0.1:8080'),
   LLAMA_API_KEY: z.string().min(1).optional(),
@@ -36,9 +49,19 @@ export interface Config {
   dataDir: string;
   logLevel: LogLevel;
   isProduction: boolean;
-  /** Canonical lowercase UUID. The only identity source until Phase 4 (INV-14). */
+  /** Canonical lowercase UUID. Used only by `user:create --adopt-local-data`. */
   localUserId: string;
+  auth: AuthConfig;
   provider: ProviderConfig;
+}
+
+export interface AuthConfig {
+  /** `closed` (default) rejects `POST /api/auth/register` with REGISTRATION_CLOSED. */
+  registrationMode: 'closed' | 'open';
+  /** Never extended; a session dies this long after login whatever happens. */
+  absoluteTtlMs: number;
+  /** Slides forward on each authenticated request. */
+  idleTtlMs: number;
 }
 
 export interface ProviderConfig {
@@ -75,6 +98,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     DATA_DIR,
     LOG_LEVEL,
     LOCAL_USER_ID,
+    REGISTRATION_MODE,
+    SESSION_ABSOLUTE_TTL_MS,
+    SESSION_IDLE_TTL_MS,
     LLAMA_BASE_URL,
     LLAMA_API_KEY,
     PROVIDER_TIMEOUT_MS,
@@ -89,6 +115,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     logLevel: LOG_LEVEL,
     isProduction: NODE_ENV === 'production',
     localUserId: LOCAL_USER_ID,
+    auth: {
+      registrationMode: REGISTRATION_MODE,
+      absoluteTtlMs: SESSION_ABSOLUTE_TTL_MS,
+      idleTtlMs: SESSION_IDLE_TTL_MS,
+    },
     provider: {
       baseUrl: LLAMA_BASE_URL.replace(/\/+$/, ''),
       apiKey: LLAMA_API_KEY,

@@ -7,6 +7,8 @@ import { ConversationStore } from './storage/conversations.ts';
 import { ChatIndex } from './storage/index.ts';
 import { StoragePaths } from './storage/paths.ts';
 import { GenerationService } from './generation/service.ts';
+import { UserStore } from './auth/users.ts';
+import { SessionManager } from './auth/sessions.ts';
 
 function main(): void {
   let config;
@@ -40,6 +42,15 @@ function main(): void {
     maxOutputTokens: config.provider.maxOutputTokens,
   });
 
+  const paths = store.paths;
+  const users = new UserStore({ paths, logger });
+  const sessions = new SessionManager({
+    paths,
+    logger,
+    absoluteTtlMs: config.auth.absoluteTtlMs,
+    idleTtlMs: config.auth.idleTtlMs,
+  });
+
   const app = createApp({
     logger,
     provider,
@@ -47,7 +58,10 @@ function main(): void {
     store,
     index,
     service,
-    userId: () => config.localUserId,
+    users,
+    sessions,
+    authConfig: config.auth,
+    isProduction: config.isProduction,
   });
 
   // Prepares the user's directories and sweeps temp files left by a crash
@@ -55,11 +69,17 @@ function main(): void {
   // server accepts a request that would write to it.
   // Also rebuilds the derived index when it is missing, unparseable, or was
   // left dirty by a crash (INV-11).
-  store
-    .init(config.localUserId)
-    .then(() => index.list(config.localUserId))
+  // Storage for a user is prepared on demand now that accounts exist; startup
+  // only sweeps expired sessions and warns when there is no account yet.
+  sessions
+    .cleanupExpired()
+    .then(async () => {
+      if ((await users.count()) === 0) {
+        logger.warn('No accounts exist. Create the first admin with: npm run user:create', {});
+      }
+    })
     .catch((err: unknown) => {
-      logger.error('Storage initialisation failed', { error: err });
+      logger.error('Startup initialisation failed', { error: err });
       process.exit(1);
     });
 

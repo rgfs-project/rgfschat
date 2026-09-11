@@ -44,6 +44,7 @@ function withProvider(provider: Provider, options = {}): GenerationManager {
 }
 
 const messages = [{ role: 'user' as const, content: 'hi' }];
+const OWNER = '0a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d';
 
 /** Polls until the generation reaches a terminal state, or throws. */
 async function settle(
@@ -53,7 +54,7 @@ async function settle(
 ): Promise<GenerationState> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const snapshot = m.get(id);
+    const snapshot = m.get(id, OWNER);
     if (snapshot === null) throw new Error('generation disappeared');
     if (snapshot.state !== 'pending' && snapshot.state !== 'streaming') return snapshot.state;
     if (Date.now() > deadline) throw new Error(`stuck in ${snapshot.state}`);
@@ -65,10 +66,10 @@ describe('GenerationManager', () => {
   it('completes a generation and keeps reasoning separate', async () => {
     const m = await withMock({ reasoningChunks: ['why '], contentChunks: ['Hello', '!'] });
 
-    const { generationId } = m.start('GPT', messages);
+    const { generationId } = m.start(OWNER, 'GPT', messages);
     await settle(m, generationId);
 
-    const snapshot = m.get(generationId);
+    const snapshot = m.get(generationId, OWNER);
     expect(snapshot?.state).toBe('completed');
     expect(snapshot?.content).toBe('Hello!');
     expect(snapshot?.reasoning).toBe('why ');
@@ -77,7 +78,7 @@ describe('GenerationManager', () => {
   it('mints distinct generation and assistant message ids', async () => {
     const m = await withMock();
 
-    const { generationId, assistantMessageId } = m.start('GPT', messages);
+    const { generationId, assistantMessageId } = m.start(OWNER, 'GPT', messages);
 
     expect(generationId).not.toBe(assistantMessageId);
     expect(generationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-/);
@@ -86,41 +87,41 @@ describe('GenerationManager', () => {
 
   it('INV-05: a cancel during streaming produces exactly one terminal state', async () => {
     const m = await withMock({ chunkDelayMs: 30, contentChunks: ['a', 'b', 'c', 'd', 'e'] });
-    const { generationId } = m.start('GPT', messages);
+    const { generationId } = m.start(OWNER, 'GPT', messages);
 
     const terminals: GenerationState[] = [];
-    m.subscribe(generationId, ({ event }) => {
+    m.subscribe(generationId, OWNER, ({ event }) => {
       if (event.type === 'done') terminals.push(event.state);
     });
 
     await new Promise((r) => setTimeout(r, 40));
-    m.cancel(generationId);
+    m.cancel(generationId, OWNER);
     await settle(m, generationId);
     // Give any late provider chunks a chance to (wrongly) reopen it.
     await new Promise((r) => setTimeout(r, 150));
 
     expect(terminals).toEqual(['cancelled']);
-    expect(m.get(generationId)?.state).toBe('cancelled');
+    expect(m.get(generationId, OWNER)?.state).toBe('cancelled');
   });
 
   it('INV-05: cancelling an already-completed generation does not change its state', async () => {
     const m = await withMock();
-    const { generationId } = m.start('GPT', messages);
+    const { generationId } = m.start(OWNER, 'GPT', messages);
     await settle(m, generationId);
 
-    const after = m.cancel(generationId);
+    const after = m.cancel(generationId, OWNER);
 
     expect(after.state).toBe('completed');
   });
 
   it('INV-05: a provider failure lands in `failed` exactly once', async () => {
     const m = await withMock({ failWith: { status: 500, message: 'boom' } });
-    const { generationId } = m.start('GPT', messages);
+    const { generationId } = m.start(OWNER, 'GPT', messages);
 
     const state = await settle(m, generationId);
 
     expect(state).toBe('failed');
-    expect(m.get(generationId)?.errorCode).toBe('PROVIDER_ERROR');
+    expect(m.get(generationId, OWNER)?.errorCode).toBe('PROVIDER_ERROR');
   });
 
   it('INV-05: a provider timeout lands in `timed_out`, not `failed`', async () => {
@@ -137,7 +138,7 @@ describe('GenerationManager', () => {
     );
     const m = withProvider(provider);
 
-    const { generationId } = m.start('GPT', messages);
+    const { generationId } = m.start(OWNER, 'GPT', messages);
     const state = await settle(m, generationId, 4_000);
 
     expect(state).toBe('timed_out');
@@ -160,38 +161,38 @@ describe('GenerationManager', () => {
     };
     const m = withProvider(chatty);
 
-    const { generationId } = m.start('any', messages);
+    const { generationId } = m.start(OWNER, 'any', messages);
     await new Promise((r) => setTimeout(r, 30));
-    m.cancel(generationId);
-    const lengthAtCancel = m.get(generationId)?.content.length ?? 0;
+    m.cancel(generationId, OWNER);
+    const lengthAtCancel = m.get(generationId, OWNER)?.content.length ?? 0;
 
     await new Promise((r) => setTimeout(r, 100));
 
-    expect(m.get(generationId)?.state).toBe('cancelled');
-    expect(m.get(generationId)?.content.length).toBe(lengthAtCancel);
+    expect(m.get(generationId, OWNER)?.state).toBe('cancelled');
+    expect(m.get(generationId, OWNER)?.content.length).toBe(lengthAtCancel);
     expect(yielded).toBeGreaterThan(0);
   });
 
   it('INV-06: unsubscribing does not cancel the generation', async () => {
     const m = await withMock({ chunkDelayMs: 20, contentChunks: ['a', 'b', 'c'] });
-    const { generationId } = m.start('GPT', messages);
+    const { generationId } = m.start(OWNER, 'GPT', messages);
 
-    const unsubscribe = m.subscribe(generationId, () => {});
+    const unsubscribe = m.subscribe(generationId, OWNER, () => {});
     await new Promise((r) => setTimeout(r, 25));
     unsubscribe();
 
     const state = await settle(m, generationId);
     expect(state).toBe('completed');
-    expect(m.get(generationId)?.content).toBe('abc');
+    expect(m.get(generationId, OWNER)?.content).toBe('abc');
   });
 
   it('emits events with monotonically increasing ids', async () => {
     const m = await withMock({ contentChunks: ['a', 'b', 'c'] });
-    const { generationId } = m.start('GPT', messages);
+    const { generationId } = m.start(OWNER, 'GPT', messages);
 
     const ids: number[] = [];
     const events: GenerationEvent[] = [];
-    m.subscribe(generationId, ({ id, event }) => {
+    m.subscribe(generationId, OWNER, ({ id, event }) => {
       ids.push(id);
       events.push(event);
     });
@@ -203,14 +204,36 @@ describe('GenerationManager', () => {
     expect(events.at(-1)?.type).toBe('done');
   });
 
+  it('INV-15: another user cannot observe or cancel a generation', async () => {
+    const m = await withMock({ chunkDelayMs: 30, contentChunks: ['a', 'b', 'c'] });
+    const other = '11111111-2222-4333-8444-555566667777';
+
+    const { generationId } = m.start(OWNER, 'GPT', messages);
+
+    // Reported as absent, not forbidden, so a probe cannot tell the difference.
+    expect(m.get(generationId, other)).toBeNull();
+    expect(() => m.require(generationId, other)).toThrow(
+      expect.objectContaining({ code: 'GENERATION_NOT_FOUND' })
+    );
+    expect(() => m.cancel(generationId, other)).toThrow(
+      expect.objectContaining({ code: 'GENERATION_NOT_FOUND' })
+    );
+    expect(() => m.subscribe(generationId, other, () => {})).toThrow(
+      expect.objectContaining({ code: 'GENERATION_NOT_FOUND' })
+    );
+
+    // The owner is unaffected by the failed attempts.
+    expect(await settle(m, generationId)).toBe('completed');
+  });
+
   it('reports GENERATION_NOT_FOUND for an unknown id', async () => {
     const m = await withMock();
 
-    expect(m.get('missing')).toBeNull();
-    expect(() => m.require('missing')).toThrow(
+    expect(m.get('missing', OWNER)).toBeNull();
+    expect(() => m.require('missing', OWNER)).toThrow(
       expect.objectContaining({ code: 'GENERATION_NOT_FOUND' })
     );
-    expect(() => m.cancel('missing')).toThrow(
+    expect(() => m.cancel('missing', OWNER)).toThrow(
       expect.objectContaining({ code: 'GENERATION_NOT_FOUND' })
     );
   });
@@ -237,21 +260,21 @@ describe('GenerationManager', () => {
     });
     manager = m;
 
-    const first = m.start('GPT', messages);
+    const first = m.start(OWNER, 'GPT', messages);
     await settle(m, first.generationId);
     expect(m.size).toBe(1);
 
     clock = new Date(clock.getTime() + 5_000);
-    m.start('GPT', messages); // starting triggers eviction
+    m.start(OWNER, 'GPT', messages); // starting triggers eviction
 
-    expect(m.get(first.generationId)).toBeNull();
+    expect(m.get(first.generationId, OWNER)).toBeNull();
   });
 
   it('caps the number of retained generations', async () => {
     const m = await withMock();
     const started = [];
     for (let i = 0; i < 6; i += 1) {
-      const g = m.start('GPT', messages);
+      const g = m.start(OWNER, 'GPT', messages);
       started.push(g.generationId);
       await settle(m, g.generationId);
     }
@@ -270,11 +293,11 @@ describe('GenerationManager', () => {
     });
     const ids = [];
     for (let i = 0; i < 6; i += 1) {
-      const g = managerWithCap.start('m', messages);
+      const g = managerWithCap.start(OWNER, 'm', messages);
       ids.push(g.generationId);
       await settle(managerWithCap, g.generationId);
     }
-    managerWithCap.start('m', messages);
+    managerWithCap.start(OWNER, 'm', messages);
 
     expect(managerWithCap.size).toBeLessThanOrEqual(4);
     managerWithCap.shutdown();

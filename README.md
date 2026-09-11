@@ -4,10 +4,10 @@ A self-hosted chat workspace. Conversations are plain Markdown files on disk, ge
 owned by the server, and the model provider is replaceable.
 
 This repository is built in phases against a project contract kept outside the repository.
-**Phase 3** is complete: the foundation and HTTP
-conventions, a llama.cpp provider with server-owned generations and SSE streaming, and
-canonical Markdown persistence with a rebuildable index. There is still no authentication —
-that is Phase 4, so do not expose this to a network you do not control.
+**Phase 4** is complete: the foundation and HTTP
+conventions, a llama.cpp provider with server-owned generations and SSE streaming, canonical
+Markdown persistence with a rebuildable index, and accounts with sessions, CSRF protection,
+and per-user isolation.
 
 ## Prerequisites
 
@@ -120,6 +120,28 @@ scripts/    dev, build-server, verify, probe-provider
 docs/       provider-notes.md — observed provider behaviour
 data/       Persistent boundary — committed empty; contents are never tracked
 ```
+
+## First run
+
+There are no accounts to begin with, and registration is closed by default, so create the
+first admin from the command line:
+
+```bash
+npm run user:create -- --username ada --admin
+```
+
+The password is read from a prompt (or stdin, for scripting: `echo "…" | npm run user:create
+-- --username ada --admin`). It is **never** accepted as a command-line argument, where it
+would land in your shell history and in the process list.
+
+Upgrading from Phase 3? Add `--adopt-local-data` to hand the existing
+`data/<LOCAL_USER_ID>/` directory to the new account — nothing moves on disk:
+
+```bash
+npm run user:create -- --username ada --admin --adopt-local-data
+```
+
+Set `REGISTRATION_MODE=open` to let people sign themselves up.
 
 ## Your data
 

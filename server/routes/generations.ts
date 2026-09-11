@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { z } from 'zod';
 import type { GenerationAcceptedDto, GenerationEvent } from '@shared/generation.ts';
 import { isCanonicalUuid } from '@shared/conversation.ts';
@@ -29,15 +29,16 @@ export interface GenerationRoutesOptions {
   manager: GenerationManager;
   provider: Provider;
   service: GenerationService;
-  userId: () => string;
 }
 
-export function generationRouter({
-  manager,
-  provider,
-  service,
-  userId,
-}: GenerationRoutesOptions): Router {
+/** Identity comes only from the session (INV-14). */
+function ownerOf(req: Request): string {
+  const userId = req.auth?.userId;
+  if (userId === undefined) throw AppError.internal('Route reached without authentication');
+  return userId;
+}
+
+export function generationRouter({ manager, provider, service }: GenerationRoutesOptions): Router {
   const router = Router();
 
   router.get('/models', async (_req, res) => {
@@ -58,7 +59,7 @@ export function generationRouter({
     }
 
     // Returns only once the user message is durable (INV-08).
-    const result = await service.start(userId(), conversationId, model, content);
+    const result = await service.start(ownerOf(req), conversationId, model, content);
 
     const dto: GenerationAcceptedDto = result;
     res.status(202).json(dto);
@@ -74,22 +75,23 @@ export function generationRouter({
       throw new AppError('MODEL_NOT_FOUND', 'The requested model is not available.');
     }
 
-    res.status(202).json(await service.regenerate(userId(), conversationId, model));
+    res.status(202).json(await service.regenerate(ownerOf(req), conversationId, model));
   });
 
   router.get('/generations/:id', (req, res) => {
-    res.json(manager.require(req.params.id));
+    res.json(manager.require(req.params.id, ownerOf(req)));
   });
 
   router.post('/generations/:id/cancel', (req, res) => {
-    res.json(manager.cancel(req.params.id));
+    res.json(manager.cancel(req.params.id, ownerOf(req)));
   });
 
   router.get('/generations/:id/stream', (req, res) => {
     const id = req.params.id;
+    const owner = ownerOf(req);
     // Throws GENERATION_NOT_FOUND before any SSE header is written, so the
     // failure is a normal JSON error rather than an event stream.
-    const snapshot = manager.require(id);
+    const snapshot = manager.require(id, owner);
 
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -117,7 +119,7 @@ export function generationRouter({
       return;
     }
 
-    const unsubscribe = manager.subscribe(id, ({ id: eventId, event }) => {
+    const unsubscribe = manager.subscribe(id, owner, ({ id: eventId, event }) => {
       write(eventId, event);
       if (event.type === 'done') {
         cleanup();

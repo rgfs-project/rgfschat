@@ -7,6 +7,11 @@ import type { Provider } from './provider/types.ts';
 import { generationRouter } from './routes/generations.ts';
 import { healthRouter } from './routes/health.ts';
 import { conversationRouter } from './routes/conversations.ts';
+import { authRouter } from './routes/auth.ts';
+import { authenticate, requireAuth, requireCsrf } from './auth/middleware.ts';
+import type { SessionManager } from './auth/sessions.ts';
+import type { UserStore } from './auth/users.ts';
+import type { AuthConfig } from './config.ts';
 import type { ConversationStore } from './storage/conversations.ts';
 import type { ChatIndex } from './storage/index.ts';
 import type { GenerationService } from './generation/service.ts';
@@ -19,11 +24,10 @@ export interface AppOptions {
   store?: ConversationStore;
   index?: ChatIndex;
   service?: GenerationService;
-  /**
-   * Server-side identity. In Phase 3 this is `LOCAL_USER_ID`; from Phase 4 it
-   * comes from the session. It is never read from the request (INV-14).
-   */
-  userId?: () => string;
+  users?: UserStore;
+  sessions?: SessionManager;
+  authConfig?: AuthConfig;
+  isProduction?: boolean;
 }
 
 /**
@@ -40,7 +44,10 @@ export function createApp({
   store,
   index,
   service,
-  userId,
+  users,
+  sessions,
+  authConfig,
+  isProduction = false,
 }: AppOptions): Express {
   const app = express();
 
@@ -48,19 +55,27 @@ export function createApp({
 
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
+  // Health is public and must answer before anything auth-related.
   app.use('/api', healthRouter());
 
-  if (store !== undefined && index !== undefined && userId !== undefined) {
-    app.use('/api', conversationRouter({ store, index, userId }));
+  if (users !== undefined && sessions !== undefined && authConfig !== undefined) {
+    // Resolves the session for every request, including public ones, so
+    // `GET /api/auth/session` can describe the caller.
+    app.use(authenticate({ sessions, users }));
+    app.use('/api', authRouter({ users, sessions, config: authConfig, isProduction, logger }));
+
+    // Everything below this line requires a session and a CSRF token. Mounting
+    // it as a gate rather than per-route means a new route cannot be added
+    // unprotected by omission (INV-16, INV-24 groundwork).
+    app.use('/api', requireAuth(), requireCsrf());
   }
 
-  if (
-    provider !== undefined &&
-    manager !== undefined &&
-    service !== undefined &&
-    userId !== undefined
-  ) {
-    app.use('/api', generationRouter({ manager, provider, service, userId }));
+  if (store !== undefined && index !== undefined) {
+    app.use('/api', conversationRouter({ store, index }));
+  }
+
+  if (provider !== undefined && manager !== undefined && service !== undefined) {
+    app.use('/api', generationRouter({ manager, provider, service }));
   }
 
   app.use(notFoundHandler());

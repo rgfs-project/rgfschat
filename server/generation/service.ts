@@ -127,6 +127,7 @@ export class GenerationService {
     }
 
     const { generationId, assistantMessageId } = this.#manager.start(
+      userId,
       model,
       prepared.prompt.messages
     );
@@ -192,6 +193,7 @@ export class GenerationService {
     });
 
     const { generationId, assistantMessageId } = this.#manager.start(
+      userId,
       model,
       prepared.prompt.messages
     );
@@ -293,7 +295,7 @@ export class GenerationService {
 
   /** Cancels and waits for the write, so callers observe a settled conversation. */
   async cancel(userId: string, conversationId: string, generationId: string): Promise<void> {
-    this.#manager.cancel(generationId);
+    this.#manager.cancel(generationId, userId);
     await this.#manager.whenTerminal(generationId);
     void userId;
     void conversationId;

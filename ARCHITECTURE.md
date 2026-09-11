@@ -5,7 +5,7 @@ maintained **outside this repository** alongside the phase prompts that drive th
 This document records what is **actually built** and where each invariant is enforced.
 If this file and the contract disagree, the contract wins and the discrepancy is a bug.
 
-Current state: **Phase 3 complete.**
+Current state: **Phase 4 complete.**
 
 ## 1. Process shape
 
@@ -66,6 +66,11 @@ Error codes in use (the subset of the contracts §5 table reached so far):
 | `CONVERSATION_MALFORMED` | 422  | a conversation file that cannot be parsed       |
 | `GENERATION_IN_PROGRESS` | 409  | a second send for the same conversation         |
 | `CONTEXT_TOO_LARGE`      | 422  | the prompt cannot fit the model's context       |
+| `UNAUTHENTICATED`        | 401  | no valid session                                |
+| `FORBIDDEN`              | 403  | authenticated but not permitted                 |
+| `CSRF_INVALID`           | 403  | missing/invalid CSRF token or cross-origin      |
+| `CONFLICT`               | 409  | username already taken                          |
+| `REGISTRATION_CLOSED`    | 403  | registration is not open                        |
 
 Express 5 forwards rejected promises from async handlers to the error middleware natively, so
 there is no `asyncHandler` wrapper anywhere in the codebase.
@@ -145,36 +150,36 @@ throughout. Reasoning is never sent back to the model (contracts §4).
 
 Every invariant is enforced in code and covered by at least one test whose title names it.
 
-| ID     | Invariant                                                                                                       | Phase | Enforced in                                                  | Tests                                                                    |
-| ------ | --------------------------------------------------------------------------------------------------------------- | ----- | ------------------------------------------------------------ | ------------------------------------------------------------------------ |
-| INV-01 | Every API error uses the canonical error contract; unhandled errors become `INTERNAL` with no internals exposed | 1     | `server/middleware/errorHandler.ts`                          | `server/middleware/errorHandler.test.ts`                                 |
-| INV-02 | Every request body is schema-validated and unknown fields are rejected                                          | 1     | `server/http/validate.ts` (`z.strictObject`)                 | `server/http/validate.test.ts`                                           |
-| INV-03 | Responses are explicit DTOs; no secrets, hashes, paths, or upstream bodies in any response                      | 1     | `server/routes/health.ts`, `shared/api.ts`, `errorBody()`    | `server/routes/health.test.ts`, `server/http/validate.test.ts`           |
-| INV-04 | Provider credentials and raw provider payloads never reach the browser                                          | 2     | `server/provider/llamacpp.ts` (`listModels` DTO mapping)     | `server/provider/llamacpp.test.ts`, `server/routes/generations.test.ts`  |
-| INV-05 | A generation reaches exactly one terminal state                                                                 | 2     | `server/generation/manager.ts` (`#finish`)                   | `server/generation/manager.test.ts`                                      |
-| INV-06 | Closing an SSE connection never cancels a generation                                                            | 2     | `server/routes/generations.ts` (`cleanup` only unsubscribes) | `server/generation/manager.test.ts`, `server/routes/generations.test.ts` |
-| INV-07 | The assistant message is written to canonical storage exactly once per generation                               | 3     | `server/generation/service.ts` (`#persistOnTerminal`)        | `server/storage/persistence.test.ts`                                     |
-| INV-08 | The user message is durable before `202` is returned                                                            | 3     | `server/generation/service.ts` (`start`, under the lock)     | `server/storage/persistence.test.ts`                                     |
-| INV-09 | `formatVersion: 1` round-trips exactly                                                                          | 3     | `server/storage/markdown.ts`                                 | `server/storage/markdown.test.ts`                                        |
-| INV-10 | Malformed conversations are never modified and never break other conversations                                  | 3     | `server/storage/conversations.ts`                            | `server/storage/storage.test.ts`, `server/storage/persistence.test.ts`   |
-| INV-11 | The index is derived: deleting it and restarting loses nothing                                                  | 3     | `server/storage/index.ts`                                    | `server/storage/persistence.test.ts`                                     |
-| INV-12 | No filesystem path contains request-controlled input; all paths stay inside `DATA_DIR`                          | 3     | `server/storage/paths.ts`                                    | `server/storage/storage.test.ts`                                         |
-| INV-13 | At most one non-terminal generation per conversation                                                            | 3     | `server/generation/service.ts` (`#active` under the lock)    | `server/storage/persistence.test.ts`                                     |
-| INV-14 | Identity comes only from server-side state                                                                      | 3     | `server/config.ts` + `createApp({ userId })`                 | `server/storage/persistence.test.ts`                                     |
-| INV-15 | A user can never read, modify, delete, or observe another user's resources (404)                                | 4     | pending                                                      | pending                                                                  |
-| INV-16 | Every state-changing route requires a valid CSRF token or same-origin check                                     | 4     | pending                                                      | pending                                                                  |
-| INV-17 | Reducing a user's privileges or disabling them revokes all their sessions                                       | 4     | pending                                                      | pending                                                                  |
-| INV-18 | Only server-validated `(providerId, modelId)` pairs are ever sent to a provider                                 | 5     | pending                                                      | pending                                                                  |
-| INV-19 | Every provider endpoint passes SSRF validation on create/edit and at request time                               | 5     | pending                                                      | pending                                                                  |
-| INV-20 | SSE replay never silently skips events; a too-old `Last-Event-ID` triggers a full resync                        | 6     | pending                                                      | pending                                                                  |
-| INV-21 | After a restart, no generation remains non-terminal, and partial output is persisted once                       | 6     | pending                                                      | pending                                                                  |
-| INV-22 | Rendered Markdown never executes script or raw HTML                                                             | 7     | pending                                                      | pending                                                                  |
-| INV-23 | A stale response never overwrites newer client state                                                            | 8     | pending                                                      | pending                                                                  |
-| INV-24 | Admin authorization is enforced server-side on every admin route                                                | 9     | pending                                                      | pending                                                                  |
-| INV-25 | Secrets are write-only: no API response ever contains a configured secret                                       | 9     | pending                                                      | pending                                                                  |
-| INV-26 | There is always at least one active admin                                                                       | 9     | pending                                                      | pending                                                                  |
-| INV-27 | Attachment bytes are never served as executable content; media type is sniffed, not trusted                     | 11    | pending                                                      | pending                                                                  |
-| INV-28 | Attachment storage paths never derive from the uploaded filename                                                | 11    | pending                                                      | pending                                                                  |
+| ID     | Invariant                                                                                                       | Phase | Enforced in                                                       | Tests                                                                    |
+| ------ | --------------------------------------------------------------------------------------------------------------- | ----- | ----------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| INV-01 | Every API error uses the canonical error contract; unhandled errors become `INTERNAL` with no internals exposed | 1     | `server/middleware/errorHandler.ts`                               | `server/middleware/errorHandler.test.ts`                                 |
+| INV-02 | Every request body is schema-validated and unknown fields are rejected                                          | 1     | `server/http/validate.ts` (`z.strictObject`)                      | `server/http/validate.test.ts`                                           |
+| INV-03 | Responses are explicit DTOs; no secrets, hashes, paths, or upstream bodies in any response                      | 1     | `server/routes/health.ts`, `shared/api.ts`, `errorBody()`         | `server/routes/health.test.ts`, `server/http/validate.test.ts`           |
+| INV-04 | Provider credentials and raw provider payloads never reach the browser                                          | 2     | `server/provider/llamacpp.ts` (`listModels` DTO mapping)          | `server/provider/llamacpp.test.ts`, `server/routes/generations.test.ts`  |
+| INV-05 | A generation reaches exactly one terminal state                                                                 | 2     | `server/generation/manager.ts` (`#finish`)                        | `server/generation/manager.test.ts`                                      |
+| INV-06 | Closing an SSE connection never cancels a generation                                                            | 2     | `server/routes/generations.ts` (`cleanup` only unsubscribes)      | `server/generation/manager.test.ts`, `server/routes/generations.test.ts` |
+| INV-07 | The assistant message is written to canonical storage exactly once per generation                               | 3     | `server/generation/service.ts` (`#persistOnTerminal`)             | `server/storage/persistence.test.ts`                                     |
+| INV-08 | The user message is durable before `202` is returned                                                            | 3     | `server/generation/service.ts` (`start`, under the lock)          | `server/storage/persistence.test.ts`                                     |
+| INV-09 | `formatVersion: 1` round-trips exactly                                                                          | 3     | `server/storage/markdown.ts`                                      | `server/storage/markdown.test.ts`                                        |
+| INV-10 | Malformed conversations are never modified and never break other conversations                                  | 3     | `server/storage/conversations.ts`                                 | `server/storage/storage.test.ts`, `server/storage/persistence.test.ts`   |
+| INV-11 | The index is derived: deleting it and restarting loses nothing                                                  | 3     | `server/storage/index.ts`                                         | `server/storage/persistence.test.ts`                                     |
+| INV-12 | No filesystem path contains request-controlled input; all paths stay inside `DATA_DIR`                          | 3     | `server/storage/paths.ts`                                         | `server/storage/storage.test.ts`                                         |
+| INV-13 | At most one non-terminal generation per conversation                                                            | 3     | `server/generation/service.ts` (`#active` under the lock)         | `server/storage/persistence.test.ts`                                     |
+| INV-14 | Identity comes only from server-side state                                                                      | 3     | `server/auth/middleware.ts`; `ownerOf(req)` reads only `req.auth` | `server/storage/persistence.test.ts`                                     |
+| INV-15 | A user can never read, modify, delete, or observe another user's resources (404)                                | 4     | `server/auth/middleware.ts` + `userId` args through storage       | `server/auth/auth.test.ts`                                               |
+| INV-16 | Every state-changing route requires a valid CSRF token or same-origin check                                     | 4     | `server/auth/middleware.ts` (`requireCsrf`, `requireSameOrigin`)  | `server/auth/auth.test.ts`                                               |
+| INV-17 | Reducing a user's privileges or disabling them revokes all their sessions                                       | 4     | `server/auth/middleware.ts` (record loaded per request)           | `server/auth/auth.test.ts`                                               |
+| INV-18 | Only server-validated `(providerId, modelId)` pairs are ever sent to a provider                                 | 5     | pending                                                           | pending                                                                  |
+| INV-19 | Every provider endpoint passes SSRF validation on create/edit and at request time                               | 5     | pending                                                           | pending                                                                  |
+| INV-20 | SSE replay never silently skips events; a too-old `Last-Event-ID` triggers a full resync                        | 6     | pending                                                           | pending                                                                  |
+| INV-21 | After a restart, no generation remains non-terminal, and partial output is persisted once                       | 6     | pending                                                           | pending                                                                  |
+| INV-22 | Rendered Markdown never executes script or raw HTML                                                             | 7     | pending                                                           | pending                                                                  |
+| INV-23 | A stale response never overwrites newer client state                                                            | 8     | pending                                                           | pending                                                                  |
+| INV-24 | Admin authorization is enforced server-side on every admin route                                                | 9     | pending                                                           | pending                                                                  |
+| INV-25 | Secrets are write-only: no API response ever contains a configured secret                                       | 9     | pending                                                           | pending                                                                  |
+| INV-26 | There is always at least one active admin                                                                       | 9     | pending                                                           | pending                                                                  |
+| INV-27 | Attachment bytes are never served as executable content; media type is sniffed, not trusted                     | 11    | pending                                                           | pending                                                                  |
+| INV-28 | Attachment storage paths never derive from the uploaded filename                                                | 11    | pending                                                           | pending                                                                  |
 
 ## 6. Storage
 
@@ -263,9 +268,54 @@ load on a router-mode server, so counting tokens would cost a model swap.
 
 ## 8. Authentication and sessions
 
-N/A until Phase 4. Phase 3 uses `LOCAL_USER_ID`, validated at boot as a canonical lowercase
-UUID and used as the sole source of the user-directory segment (INV-14). It is never read
-from a header, query, body, or route param.
+`data/<user-uuid>/user.json` is the canonical account record;
+`_system/users.index.json` is a derived username → id map, rebuilt from the canonical records
+whenever it is missing or unusable. `passwordHash` never leaves `server/auth/users.ts` —
+`toDto` is the only way an account crosses a boundary and it cannot carry the hash (INV-03).
+
+Passwords use **Argon2id** with OWASP parameters. Tests may inject deliberately weak
+parameters; the strong ones are the default, so production cannot get the weak ones by
+omission. A login for a missing account still pays for a hash, so timing does not reveal
+whether a username exists — and a disabled account is rejected exactly like a wrong password.
+
+**Sessions.** A 256-bit token lives only in an `HttpOnly`, `SameSite=Lax` cookie (`Secure` in
+production). Only its SHA-256 is stored, as the filename under `_system/sessions/`, so a
+stolen directory yields no usable tokens. Absolute expiry is never extended; idle expiry
+slides on use. The token rotates on login, which defeats fixation.
+
+**The user record is loaded on every request**, not trusted from the session. A disabled
+account or a role change therefore takes effect on the very next request rather than at the
+next login (INV-17). Changing a password revokes every other session.
+
+**Authorization** is a gate, not a per-route decoration:
+
+```text
+app.use('/api', healthRouter())            ← public
+app.use(authenticate(...))                 ← resolves the session for everyone
+app.use('/api', authRouter(...))           ← login/register/session/logout
+app.use('/api', requireAuth(), requireCsrf())   ← everything below is protected
+app.use('/api', conversationRouter(...), generationRouter(...))
+```
+
+Mounting it this way means a route added later is protected by default; forgetting to guard
+it is not possible by omission. One consequence worth knowing: an unknown `/api` path returns
+`401` to an anonymous caller (the gate answers first) and `404` to an authenticated one.
+
+**Ownership** is enforced at the service boundary, not only at the route: every storage and
+generation call takes a `userId` argument. Cross-user access returns `404`, never `403`, so a
+probe cannot distinguish "not yours" from "does not exist" (INV-15). Generations record their
+owner, so another user's stream, snapshot, and cancel all 404 too.
+
+**Identity comes only from the session** (INV-14). `ownerOf(req)` reads `req.auth` and
+nothing else, and `server/auth/identitySource.test.ts` greps every route file for a user id
+taken from the body, params, query, or a header — the failure it guards against is a _future_
+route, which no behavioural test would catch.
+
+**First admin**: `npm run user:create -- --username <name> --admin`. The password is read
+from a prompt or stdin and `--password` is refused outright, so it cannot leak through shell
+history or the process list. `--adopt-local-data` gives the new account `LOCAL_USER_ID` as
+its id, so an existing Phase 3 `data/<LOCAL_USER_ID>/` simply becomes theirs with no file
+moves.
 
 ## 9. Providers and models
 

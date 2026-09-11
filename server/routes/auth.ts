@@ -1,0 +1,149 @@
+import { Router, type Response } from 'express';
+import { z } from 'zod';
+import {
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  USERNAME_MAX_LENGTH,
+  USERNAME_MIN_LENGTH,
+  type SessionDto,
+} from '@shared/auth.ts';
+import type { AuthConfig } from '../config.ts';
+import { AppError } from '../errors/AppError.ts';
+import { validateBody } from '../http/validate.ts';
+import type { Logger } from '../logger.ts';
+import { requireAuth, requireSameOrigin } from '../auth/middleware.ts';
+import { SESSION_COOKIE, type SessionManager } from '../auth/sessions.ts';
+import { toDto, type UserStore } from '../auth/users.ts';
+
+const credentialsSchema = z.strictObject({
+  username: z.string().min(USERNAME_MIN_LENGTH).max(USERNAME_MAX_LENGTH),
+  password: z.string().min(PASSWORD_MIN_LENGTH).max(PASSWORD_MAX_LENGTH),
+});
+
+const changePasswordSchema = z.strictObject({
+  currentPassword: z.string().min(1).max(PASSWORD_MAX_LENGTH),
+  newPassword: z.string().min(PASSWORD_MIN_LENGTH).max(PASSWORD_MAX_LENGTH),
+});
+
+export interface AuthRoutesOptions {
+  users: UserStore;
+  sessions: SessionManager;
+  config: AuthConfig;
+  isProduction: boolean;
+  logger: Logger;
+}
+
+export function authRouter({
+  users,
+  sessions,
+  config,
+  isProduction,
+  logger,
+}: AuthRoutesOptions): Router {
+  const router = Router();
+
+  const setSessionCookie = (res: Response, token: string): void => {
+    res.cookie(SESSION_COOKIE, token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: isProduction,
+      path: '/',
+    });
+  };
+
+  /** Public: how the client learns whether it is signed in, and its CSRF token. */
+  router.get('/auth/session', (req, res) => {
+    const dto: SessionDto = {
+      user:
+        req.auth === undefined
+          ? null
+          : toDto({
+              id: req.auth.userId,
+              username: req.auth.username,
+              role: req.auth.role,
+              status: 'active',
+              createdAt: '',
+            }),
+      csrfToken: req.auth?.csrfToken ?? null,
+      registrationOpen: config.registrationMode === 'open',
+    };
+    res.json(dto);
+  });
+
+  router.post(
+    '/auth/register',
+    requireSameOrigin(),
+    validateBody(credentialsSchema),
+    async (req, res) => {
+      if (config.registrationMode !== 'open') {
+        throw new AppError('REGISTRATION_CLOSED', 'Registration is closed.');
+      }
+
+      const { username, password } = req.body as z.infer<typeof credentialsSchema>;
+      const user = await users.create({ username, password });
+
+      const session = await sessions.create(user.id);
+      setSessionCookie(res, session.token);
+
+      res.status(201).json({ user, csrfToken: session.csrfToken });
+    }
+  );
+
+  router.post(
+    '/auth/login',
+    requireSameOrigin(),
+    validateBody(credentialsSchema),
+    async (req, res) => {
+      const { username, password } = req.body as z.infer<typeof credentialsSchema>;
+
+      const record = await users.verify(username, password);
+      // A disabled account is rejected exactly like a wrong password, so the
+      // response never distinguishes "wrong" from "suspended".
+      if (record === null || record.status !== 'active') {
+        logger.warn('Failed sign-in attempt', {});
+        throw new AppError('UNAUTHENTICATED', 'Incorrect username or password.');
+      }
+
+      // Fresh token on every login defeats session fixation (contracts §6).
+      const existing = req.auth?.token;
+      if (existing !== undefined) await sessions.destroy(existing);
+
+      const session = await sessions.create(record.id);
+      setSessionCookie(res, session.token);
+
+      res.json({ user: toDto(record), csrfToken: session.csrfToken });
+    }
+  );
+
+  router.post('/auth/logout', requireAuth(), async (req, res) => {
+    // Server-side destruction, not merely a cleared cookie: a copied token
+    // must stop working too.
+    await sessions.destroy(req.auth!.token);
+    res.clearCookie(SESSION_COOKIE, { path: '/' });
+    res.status(204).end();
+  });
+
+  router.post(
+    '/auth/password',
+    requireAuth(),
+    validateBody(changePasswordSchema),
+    async (req, res) => {
+      const { currentPassword, newPassword } = req.body as z.infer<typeof changePasswordSchema>;
+      const auth = req.auth!;
+
+      if ((await users.verify(auth.username, currentPassword)) === null) {
+        throw new AppError('UNAUTHENTICATED', 'Your current password is incorrect.');
+      }
+
+      await users.setPassword(auth.userId, newPassword);
+
+      // Every other session is revoked: a password change must evict whoever
+      // was using the old one (contracts §6).
+      await sessions.revokeAllForUser(auth.userId, { except: auth.token });
+
+      res.status(204).end();
+    }
+  );
+
+  return router;
+}

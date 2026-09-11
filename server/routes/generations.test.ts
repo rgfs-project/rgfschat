@@ -17,10 +17,26 @@ import {
 import { ConversationStore } from '../storage/conversations.ts';
 import { ChatIndex } from '../storage/index.ts';
 import { StoragePaths } from '../storage/paths.ts';
+import { ARGON2_TEST_OPTIONS, UserStore } from '../auth/users.ts';
+import { SessionManager } from '../auth/sessions.ts';
+import { signIn, type TestClient } from '../auth/testClient.ts';
 import { GenerationService } from '../generation/service.ts';
 
 const logger = createLogger({ level: 'silent', write: () => {} });
 const USER = '0a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d';
+
+/** Every protected route needs a session cookie and a CSRF token. */
+let client: TestClient | undefined;
+const afetch = (url: string, init: RequestInit = {}): Promise<Response> =>
+  fetch(url, {
+    ...init,
+    headers: {
+      ...(client === undefined
+        ? {}
+        : { Cookie: `workspace_session=${client.token}`, 'X-CSRF-Token': client.csrfToken }),
+      ...init.headers,
+    },
+  });
 
 let mock: MockProvider | undefined;
 let server: Server | undefined;
@@ -80,6 +96,19 @@ async function boot(options: MockProviderOptions = {}, apiKey?: string): Promise
     maxOutputTokens: 128,
   });
 
+  const users = new UserStore({
+    paths: store.paths,
+    logger,
+    argon2Options: ARGON2_TEST_OPTIONS,
+  });
+  const sessions = new SessionManager({
+    paths: store.paths,
+    logger,
+    absoluteTtlMs: 60 * 60 * 1000,
+    idleTtlMs: 60 * 60 * 1000,
+  });
+  await users.create({ username: 'tester', password: 'correct horse battery', id: USER });
+
   const app = createApp({
     logger,
     provider,
@@ -87,18 +116,22 @@ async function boot(options: MockProviderOptions = {}, apiKey?: string): Promise
     store,
     index,
     service,
-    userId: () => USER,
+    users,
+    sessions,
+    authConfig: { registrationMode: 'closed', absoluteTtlMs: 3_600_000, idleTtlMs: 3_600_000 },
   });
   server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server?.once('listening', resolve));
 
   const { port } = server.address() as AddressInfo;
-  return `http://127.0.0.1:${port}`;
+  const url = `http://127.0.0.1:${port}`;
+  client = await signIn(url, sessions, USER);
+  return url;
 }
 
 /** Phase 3: history comes from storage, so a conversation must exist first. */
 async function newConversation(base: string): Promise<string> {
-  const response = await fetch(`${base}/api/conversations`, {
+  const response = await afetch(`${base}/api/conversations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
@@ -108,7 +141,7 @@ async function newConversation(base: string): Promise<string> {
 
 async function startGeneration(base: string, model = 'GPT', conversationId?: string) {
   const id = conversationId ?? (await newConversation(base));
-  const response = await fetch(`${base}/api/generations`, {
+  const response = await afetch(`${base}/api/generations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ conversationId: id, model, content: 'hi' }),
@@ -121,7 +154,7 @@ async function readSse(
   url: string,
   opts: { stopAfter?: number; signal?: AbortSignal } = {}
 ): Promise<{ events: { id: string; event: GenerationEvent }[]; raw: string; headers: Headers }> {
-  const response = await fetch(url, opts.signal !== undefined ? { signal: opts.signal } : {});
+  const response = await afetch(url, opts.signal !== undefined ? { signal: opts.signal } : {});
   const events: { id: string; event: GenerationEvent }[] = [];
   let raw = '';
 
@@ -168,7 +201,7 @@ async function readSse(
 
 async function settle(base: string, id: string): Promise<GenerationSnapshotDto> {
   for (let i = 0; i < 300; i += 1) {
-    const response = await fetch(`${base}/api/generations/${id}`);
+    const response = await afetch(`${base}/api/generations/${id}`);
     const snapshot = (await response.json()) as GenerationSnapshotDto;
     if (snapshot.state !== 'pending' && snapshot.state !== 'streaming') return snapshot;
     await new Promise((r) => setTimeout(r, 10));
@@ -180,7 +213,7 @@ describe('GET /api/models', () => {
   it('returns the mapped model list', async () => {
     const base = await boot();
 
-    const response = await fetch(`${base}/api/models`);
+    const response = await afetch(`${base}/api/models`);
     const body = (await response.json()) as { models: unknown[] };
 
     expect(response.status).toBe(200);
@@ -190,7 +223,7 @@ describe('GET /api/models', () => {
   it('INV-04: never exposes credentials or raw provider payloads', async () => {
     const base = await boot({ requireApiKey: 'super-secret' }, 'super-secret');
 
-    const response = await fetch(`${base}/api/models`);
+    const response = await afetch(`${base}/api/models`);
     const text = await response.text();
 
     expect(text).not.toContain('super-secret');
@@ -218,7 +251,7 @@ describe('POST /api/generations', () => {
     const base = await boot();
 
     const conversationId = await newConversation(base);
-    const response = await fetch(`${base}/api/generations`, {
+    const response = await afetch(`${base}/api/generations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ conversationId, model: 'no-such-model', content: 'hi' }),
@@ -234,7 +267,7 @@ describe('POST /api/generations', () => {
 
     const conversationId = await newConversation(base);
 
-    const extra = await fetch(`${base}/api/generations`, {
+    const extra = await afetch(`${base}/api/generations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ conversationId, model: 'GPT', content: 'hi', temperature: 0.9 }),
@@ -243,7 +276,7 @@ describe('POST /api/generations', () => {
     expect(((await extra.json()) as { error: { code: string } }).error.code).toBe('VALIDATION');
 
     // The client may no longer supply history; it comes from storage.
-    const withMessages = await fetch(`${base}/api/generations`, {
+    const withMessages = await afetch(`${base}/api/generations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -260,7 +293,7 @@ describe('GET /api/generations/:id', () => {
   it('404s for an unknown generation', async () => {
     const base = await boot();
 
-    const response = await fetch(`${base}/api/generations/nope`);
+    const response = await afetch(`${base}/api/generations/nope`);
     const body = (await response.json()) as { error: { code: string } };
 
     expect(response.status).toBe(404);
@@ -303,21 +336,29 @@ describe('GET /api/generations/:id/stream', () => {
     const { events } = await readSse(`${base}/api/generations/${body.generationId}/stream`);
 
     expect(events[0]?.event.type).toBe('snapshot');
-    expect(events.at(-1)?.event).toMatchObject({ type: 'done', state: 'completed' });
 
-    const content = events
-      .map((e) => e.event)
-      .filter((e): e is Extract<GenerationEvent, { type: 'content' }> => e.type === 'content')
-      .map((e) => e.delta)
-      .join('');
-    const reasoning = events
-      .map((e) => e.event)
-      .filter((e): e is Extract<GenerationEvent, { type: 'reasoning' }> => e.type === 'reasoning')
-      .map((e) => e.delta)
-      .join('');
+    // The stream may attach before or after the generation finishes, so the
+    // output is reconstructed from the opening snapshot *plus* any deltas that
+    // followed. Asserting on deltas alone would fail whenever the run happened
+    // to complete first — a timing accident, not a defect.
+    const opening = events[0]?.event;
+    const snapshot = opening?.type === 'snapshot' ? opening.snapshot : undefined;
 
-    expect(content).toBe('ab');
-    expect(reasoning).toBe('r1');
+    const joined = (type: 'content' | 'reasoning'): string =>
+      (type === 'content' ? (snapshot?.content ?? '') : (snapshot?.reasoning ?? '')) +
+      events
+        .map((e) => e.event)
+        .filter((e) => e.type === type)
+        .map((e) => (e as { delta: string }).delta)
+        .join('');
+
+    expect(joined('content')).toBe('ab');
+    expect(joined('reasoning')).toBe('r1');
+
+    // Either it was already terminal when we attached, or we saw it finish.
+    const last = events.at(-1)?.event;
+    const alreadyDone = snapshot !== undefined && snapshot.state === 'completed';
+    expect(alreadyDone || last?.type === 'done').toBe(true);
   });
 
   it('gives every event a monotonically increasing id', async () => {
@@ -379,7 +420,7 @@ describe('GET /api/generations/:id/stream', () => {
   it('404s for an unknown generation without opening a stream', async () => {
     const base = await boot();
 
-    const response = await fetch(`${base}/api/generations/missing/stream`);
+    const response = await afetch(`${base}/api/generations/missing/stream`);
 
     expect(response.status).toBe(404);
     expect(response.headers.get('content-type')).toContain('application/json');
@@ -392,7 +433,7 @@ describe('POST /api/generations/:id/cancel', () => {
     const { body } = await startGeneration(base);
 
     await new Promise((r) => setTimeout(r, 40));
-    const response = await fetch(`${base}/api/generations/${body.generationId}/cancel`, {
+    const response = await afetch(`${base}/api/generations/${body.generationId}/cancel`, {
       method: 'POST',
     });
     const snapshot = (await response.json()) as GenerationSnapshotDto;
@@ -407,7 +448,7 @@ describe('POST /api/generations/:id/cancel', () => {
   it('404s for an unknown generation', async () => {
     const base = await boot();
 
-    const response = await fetch(`${base}/api/generations/nope/cancel`, { method: 'POST' });
+    const response = await afetch(`${base}/api/generations/nope/cancel`, { method: 'POST' });
 
     expect(response.status).toBe(404);
   });

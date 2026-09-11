@@ -23,9 +23,11 @@
     "format:check": "prettier --check .",
     "verify": "node scripts/verify.mjs",
     "probe:provider": "tsx --env-file-if-exists=.env scripts/probe-provider.ts",
-    "index:rebuild": "node scripts/rebuild-index.mjs"
+    "index:rebuild": "node scripts/rebuild-index.mjs",
+    "user:create": "tsx --env-file-if-exists=.env server/scripts/createUser.ts"
   },
   "dependencies": {
+    "argon2": "^0.45.1",
     "express": "^5.1.0",
     "lucide-react": "^1.45.0",
     "react": "^19.1.0",

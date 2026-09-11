@@ -440,3 +440,117 @@ button.danger {
   align-items: center;
   gap: 0.375rem;
 }
+
+/* --- sign-in and account --- */
+
+.signin {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+}
+
+.signin__card,
+.modal__card {
+  width: 100%;
+  max-width: 22rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+}
+
+.signin__card h1 {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3125rem;
+}
+
+.field > span {
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+input[type='text'],
+input[type='password'],
+input:not([type]) {
+  font: inherit;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.625rem;
+}
+
+input:focus-visible {
+  outline: 2px solid var(--border-strong);
+  outline-offset: 2px;
+}
+
+button.linkish {
+  background: none;
+  border: none;
+  color: var(--muted);
+  text-decoration: underline;
+  padding: 0.25rem;
+  font-size: 0.875rem;
+}
+
+button.linkish:hover {
+  color: var(--text);
+  opacity: 1;
+}
+
+.account {
+  position: fixed;
+  bottom: 0.75rem;
+  left: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.25rem 0.5rem 0.25rem 0.75rem;
+}
+
+.account__name {
+  font-size: 0.8125rem;
+  color: var(--muted);
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  padding: 1.5rem;
+}
+
+.modal__card h2 {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.modal__actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: flex-end;
+}

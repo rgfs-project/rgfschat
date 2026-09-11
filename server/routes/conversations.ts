@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { z } from 'zod';
 import { TITLE_MAX_LENGTH, type Conversation } from '@shared/conversation.ts';
 import type { ConversationStore } from '../storage/conversations.ts';
@@ -30,7 +30,18 @@ const editMessageSchema = z.strictObject({ body: z.string().min(1).max(200_000) 
 export interface ConversationRoutesOptions {
   store: ConversationStore;
   index: ChatIndex;
-  userId: () => string;
+}
+
+/**
+ * The only way a route learns who is calling (INV-14).
+ *
+ * `req.auth` is set by `authenticate` from the session cookie alone. A route
+ * that reached here without one is a mounting bug, not a client error.
+ */
+function ownerOf(req: Request): string {
+  const userId = req.auth?.userId;
+  if (userId === undefined) throw AppError.internal('Route reached without authentication');
+  return userId;
 }
 
 /**
@@ -55,16 +66,16 @@ function toDto(id: string, conversation: Conversation) {
   };
 }
 
-export function conversationRouter({ store, index, userId }: ConversationRoutesOptions): Router {
+export function conversationRouter({ store, index }: ConversationRoutesOptions): Router {
   const router = Router();
 
-  router.get('/conversations', async (_req, res) => {
-    res.json({ conversations: await index.list(userId()) });
+  router.get('/conversations', async (req, res) => {
+    res.json({ conversations: await index.list(ownerOf(req)) });
   });
 
   router.post('/conversations', validateBody(createSchema), async (req, res) => {
     const { title } = req.body as z.infer<typeof createSchema>;
-    const user = userId();
+    const user = ownerOf(req);
 
     const { id, conversation } = await store.create(user, title);
     await index.upsert(user, entryFor(id, conversation));
@@ -74,7 +85,7 @@ export function conversationRouter({ store, index, userId }: ConversationRoutesO
 
   router.get('/conversations/:id', async (req, res) => {
     const id = requireId(req.params.id);
-    const user = userId();
+    const user = ownerOf(req);
 
     res.json(toDto(id, await store.load(user, id)));
   });
@@ -82,7 +93,7 @@ export function conversationRouter({ store, index, userId }: ConversationRoutesO
   router.patch('/conversations/:id', validateBody(patchSchema), async (req, res) => {
     const id = requireId(req.params.id);
     const { title } = req.body as z.infer<typeof patchSchema>;
-    const user = userId();
+    const user = ownerOf(req);
 
     // A rename sets the title explicitly and disables auto-titling for this
     // conversation (contracts §3.3); `titleLocked` is tracked by the generation
@@ -106,7 +117,7 @@ export function conversationRouter({ store, index, userId }: ConversationRoutesO
       const id = requireId(req.params.id);
       const messageId = requireId(req.params.messageId);
       const { body } = req.body as z.infer<typeof editMessageSchema>;
-      const user = userId();
+      const user = ownerOf(req);
 
       const updated = await store.editMessageBody(user, id, messageId, body);
       await index.upsert(user, entryFor(id, updated));
@@ -123,7 +134,7 @@ export function conversationRouter({ store, index, userId }: ConversationRoutesO
   router.delete('/conversations/:id/messages/:messageId', async (req, res) => {
     const id = requireId(req.params.id);
     const messageId = requireId(req.params.messageId);
-    const user = userId();
+    const user = ownerOf(req);
 
     const updated = await store.deleteMessagePair(user, id, messageId);
 
@@ -145,7 +156,7 @@ export function conversationRouter({ store, index, userId }: ConversationRoutesO
 
   router.delete('/conversations/:id', async (req, res) => {
     const id = requireId(req.params.id);
-    const user = userId();
+    const user = ownerOf(req);
 
     // Markdown first, then the index entry. An orphaned index entry is
     // recoverable by a rebuild; a dangling reference to a live file is not.
