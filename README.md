@@ -3,9 +3,9 @@
 A self-hosted chat workspace. Conversations are plain Markdown files on disk, generation is
 owned by the server, and the model provider is replaceable.
 
-This repository is built in phases (`.Phases/`). **Phase 1** is complete: the foundation,
-HTTP conventions, and verification toolchain. There is no chat, persistence, or provider
-integration yet.
+This repository is built in phases (`.Phases/`). **Phase 2** is complete: the foundation and
+HTTP conventions, plus a llama.cpp provider, server-owned generations, and SSE streaming.
+Conversations are not yet persisted — that is Phase 3.
 
 ## Prerequisites
 
@@ -64,22 +64,55 @@ Copy `.env.example` to `.env`. Every variable has a safe default, so an empty fi
 The environment is validated once at boot and the process exits with a readable message if
 it is invalid — never with a stack trace, and never echoing the offending value.
 
-| Variable          | Default                 | Purpose                                                |
-| ----------------- | ----------------------- | ------------------------------------------------------ |
-| `NODE_ENV`        | `development`           | `development` \| `test` \| `production`                |
-| `PORT`            | `3001`                  | API port (client port under `npm run dev`)             |
-| `API_PORT`        | `3001`                  | API port used by `npm run dev`                         |
-| `DATA_DIR`        | `./data`                | Persistent boundary. Nothing writes here until Phase 3 |
-| `LOG_LEVEL`       | `info`                  | `debug` \| `info` \| `warn` \| `error` \| `silent`     |
-| `VITE_API_TARGET` | `http://localhost:3001` | Dev/preview proxy target                               |
+| Variable                 | Default                 | Purpose                                                |
+| ------------------------ | ----------------------- | ------------------------------------------------------ |
+| `NODE_ENV`               | `development`           | `development` \| `test` \| `production`                |
+| `PORT`                   | `3001`                  | API port (client port under `npm run dev`)             |
+| `API_PORT`               | `3001`                  | API port used by `npm run dev`                         |
+| `DATA_DIR`               | `./data`                | Persistent boundary. Nothing writes here until Phase 3 |
+| `LOG_LEVEL`              | `info`                  | `debug` \| `info` \| `warn` \| `error` \| `silent`     |
+| `VITE_API_TARGET`        | `http://localhost:3001` | Dev/preview proxy target                               |
+| `LLAMA_BASE_URL`         | `http://127.0.0.1:8080` | llama.cpp `llama-server` endpoint                      |
+| `LLAMA_API_KEY`          | _(unset)_               | **Secret.** Bearer token, if the server requires one   |
+| `PROVIDER_TIMEOUT_MS`    | `120000`                | Generous: a cold model load can take ~12 s             |
+| `DEFAULT_CONTEXT_TOKENS` | `8192`                  | Fallback when a model's real context is unknown        |
+| `MAX_OUTPUT_TOKENS`      | `2048`                  | Per-generation output cap                              |
+
+`.env` is git-ignored and loaded natively by Node (`--env-file-if-exists`), so there is no
+dotenv dependency.
+
+## Talking to llama.cpp
+
+Point `LLAMA_BASE_URL` at a running `llama-server`. Before trusting any assumption about how
+it behaves, run the probe against it:
+
+```bash
+npm run probe:provider
+```
+
+It reports auth behaviour, the model-list shape, streaming chunk shapes, `reasoning_content`,
+context-length discovery, and error responses. Findings are written up in
+[`docs/provider-notes.md`](docs/provider-notes.md) — **that file, not the OpenAI spec, is what
+the provider is implemented against.** Anything not observed live is marked UNVERIFIED.
+
+Three things it turned up that are worth knowing if you run a router-mode server:
+
+- **Model ids can contain spaces** (`Qwen Mini`), so they are URL-encoded and treated as opaque.
+- **`GET /props?model=X` loads that model**, evicting the resident one. Context lengths are
+  therefore discovered lazily, never enumerated at startup.
+- **Reasoning can consume the entire output budget**, finishing cleanly with empty content.
+  If replies come back blank, raise `MAX_OUTPUT_TOKENS`.
 
 ## Layout
 
 ```text
 client/     React 19 app (Vite)
 server/     Express 5 API
+  provider/   llama.cpp client + an HTTP mock that replays observed wire shapes
+  generation/ the server-owned generation state machine
 shared/     Types used by both, imported as @shared/*
-scripts/    dev, build-server, verify
+scripts/    dev, build-server, verify, probe-provider
+docs/       provider-notes.md — observed provider behaviour
 data/       Persistent boundary — git-ignored except .gitkeep
 .Phases/    Phase prompts and the shared contracts
 ```

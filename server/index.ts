@@ -1,6 +1,8 @@
 import { createApp } from './app.ts';
 import { loadConfig } from './config.ts';
+import { GenerationManager } from './generation/manager.ts';
 import { createLogger } from './logger.ts';
+import { LlamaCppProvider } from './provider/llamacpp.ts';
 
 function main(): void {
   let config;
@@ -14,7 +16,15 @@ function main(): void {
   }
 
   const logger = createLogger({ level: config.logLevel });
-  const app = createApp({ logger });
+
+  const provider = new LlamaCppProvider(config.provider, logger);
+  const manager = new GenerationManager({
+    provider,
+    logger,
+    maxOutputTokens: config.provider.maxOutputTokens,
+  });
+
+  const app = createApp({ logger, provider, manager });
 
   const server = app.listen(config.port, () => {
     const address = server.address();
@@ -33,6 +43,8 @@ function main(): void {
     shuttingDown = true;
 
     logger.info('Shutting down', { signal });
+    // In-flight generations are in-memory only; Phase 6 makes them durable.
+    manager.shutdown();
     server.close((err) => {
       if (err) {
         logger.error('Shutdown failed', { error: err });

@@ -4,7 +4,19 @@
  * The full code table is defined in `.Phases/00-contracts.md`. Each phase adds
  * only the codes it actually uses; Phase 1 introduces the four below.
  */
-export const ERROR_CODES = ['VALIDATION', 'NOT_FOUND', 'PAYLOAD_TOO_LARGE', 'INTERNAL'] as const;
+export const ERROR_CODES = [
+  // Phase 1
+  'VALIDATION',
+  'NOT_FOUND',
+  'PAYLOAD_TOO_LARGE',
+  'INTERNAL',
+  // Phase 2
+  'PROVIDER_UNAVAILABLE',
+  'PROVIDER_ERROR',
+  'PROVIDER_TIMEOUT',
+  'MODEL_NOT_FOUND',
+  'GENERATION_NOT_FOUND',
+] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
@@ -14,6 +26,11 @@ export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
   NOT_FOUND: 404,
   PAYLOAD_TOO_LARGE: 413,
   INTERNAL: 500,
+  PROVIDER_UNAVAILABLE: 502,
+  PROVIDER_ERROR: 502,
+  PROVIDER_TIMEOUT: 504,
+  MODEL_NOT_FOUND: 400,
+  GENERATION_NOT_FOUND: 404,
 };
 
 /**

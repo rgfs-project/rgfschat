@@ -51,7 +51,7 @@ export default tseslint.config(
   // `rules` must be merged into the preset, not declared after it, or the
   // spread's disabled rules are replaced wholesale.
   {
-    files: ['scripts/**/*.mjs', '**/*.config.{ts,js}', 'eslint.config.js'],
+    files: ['scripts/**/*.{mjs,ts}', '**/*.config.{ts,js}', 'eslint.config.js'],
     languageOptions: {
       globals: globals.node,
       parserOptions: { projectService: false, program: null },

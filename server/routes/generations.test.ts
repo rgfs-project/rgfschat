@@ -1,0 +1,353 @@
+import type { Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { afterEach, describe, expect, it } from 'vitest';
+import type { GenerationEvent, GenerationSnapshotDto } from '@shared/generation.ts';
+import { createApp } from '../app.ts';
+import { GenerationManager } from '../generation/manager.ts';
+import { createLogger } from '../logger.ts';
+import { LlamaCppProvider } from '../provider/llamacpp.ts';
+import {
+  startMockProvider,
+  type MockProvider,
+  type MockProviderOptions,
+} from '../provider/mockServer.ts';
+
+const logger = createLogger({ level: 'silent', write: () => {} });
+
+let mock: MockProvider | undefined;
+let server: Server | undefined;
+let manager: GenerationManager | undefined;
+
+afterEach(async () => {
+  manager?.shutdown();
+  manager = undefined;
+  if (server !== undefined) {
+    const s = server;
+    server = undefined;
+    s.closeAllConnections();
+    await new Promise<void>((resolve) => s.close(() => resolve()));
+  }
+  await mock?.close();
+  mock = undefined;
+});
+
+/** Boots the real app over real HTTP, which is what SSE needs. */
+async function boot(options: MockProviderOptions = {}, apiKey?: string): Promise<string> {
+  mock = await startMockProvider(options);
+  const provider = new LlamaCppProvider(
+    {
+      baseUrl: mock.url,
+      apiKey,
+      timeoutMs: 5_000,
+      defaultContextTokens: 8_192,
+      maxOutputTokens: 128,
+    },
+    logger
+  );
+  manager = new GenerationManager({ provider, logger, maxOutputTokens: 128 });
+
+  const app = createApp({ logger, provider, manager });
+  server = app.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server?.once('listening', resolve));
+
+  const { port } = server.address() as AddressInfo;
+  return `http://127.0.0.1:${port}`;
+}
+
+async function startGeneration(base: string, model = 'GPT') {
+  const response = await fetch(`${base}/api/generations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, messages: [{ role: 'user', content: 'hi' }] }),
+  });
+  return { status: response.status, body: (await response.json()) as Record<string, string> };
+}
+
+/** Reads an SSE stream to completion, returning parsed events plus raw text. */
+async function readSse(
+  url: string,
+  opts: { stopAfter?: number; signal?: AbortSignal } = {}
+): Promise<{ events: { id: string; event: GenerationEvent }[]; raw: string; headers: Headers }> {
+  const response = await fetch(url, opts.signal !== undefined ? { signal: opts.signal } : {});
+  const events: { id: string; event: GenerationEvent }[] = [];
+  let raw = '';
+
+  if (response.body === null) return { events, raw, headers: response.headers };
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const text = decoder.decode(value, { stream: true });
+      raw += text;
+      buffer += text;
+
+      let boundary: number;
+      while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+        const frame = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+
+        let id = '';
+        let data = '';
+        for (const line of frame.split('\n')) {
+          if (line.startsWith('id:')) id = line.slice(3).trim();
+          if (line.startsWith('data:')) data = line.slice(5).trim();
+        }
+        if (data !== '') {
+          events.push({ id, event: JSON.parse(data) as GenerationEvent });
+        }
+        if (opts.stopAfter !== undefined && events.length >= opts.stopAfter) {
+          await reader.cancel();
+          return { events, raw, headers: response.headers };
+        }
+      }
+    }
+  } catch {
+    // Aborted by the caller.
+  }
+
+  return { events, raw, headers: response.headers };
+}
+
+async function settle(base: string, id: string): Promise<GenerationSnapshotDto> {
+  for (let i = 0; i < 300; i += 1) {
+    const response = await fetch(`${base}/api/generations/${id}`);
+    const snapshot = (await response.json()) as GenerationSnapshotDto;
+    if (snapshot.state !== 'pending' && snapshot.state !== 'streaming') return snapshot;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error('did not settle');
+}
+
+describe('GET /api/models', () => {
+  it('returns the mapped model list', async () => {
+    const base = await boot();
+
+    const response = await fetch(`${base}/api/models`);
+    const body = (await response.json()) as { models: unknown[] };
+
+    expect(response.status).toBe(200);
+    expect(body.models).toHaveLength(2);
+  });
+
+  it('INV-04: never exposes credentials or raw provider payloads', async () => {
+    const base = await boot({ requireApiKey: 'super-secret' }, 'super-secret');
+
+    const response = await fetch(`${base}/api/models`);
+    const text = await response.text();
+
+    expect(text).not.toContain('super-secret');
+    expect(text).not.toContain('api-key-file');
+    expect(text).not.toContain('.gguf');
+    expect(text).not.toContain('llama-server');
+  });
+});
+
+describe('POST /api/generations', () => {
+  it('returns 202 with both ids', async () => {
+    const base = await boot();
+
+    const { status, body } = await startGeneration(base);
+
+    expect(status).toBe(202);
+    expect(Object.keys(body).sort()).toEqual(['assistantMessageId', 'generationId']);
+  });
+
+  it('rejects an unknown model with MODEL_NOT_FOUND and creates nothing', async () => {
+    const base = await boot();
+
+    const response = await fetch(`${base}/api/generations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'no-such-model', messages: [{ role: 'user', content: 'hi' }] }),
+    });
+    const body = (await response.json()) as { error: { code: string } };
+
+    expect(response.status).toBe(400);
+    expect(body.error.code).toBe('MODEL_NOT_FOUND');
+  });
+
+  it('INV-02: rejects unknown fields and malformed messages', async () => {
+    const base = await boot();
+
+    const extra = await fetch(`${base}/api/generations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'GPT',
+        messages: [{ role: 'user', content: 'hi' }],
+        temperature: 0.9,
+      }),
+    });
+    expect(extra.status).toBe(400);
+    expect(((await extra.json()) as { error: { code: string } }).error.code).toBe('VALIDATION');
+
+    const badRole = await fetch(`${base}/api/generations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'GPT', messages: [{ role: 'root', content: 'hi' }] }),
+    });
+    expect(badRole.status).toBe(400);
+  });
+});
+
+describe('GET /api/generations/:id', () => {
+  it('404s for an unknown generation', async () => {
+    const base = await boot();
+
+    const response = await fetch(`${base}/api/generations/nope`);
+    const body = (await response.json()) as { error: { code: string } };
+
+    expect(response.status).toBe(404);
+    expect(body.error.code).toBe('GENERATION_NOT_FOUND');
+  });
+
+  it('exposes the terminal snapshot with reasoning separated', async () => {
+    const base = await boot({ reasoningChunks: ['hmm'], contentChunks: ['Hi'] });
+    const { body } = await startGeneration(base);
+
+    const snapshot = await settle(base, body.generationId!);
+
+    expect(snapshot.state).toBe('completed');
+    expect(snapshot.content).toBe('Hi');
+    expect(snapshot.reasoning).toBe('hmm');
+  });
+});
+
+describe('GET /api/generations/:id/stream', () => {
+  it('sends the contract-required SSE headers', async () => {
+    const base = await boot({ chunkDelayMs: 5 });
+    const { body } = await startGeneration(base);
+
+    const { headers } = await readSse(`${base}/api/generations/${body.generationId}/stream`);
+
+    expect(headers.get('content-type')).toContain('text/event-stream');
+    expect(headers.get('cache-control')).toContain('no-cache');
+    expect(headers.get('x-accel-buffering')).toBe('no');
+    expect(headers.get('content-encoding')).toBeNull();
+  });
+
+  it('opens with a snapshot, streams deltas, and ends with done', async () => {
+    const base = await boot({
+      reasoningChunks: ['r1'],
+      contentChunks: ['a', 'b'],
+      chunkDelayMs: 5,
+    });
+    const { body } = await startGeneration(base);
+
+    const { events } = await readSse(`${base}/api/generations/${body.generationId}/stream`);
+
+    expect(events[0]?.event.type).toBe('snapshot');
+    expect(events.at(-1)?.event).toMatchObject({ type: 'done', state: 'completed' });
+
+    const content = events
+      .map((e) => e.event)
+      .filter((e): e is Extract<GenerationEvent, { type: 'content' }> => e.type === 'content')
+      .map((e) => e.delta)
+      .join('');
+    const reasoning = events
+      .map((e) => e.event)
+      .filter((e): e is Extract<GenerationEvent, { type: 'reasoning' }> => e.type === 'reasoning')
+      .map((e) => e.delta)
+      .join('');
+
+    expect(content).toBe('ab');
+    expect(reasoning).toBe('r1');
+  });
+
+  it('gives every event a monotonically increasing id', async () => {
+    const base = await boot({ contentChunks: ['a', 'b', 'c'], chunkDelayMs: 5 });
+    const { body } = await startGeneration(base);
+
+    const { events } = await readSse(`${base}/api/generations/${body.generationId}/stream`);
+
+    const ids = events.map((e) => Number(e.id));
+    expect(ids).toEqual([...ids].sort((a, b) => a - b));
+  });
+
+  it('INV-06: disconnecting does not cancel the generation', async () => {
+    const base = await boot({ contentChunks: ['a', 'b', 'c', 'd', 'e'], chunkDelayMs: 25 });
+    const { body } = await startGeneration(base);
+    const id = body.generationId!;
+
+    // Attach, read a couple of events, then hang up mid-flight.
+    await readSse(`${base}/api/generations/${id}/stream`, { stopAfter: 2 });
+
+    const snapshot = await settle(base, id);
+    expect(snapshot.state).toBe('completed');
+    expect(snapshot.content).toBe('abcde');
+  });
+
+  it('a reconnecting client receives the current snapshot, then live events', async () => {
+    const base = await boot({ contentChunks: ['a', 'b', 'c', 'd'], chunkDelayMs: 30 });
+    const { body } = await startGeneration(base);
+    const id = body.generationId!;
+
+    await readSse(`${base}/api/generations/${id}/stream`, { stopAfter: 2 });
+    const { events } = await readSse(`${base}/api/generations/${id}/stream`);
+
+    const first = events[0]?.event;
+    expect(first?.type).toBe('snapshot');
+
+    // Snapshot content plus subsequent deltas must reconstruct the whole output.
+    const snapshotContent = first?.type === 'snapshot' ? first.snapshot.content : '';
+    const deltas = events
+      .map((e) => e.event)
+      .filter((e): e is Extract<GenerationEvent, { type: 'content' }> => e.type === 'content')
+      .map((e) => e.delta)
+      .join('');
+
+    expect(snapshotContent + deltas).toBe('abcd');
+  });
+
+  it('streams a terminal generation as a single snapshot and closes', async () => {
+    const base = await boot({ contentChunks: ['done'] });
+    const { body } = await startGeneration(base);
+    await settle(base, body.generationId!);
+
+    const { events } = await readSse(`${base}/api/generations/${body.generationId}/stream`);
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.event.type).toBe('snapshot');
+  });
+
+  it('404s for an unknown generation without opening a stream', async () => {
+    const base = await boot();
+
+    const response = await fetch(`${base}/api/generations/missing/stream`);
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get('content-type')).toContain('application/json');
+  });
+});
+
+describe('POST /api/generations/:id/cancel', () => {
+  it('moves a running generation to cancelled', async () => {
+    const base = await boot({ contentChunks: ['a', 'b', 'c', 'd'], chunkDelayMs: 30 });
+    const { body } = await startGeneration(base);
+
+    await new Promise((r) => setTimeout(r, 40));
+    const response = await fetch(`${base}/api/generations/${body.generationId}/cancel`, {
+      method: 'POST',
+    });
+    const snapshot = (await response.json()) as GenerationSnapshotDto;
+
+    expect(response.status).toBe(200);
+    expect(snapshot.state).toBe('cancelled');
+
+    const settled = await settle(base, body.generationId!);
+    expect(settled.state).toBe('cancelled');
+  });
+
+  it('404s for an unknown generation', async () => {
+    const base = await boot();
+
+    const response = await fetch(`${base}/api/generations/nope/cancel`, { method: 'POST' });
+
+    expect(response.status).toBe(404);
+  });
+});

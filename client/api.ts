@@ -1,4 +1,10 @@
 import type { HealthDto } from '@shared/api.ts';
+import type {
+  ChatMessage,
+  GenerationAcceptedDto,
+  GenerationSnapshotDto,
+  ModelDto,
+} from '@shared/generation.ts';
 import { isErrorCode, type ErrorCode } from '@shared/errors.ts';
 
 export class ApiError extends Error {
@@ -24,10 +30,13 @@ function readErrorBody(body: unknown): ApiError | null {
   return new ApiError(code, message);
 }
 
-async function request<T>(path: string): Promise<T> {
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(path, { headers: { Accept: 'application/json' } });
+    response = await fetch(path, {
+      ...init,
+      headers: { Accept: 'application/json', ...init?.headers },
+    });
   } catch {
     throw new ApiError('NETWORK', 'Could not reach the server.');
   }
@@ -45,4 +54,34 @@ async function request<T>(path: string): Promise<T> {
 
 export function fetchHealth(): Promise<HealthDto> {
   return request<HealthDto>('/api/health');
+}
+
+export async function fetchModels(): Promise<ModelDto[]> {
+  const { models } = await request<{ models: ModelDto[] }>('/api/models');
+  return models;
+}
+
+export function startGeneration(
+  model: string,
+  messages: ChatMessage[]
+): Promise<GenerationAcceptedDto> {
+  return request<GenerationAcceptedDto>('/api/generations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, messages }),
+  });
+}
+
+export function fetchGeneration(id: string): Promise<GenerationSnapshotDto> {
+  return request<GenerationSnapshotDto>(`/api/generations/${encodeURIComponent(id)}`);
+}
+
+export function cancelGeneration(id: string): Promise<GenerationSnapshotDto> {
+  return request<GenerationSnapshotDto>(`/api/generations/${encodeURIComponent(id)}/cancel`, {
+    method: 'POST',
+  });
+}
+
+export function generationStreamUrl(id: string): string {
+  return `/api/generations/${encodeURIComponent(id)}/stream`;
 }

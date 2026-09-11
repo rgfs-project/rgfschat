@@ -9,6 +9,13 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(0).max(65535).default(3001),
   DATA_DIR: z.string().min(1).default('./data'),
   LOG_LEVEL: z.enum(LOG_LEVELS).default('info'),
+
+  // Provider (Phase 2). A single llama.cpp endpoint; multi-provider is Phase 5.
+  LLAMA_BASE_URL: z.url().default('http://127.0.0.1:8080'),
+  LLAMA_API_KEY: z.string().min(1).optional(),
+  PROVIDER_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(120_000),
+  DEFAULT_CONTEXT_TOKENS: z.coerce.number().int().min(512).max(2_000_000).default(8_192),
+  MAX_OUTPUT_TOKENS: z.coerce.number().int().min(16).max(1_000_000).default(2_048),
 });
 
 export interface Config {
@@ -18,6 +25,21 @@ export interface Config {
   dataDir: string;
   logLevel: LogLevel;
   isProduction: boolean;
+  provider: ProviderConfig;
+}
+
+export interface ProviderConfig {
+  /** Base URL with any trailing slash removed, so path joins are unambiguous. */
+  baseUrl: string;
+  /**
+   * Bearer token for the upstream server. Secret: it is sent upstream only and
+   * never reaches a response, a log, or the browser (INV-04).
+   */
+  apiKey: string | undefined;
+  timeoutMs: number;
+  /** Used when the provider does not disclose a model's context length. */
+  defaultContextTokens: number;
+  maxOutputTokens: number;
 }
 
 /**
@@ -34,7 +56,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     throw new Error(`Invalid environment configuration:\n${issues}`);
   }
 
-  const { NODE_ENV, PORT, DATA_DIR, LOG_LEVEL } = parsed.data;
+  const {
+    NODE_ENV,
+    PORT,
+    DATA_DIR,
+    LOG_LEVEL,
+    LLAMA_BASE_URL,
+    LLAMA_API_KEY,
+    PROVIDER_TIMEOUT_MS,
+    DEFAULT_CONTEXT_TOKENS,
+    MAX_OUTPUT_TOKENS,
+  } = parsed.data;
 
   return {
     nodeEnv: NODE_ENV,
@@ -42,6 +74,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dataDir: resolve(DATA_DIR),
     logLevel: LOG_LEVEL,
     isProduction: NODE_ENV === 'production',
+    provider: {
+      baseUrl: LLAMA_BASE_URL.replace(/\/+$/, ''),
+      apiKey: LLAMA_API_KEY,
+      timeoutMs: PROVIDER_TIMEOUT_MS,
+      defaultContextTokens: DEFAULT_CONTEXT_TOKENS,
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+    },
   };
 }
 
