@@ -36,6 +36,22 @@
   --accent: #121212;
   --on-accent: #ffffff;
 
+  /*
+   * Motion.
+   *
+   * Two durations and one curve, shared by everything, so the interface moves
+   * at one speed rather than at each component's guess. `--ease-out` decelerates
+   * into place, which is what makes something entering read as arriving rather
+   * than as being thrown.
+   *
+   * Chrome moves; **text does not**. Nothing here is applied to message bodies,
+   * markdown, or the transcript: animating content that is already streaming in
+   * fights the reader, and a body that fades on every token is unreadable.
+   */
+  --motion-fast: 120ms;
+  --motion: 180ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+
   --sidebar-width: 22rem;
   --header-height: 4.25rem;
   /* The single horizontal inset shared by both header rows. */
@@ -68,6 +84,22 @@
 
 * {
   box-sizing: border-box;
+}
+
+/*
+ * One switch for everyone who has asked for less movement. Declared once,
+ * globally, rather than repeated per rule — a component added later is covered
+ * without anyone remembering to cover it.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /*
@@ -164,9 +196,22 @@ select:focus-visible,
   flex: none;
 }
 
+.icon-button {
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
 .icon-button:hover:not(:disabled) {
   background: var(--surface-2);
   color: var(--text);
+}
+
+/* A small, immediate acknowledgement of the press itself. */
+.icon-button:active:not(:disabled),
+.nav-button:active,
+.button-primary:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
 /** The filled, high-contrast action. */
@@ -178,6 +223,12 @@ select:focus-visible,
   background: var(--accent);
   color: var(--on-accent);
   font-weight: 500;
+}
+
+.button-primary {
+  transition:
+    opacity var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
 }
 
 .button-primary:hover:not(:disabled) {
@@ -195,6 +246,12 @@ select:focus-visible,
   text-align: left;
   color: var(--text);
   font-size: 1rem;
+}
+
+.nav-button {
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
 }
 
 .nav-button:hover {
@@ -222,6 +279,14 @@ select:focus-visible,
   outline: none;
   color: var(--text);
   font-size: 1rem;
+}
+
+.search {
+  transition: border-color var(--motion-fast) var(--ease-out);
+}
+
+.search:focus-within {
+  border-color: var(--border-strong);
 }
 
 .search input::placeholder {

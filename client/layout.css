@@ -75,8 +75,8 @@ body {
   transform: translateX(-100%);
   visibility: hidden;
   transition:
-    transform 200ms ease,
-    visibility 200ms;
+    transform var(--motion) var(--ease-out),
+    visibility var(--motion);
 }
 
 .shell[data-sidebar='expanded'] .sidebar {
@@ -86,14 +86,7 @@ body {
 
 /* The main column follows it on a wide window, at the same rate. */
 .main {
-  transition: padding-left 200ms ease;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sidebar,
-  .main {
-    transition: none;
-  }
+  transition: padding-left var(--motion) var(--ease-out);
 }
 
 .sidebar__brand,
@@ -210,6 +203,7 @@ body {
   inset: 0;
   z-index: 15;
   background: color-mix(in srgb, #000 45%, transparent);
+  animation: fade-in var(--motion-fast) var(--ease-out);
 }
 
 .main__title {
