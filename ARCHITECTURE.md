@@ -5,7 +5,7 @@ maintained **outside this repository** alongside the phase prompts that drive th
 This document records what is **actually built** and where each invariant is enforced.
 If this file and the contract disagree, the contract wins and the discrepancy is a bug.
 
-Current state: **Phase 2 complete.**
+Current state: **Phase 3 complete.**
 
 ## 1. Process shape
 
@@ -52,17 +52,20 @@ canonical codes, and maps everything else to `INTERNAL` with a fixed message.
 
 Error codes in use (the subset of the contracts §5 table reached so far):
 
-| Code                   | HTTP | Raised by                                       |
-| ---------------------- | ---- | ----------------------------------------------- |
-| `VALIDATION`           | 400  | schema failure, malformed JSON                  |
-| `NOT_FOUND`            | 404  | unmatched route                                 |
-| `PAYLOAD_TOO_LARGE`    | 413  | body over `JSON_BODY_LIMIT` (100 kb)            |
-| `INTERNAL`             | 500  | anything unhandled                              |
-| `PROVIDER_UNAVAILABLE` | 502  | upstream unreachable                            |
-| `PROVIDER_ERROR`       | 502  | upstream rejected, failed, or returned nonsense |
-| `PROVIDER_TIMEOUT`     | 504  | upstream exceeded `PROVIDER_TIMEOUT_MS`         |
-| `MODEL_NOT_FOUND`      | 400  | model absent from the discovered list           |
-| `GENERATION_NOT_FOUND` | 404  | unknown generation id                           |
+| Code                     | HTTP | Raised by                                       |
+| ------------------------ | ---- | ----------------------------------------------- |
+| `VALIDATION`             | 400  | schema failure, malformed JSON                  |
+| `NOT_FOUND`              | 404  | unmatched route                                 |
+| `PAYLOAD_TOO_LARGE`      | 413  | body over `JSON_BODY_LIMIT` (100 kb)            |
+| `INTERNAL`               | 500  | anything unhandled                              |
+| `PROVIDER_UNAVAILABLE`   | 502  | upstream unreachable                            |
+| `PROVIDER_ERROR`         | 502  | upstream rejected, failed, or returned nonsense |
+| `PROVIDER_TIMEOUT`       | 504  | upstream exceeded `PROVIDER_TIMEOUT_MS`         |
+| `MODEL_NOT_FOUND`        | 400  | model absent from the discovered list           |
+| `GENERATION_NOT_FOUND`   | 404  | unknown generation id                           |
+| `CONVERSATION_MALFORMED` | 422  | a conversation file that cannot be parsed       |
+| `GENERATION_IN_PROGRESS` | 409  | a second send for the same conversation         |
+| `CONTEXT_TOO_LARGE`      | 422  | the prompt cannot fit the model's context       |
 
 Express 5 forwards rejected promises from async handlers to the error middleware natively, so
 there is no `asyncHandler` wrapper anywhere in the codebase.
@@ -150,14 +153,14 @@ Every invariant is enforced in code and covered by at least one test whose title
 | INV-04 | Provider credentials and raw provider payloads never reach the browser                                          | 2     | `server/provider/llamacpp.ts` (`listModels` DTO mapping)     | `server/provider/llamacpp.test.ts`, `server/routes/generations.test.ts`  |
 | INV-05 | A generation reaches exactly one terminal state                                                                 | 2     | `server/generation/manager.ts` (`#finish`)                   | `server/generation/manager.test.ts`                                      |
 | INV-06 | Closing an SSE connection never cancels a generation                                                            | 2     | `server/routes/generations.ts` (`cleanup` only unsubscribes) | `server/generation/manager.test.ts`, `server/routes/generations.test.ts` |
-| INV-07 | The assistant message is written to canonical storage exactly once per generation                               | 3     | pending                                                      | pending                                                                  |
-| INV-08 | The user message is durable before `202` is returned                                                            | 3     | pending                                                      | pending                                                                  |
-| INV-09 | `formatVersion: 1` round-trips exactly                                                                          | 3     | pending                                                      | pending                                                                  |
-| INV-10 | Malformed conversations are never modified and never break other conversations                                  | 3     | pending                                                      | pending                                                                  |
-| INV-11 | The index is derived: deleting it and restarting loses nothing                                                  | 3     | pending                                                      | pending                                                                  |
-| INV-12 | No filesystem path contains request-controlled input; all paths stay inside `DATA_DIR`                          | 3     | pending                                                      | pending                                                                  |
-| INV-13 | At most one non-terminal generation per conversation                                                            | 3     | pending                                                      | pending                                                                  |
-| INV-14 | Identity comes only from server-side state                                                                      | 3     | pending                                                      | pending                                                                  |
+| INV-07 | The assistant message is written to canonical storage exactly once per generation                               | 3     | `server/generation/service.ts` (`#persistOnTerminal`)        | `server/storage/persistence.test.ts`                                     |
+| INV-08 | The user message is durable before `202` is returned                                                            | 3     | `server/generation/service.ts` (`start`, under the lock)     | `server/storage/persistence.test.ts`                                     |
+| INV-09 | `formatVersion: 1` round-trips exactly                                                                          | 3     | `server/storage/markdown.ts`                                 | `server/storage/markdown.test.ts`                                        |
+| INV-10 | Malformed conversations are never modified and never break other conversations                                  | 3     | `server/storage/conversations.ts`                            | `server/storage/storage.test.ts`, `server/storage/persistence.test.ts`   |
+| INV-11 | The index is derived: deleting it and restarting loses nothing                                                  | 3     | `server/storage/index.ts`                                    | `server/storage/persistence.test.ts`                                     |
+| INV-12 | No filesystem path contains request-controlled input; all paths stay inside `DATA_DIR`                          | 3     | `server/storage/paths.ts`                                    | `server/storage/storage.test.ts`                                         |
+| INV-13 | At most one non-terminal generation per conversation                                                            | 3     | `server/generation/service.ts` (`#active` under the lock)    | `server/storage/persistence.test.ts`                                     |
+| INV-14 | Identity comes only from server-side state                                                                      | 3     | `server/config.ts` + `createApp({ userId })`                 | `server/storage/persistence.test.ts`                                     |
 | INV-15 | A user can never read, modify, delete, or observe another user's resources (404)                                | 4     | pending                                                      | pending                                                                  |
 | INV-16 | Every state-changing route requires a valid CSRF token or same-origin check                                     | 4     | pending                                                      | pending                                                                  |
 | INV-17 | Reducing a user's privileges or disabling them revokes all their sessions                                       | 4     | pending                                                      | pending                                                                  |
@@ -175,20 +178,94 @@ Every invariant is enforced in code and covered by at least one test whose title
 
 ## 6. Storage
 
-N/A until Phase 3. `data/` exists as a boundary and is git-ignored except for `.gitkeep`.
-`DATA_DIR` is resolved to an absolute path at boot, but nothing reads or writes it yet.
-The centralized path-construction module required by contracts §1 arrives with Phase 3, and
-deliberately does not exist now — an unused abstraction would be scaffolding for a phase
-whose requirements are not yet in front of us.
+```text
+data/<user-uuid>/chats/<conversation-uuid>.md   canonical
+data/<user-uuid>/index/chats.json               derived, deletable
+```
+
+**`StoragePaths` is the only module that builds a path under `DATA_DIR`.** Two independent
+defences make INV-12 hold: every segment is _validated_ (a canonical lowercase UUID, or a
+known filename) rather than escaped, and every resolved path is then asserted to remain
+inside the root before any syscall — so a bug in validation still cannot produce an escaping
+path. Nothing outside this module joins paths.
+
+**Atomic durable writes** (`atomic.ts`, contracts §2): temp write → `fsync` → `rename` →
+`fsync` parent. The rename is atomic on POSIX, so a reader sees either the old bytes or the
+new ones, never a partial file. _Windows caveat:_ directory `fsync` is unavailable and is
+skipped there, and rename-over-existing differs; single-process POSIX operation is what the
+durability guarantee covers.
+
+**Startup sweep** removes only files matching the temp pattern **and** older than process
+start, so a write in flight is never destroyed and nothing else can be swept by accident.
+
+**Locking** (`locks.ts`) is in-process and keyed. Every canonical mutation, including
+delete, runs under the conversation lock, so a read-modify-write cannot interleave. This is
+memory, not files: **two processes sharing one `DATA_DIR` would not see each other's locks**,
+which is why contracts §2 declares multi-process deployment unsupported.
+
+Permissions are 0700 for directories and 0600 for files.
+
+### The derived index
+
+`index/chats.json` is a cache, never a source of truth (INV-11). It is rebuilt from the
+Markdown when missing, unparseable, or left `dirty` by a crash — the dirty flag is set before
+a mutation and cleared with it. `npm run index:rebuild` rebuilds on demand. A file that
+cannot be parsed is listed with `malformed: true` rather than skipped, so a corrupt
+conversation stays visible and deletable instead of silently vanishing.
 
 ## 7. Conversation format
 
-N/A until Phase 3. Frozen at `formatVersion: 1` by contracts §3 once it ships.
+`formatVersion: 1`, implemented in `server/storage/markdown.ts` to contracts §3 and frozen.
+The parser returns a typed `ok | malformed` result and never throws on bad content;
+filesystem failures are a separate error class. The serializer is pure, which is what makes
+the §3.6 round-trip guarantee testable — it is covered by property-based tests over bodies
+containing delimiter-like lines, backslashes, blank lines, tabs, and CR.
+
+`reasoning` is modelled as a **field on the assistant message** rather than a separate
+message. The contract requires a reasoning block to be immediately followed by its assistant
+block, at most one per assistant; as a field those rules cannot be violated by construction,
+and reasoning can never be mistaken for prompt history.
+
+Two format properties worth knowing:
+
+- An **empty body** is legal and emits no body lines — contracts §4 writes one for a failed
+  generation, and appending a bare newline there would leave a stray blank line.
+- A body line **ending in CR cannot round-trip**: CR followed by the file's LF _is_ a CRLF,
+  which §3.2 requires normalising to LF. A lone CR _within_ a line survives. This is a
+  property of the format, not a parser limitation.
+
+### Generation ↔ storage
+
+`GenerationService` binds the two. The user message is persisted before `POST
+/api/generations` returns 202 (INV-08), the whole check-and-append runs under the
+conversation lock so two simultaneous sends cannot both pass the in-progress check (INV-13),
+and the assistant block — with its reasoning block, if any — is appended exactly once when
+the generation reaches a terminal state (INV-07). Generation state is never a second message
+store.
+
+**The status enums deliberately differ.** Markdown spells success `complete` (contracts
+§3.4); the in-memory generation state is `completed`. `STATUS_FOR_STATE` maps between them in
+one place, so the file format stays authoritative without renaming either side.
+
+If a conversation is deleted while its generation runs, the run finishes and its output is
+discarded and logged rather than resurrecting the file.
+
+**Prompt assembly** (`generation/prompt.ts`) reads only canonical storage: all system
+messages first in file order, then user/assistant bodies in order. Reasoning is never sent
+back, and assistant messages with an empty body are skipped — replaying one would teach the
+model to answer with silence. Over budget, the oldest non-system messages are dropped whole;
+the newest user message is never dropped, and if it alone does not fit the request fails with
+`CONTEXT_TOO_LARGE` before the provider is called.
+
+Token counts use the conservative estimate (≥1 token per 3 bytes) rather than the provider's
+tokenizer: per `docs/provider-notes.md`, `/tokenize` requires a `model` and triggers a model
+load on a router-mode server, so counting tokens would cost a model swap.
 
 ## 8. Authentication and sessions
 
-N/A until Phase 4. Phase 1–3 have no concept of a user; Phase 3 uses a configured
-`LOCAL_USER_ID`.
+N/A until Phase 4. Phase 3 uses `LOCAL_USER_ID`, validated at boot as a canonical lowercase
+UUID and used as the sole source of the user-directory segment (INV-14). It is never read
+from a header, query, body, or route param.
 
 ## 9. Providers and models
 

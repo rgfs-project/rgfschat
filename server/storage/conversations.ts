@@ -175,6 +175,28 @@ export class ConversationStore {
     });
   }
 
+  /**
+   * Writes a conversation **without** taking the lock.
+   *
+   * Only for callers already running inside `locks.run(conversationKey(...))` —
+   * taking it again would deadlock. `updatedAt` is still stamped here and
+   * `createdAt` is still carried through, so storage keeps ownership of both
+   * regardless of which entry point is used.
+   */
+  async writeUnderLock(
+    userId: string,
+    conversationId: string,
+    next: Conversation
+  ): Promise<Conversation> {
+    const written: Conversation = { ...next, updatedAt: this.#timestamp() };
+
+    await atomicWriteFile(
+      this.#paths.conversationFile(userId, conversationId),
+      serializeConversation(written)
+    );
+    return written;
+  }
+
   /** Appends messages atomically. The whole read-append-write holds the lock. */
   async appendMessages(
     userId: string,

@@ -64,9 +64,11 @@ export interface GenerationSnapshotDto {
   lastEventId: number;
 }
 
-/** `POST /api/generations` → 202. */
+/** `POST /api/generations` → 202. All three ids are minted server-side. */
 export interface GenerationAcceptedDto {
   generationId: string;
+  /** The user message, already durable before this is returned (INV-08). */
+  userMessageId: string;
   assistantMessageId: string;
 }
 

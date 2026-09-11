@@ -1,5 +1,8 @@
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { GenerationEvent, GenerationSnapshotDto } from '@shared/generation.ts';
 import { createApp } from '../app.ts';
@@ -11,14 +14,25 @@ import {
   type MockProvider,
   type MockProviderOptions,
 } from '../provider/mockServer.ts';
+import { ConversationStore } from '../storage/conversations.ts';
+import { ChatIndex } from '../storage/index.ts';
+import { StoragePaths } from '../storage/paths.ts';
+import { GenerationService } from '../generation/service.ts';
 
 const logger = createLogger({ level: 'silent', write: () => {} });
+const USER = '0a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d';
 
 let mock: MockProvider | undefined;
 let server: Server | undefined;
 let manager: GenerationManager | undefined;
+let dataDir: string | undefined;
+let store: ConversationStore | undefined;
+let service: GenerationService | undefined;
 
 afterEach(async () => {
+  // Generation output is persisted after the terminal state, so removing the
+  // temp DATA_DIR immediately can race an in-flight index write.
+  await service?.allSettled();
   manager?.shutdown();
   manager = undefined;
   if (server !== undefined) {
@@ -29,6 +43,12 @@ afterEach(async () => {
   }
   await mock?.close();
   mock = undefined;
+  if (dataDir !== undefined) {
+    await rm(dataDir, { recursive: true, force: true });
+    dataDir = undefined;
+  }
+  store = undefined;
+  service = undefined;
 });
 
 /** Boots the real app over real HTTP, which is what SSE needs. */
@@ -46,7 +66,29 @@ async function boot(options: MockProviderOptions = {}, apiKey?: string): Promise
   );
   manager = new GenerationManager({ provider, logger, maxOutputTokens: 128 });
 
-  const app = createApp({ logger, provider, manager });
+  dataDir = await mkdtemp(join(tmpdir(), 'workspace-gen-'));
+  store = new ConversationStore({ paths: new StoragePaths(dataDir), logger });
+  const index = new ChatIndex({ store, logger });
+  await store.init(USER);
+  service = new GenerationService({
+    store,
+    index,
+    manager,
+    provider,
+    logger,
+    defaultContextTokens: 8_192,
+    maxOutputTokens: 128,
+  });
+
+  const app = createApp({
+    logger,
+    provider,
+    manager,
+    store,
+    index,
+    service,
+    userId: () => USER,
+  });
   server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server?.once('listening', resolve));
 
@@ -54,11 +96,22 @@ async function boot(options: MockProviderOptions = {}, apiKey?: string): Promise
   return `http://127.0.0.1:${port}`;
 }
 
-async function startGeneration(base: string, model = 'GPT') {
+/** Phase 3: history comes from storage, so a conversation must exist first. */
+async function newConversation(base: string): Promise<string> {
+  const response = await fetch(`${base}/api/conversations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  return ((await response.json()) as { id: string }).id;
+}
+
+async function startGeneration(base: string, model = 'GPT', conversationId?: string) {
+  const id = conversationId ?? (await newConversation(base));
   const response = await fetch(`${base}/api/generations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages: [{ role: 'user', content: 'hi' }] }),
+    body: JSON.stringify({ conversationId: id, model, content: 'hi' }),
   });
   return { status: response.status, body: (await response.json()) as Record<string, string> };
 }
@@ -154,16 +207,21 @@ describe('POST /api/generations', () => {
     const { status, body } = await startGeneration(base);
 
     expect(status).toBe(202);
-    expect(Object.keys(body).sort()).toEqual(['assistantMessageId', 'generationId']);
+    expect(Object.keys(body).sort()).toEqual([
+      'assistantMessageId',
+      'generationId',
+      'userMessageId',
+    ]);
   });
 
   it('rejects an unknown model with MODEL_NOT_FOUND and creates nothing', async () => {
     const base = await boot();
 
+    const conversationId = await newConversation(base);
     const response = await fetch(`${base}/api/generations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'no-such-model', messages: [{ role: 'user', content: 'hi' }] }),
+      body: JSON.stringify({ conversationId, model: 'no-such-model', content: 'hi' }),
     });
     const body = (await response.json()) as { error: { code: string } };
 
@@ -174,24 +232,27 @@ describe('POST /api/generations', () => {
   it('INV-02: rejects unknown fields and malformed messages', async () => {
     const base = await boot();
 
+    const conversationId = await newConversation(base);
+
     const extra = await fetch(`${base}/api/generations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'GPT',
-        messages: [{ role: 'user', content: 'hi' }],
-        temperature: 0.9,
-      }),
+      body: JSON.stringify({ conversationId, model: 'GPT', content: 'hi', temperature: 0.9 }),
     });
     expect(extra.status).toBe(400);
     expect(((await extra.json()) as { error: { code: string } }).error.code).toBe('VALIDATION');
 
-    const badRole = await fetch(`${base}/api/generations`, {
+    // The client may no longer supply history; it comes from storage.
+    const withMessages = await fetch(`${base}/api/generations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'GPT', messages: [{ role: 'root', content: 'hi' }] }),
+      body: JSON.stringify({
+        conversationId,
+        model: 'GPT',
+        messages: [{ role: 'user', content: 'hi' }],
+      }),
     });
-    expect(badRole.status).toBe(400);
+    expect(withMessages.status).toBe(400);
   });
 });
 

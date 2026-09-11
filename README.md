@@ -4,9 +4,10 @@ A self-hosted chat workspace. Conversations are plain Markdown files on disk, ge
 owned by the server, and the model provider is replaceable.
 
 This repository is built in phases against a project contract kept outside the repository.
-**Phase 2** is complete: the foundation and
-HTTP conventions, plus a llama.cpp provider, server-owned generations, and SSE streaming.
-Conversations are not yet persisted — that is Phase 3.
+**Phase 3** is complete: the foundation and HTTP
+conventions, a llama.cpp provider with server-owned generations and SSE streaming, and
+canonical Markdown persistence with a rebuildable index. There is still no authentication —
+that is Phase 4, so do not expose this to a network you do not control.
 
 ## Prerequisites
 
@@ -55,6 +56,8 @@ npm run build
 npm run verify
 ```
 
+`npm run index:rebuild` rebuilds the derived conversation index from the Markdown.
+
 `verify` is the one that matters most: it builds, boots the **real** server on a free port
 with a throwaway `DATA_DIR`, and checks the health DTO, the canonical 404, and clean
 shutdown on `SIGTERM`. Nothing is mocked.
@@ -65,19 +68,20 @@ Copy `.env.example` to `.env`. Every variable has a safe default, so an empty fi
 The environment is validated once at boot and the process exits with a readable message if
 it is invalid — never with a stack trace, and never echoing the offending value.
 
-| Variable                 | Default                 | Purpose                                                |
-| ------------------------ | ----------------------- | ------------------------------------------------------ |
-| `NODE_ENV`               | `development`           | `development` \| `test` \| `production`                |
-| `PORT`                   | `3001`                  | API port (client port under `npm run dev`)             |
-| `API_PORT`               | `3001`                  | API port used by `npm run dev`                         |
-| `DATA_DIR`               | `./data`                | Persistent boundary. Nothing writes here until Phase 3 |
-| `LOG_LEVEL`              | `info`                  | `debug` \| `info` \| `warn` \| `error` \| `silent`     |
-| `VITE_API_TARGET`        | `http://localhost:3001` | Dev/preview proxy target                               |
-| `LLAMA_BASE_URL`         | `http://127.0.0.1:8080` | llama.cpp `llama-server` endpoint                      |
-| `LLAMA_API_KEY`          | _(unset)_               | **Secret.** Bearer token, if the server requires one   |
-| `PROVIDER_TIMEOUT_MS`    | `120000`                | Generous: a cold model load can take ~12 s             |
-| `DEFAULT_CONTEXT_TOKENS` | `8192`                  | Fallback when a model's real context is unknown        |
-| `MAX_OUTPUT_TOKENS`      | `2048`                  | Per-generation output cap                              |
+| Variable                 | Default                 | Purpose                                              |
+| ------------------------ | ----------------------- | ---------------------------------------------------- |
+| `NODE_ENV`               | `development`           | `development` \| `test` \| `production`              |
+| `PORT`                   | `3001`                  | API port (client port under `npm run dev`)           |
+| `API_PORT`               | `3001`                  | API port used by `npm run dev`                       |
+| `DATA_DIR`               | `./data`                | Persistent boundary — conversations live here        |
+| `LOG_LEVEL`              | `info`                  | `debug` \| `info` \| `warn` \| `error` \| `silent`   |
+| `LOCAL_USER_ID`          | a fixed UUID            | Temporary single-user identity until Phase 4         |
+| `VITE_API_TARGET`        | `http://localhost:3001` | Dev/preview proxy target                             |
+| `LLAMA_BASE_URL`         | `http://127.0.0.1:8080` | llama.cpp `llama-server` endpoint                    |
+| `LLAMA_API_KEY`          | _(unset)_               | **Secret.** Bearer token, if the server requires one |
+| `PROVIDER_TIMEOUT_MS`    | `120000`                | Generous: a cold model load can take ~12 s           |
+| `DEFAULT_CONTEXT_TOKENS` | `8192`                  | Fallback when a model's real context is unknown      |
+| `MAX_OUTPUT_TOKENS`      | `2048`                  | Per-generation output cap                            |
 
 `.env` is git-ignored and loaded natively by Node (`--env-file-if-exists`), so there is no
 dotenv dependency.
@@ -116,6 +120,34 @@ scripts/    dev, build-server, verify, probe-provider
 docs/       provider-notes.md — observed provider behaviour
 data/       Persistent boundary — committed empty; contents are never tracked
 ```
+
+## Your data
+
+Everything lives under `DATA_DIR` (default `./data`):
+
+```text
+data/<user-uuid>/chats/<conversation-uuid>.md   canonical — plain Markdown you can read,
+                                                diff, grep, and edit by hand
+data/<user-uuid>/index/chats.json               derived — a cache, safe to delete
+```
+
+Conversations are the source of truth. Edit one in your editor and the change is picked up on
+the next read; run `npm run index:rebuild` (or just restart) to refresh the cached list.
+
+**Backups: copy all of `data/`.** `index/` is optional — it is rebuilt from the Markdown when
+missing, unparseable, or left half-written by a crash. Deleting `data/<user-uuid>/` removes
+that user and everything they own.
+
+A conversation file that cannot be parsed is **never** repaired, normalised, or rewritten. It
+stays listed, reads and renames return `CONVERSATION_MALFORMED`, and you can still delete it.
+Other conversations are unaffected.
+
+### Single process only
+
+Locking is in-memory, so **two servers sharing one `DATA_DIR` would not see each other's
+locks** and could lose writes. Run exactly one process per `DATA_DIR`. Durability is
+guaranteed on POSIX; on Windows the directory `fsync` barrier is unavailable and
+rename-over-existing differs, so Windows is not covered by the durability guarantee.
 
 ## Architecture intent
 

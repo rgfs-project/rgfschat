@@ -13,13 +13,14 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const STARTUP_TIMEOUT_MS = 15_000;
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 const PROVIDER_KEY = 'verify-provider-key-do-not-log';
+const LOCAL_USER_ID = '0a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d';
 
 let failures = 0;
 
@@ -230,17 +231,30 @@ async function main() {
 
   console.log(`\n[2/3] Starting server on ${baseUrl} (DATA_DIR=${dataDir})…`);
   console.log(`      mock provider at ${provider.url}`);
-  const child = spawn(process.execPath, ['dist/server/index.js'], {
-    env: {
-      ...process.env,
-      PORT: String(port),
-      DATA_DIR: dataDir,
-      NODE_ENV: 'production',
-      LLAMA_BASE_URL: provider.url,
-      LLAMA_API_KEY: PROVIDER_KEY,
-    },
-    stdio: ['ignore', 'inherit', 'inherit'],
-  });
+
+  const startServer = () =>
+    spawn(process.execPath, ['dist/server/index.js'], {
+      env: {
+        ...process.env,
+        PORT: String(port),
+        DATA_DIR: dataDir,
+        NODE_ENV: 'production',
+        LOCAL_USER_ID,
+        LLAMA_BASE_URL: provider.url,
+        LLAMA_API_KEY: PROVIDER_KEY,
+      },
+      stdio: ['ignore', 'inherit', 'inherit'],
+    });
+
+  let child = startServer();
+
+  /** Stops the server and starts a fresh one on the same DATA_DIR. */
+  const restart = async () => {
+    child.kill('SIGTERM');
+    await waitForExit(child);
+    child = startServer();
+    await waitForHealth(baseUrl, child);
+  };
 
   try {
     await waitForHealth(baseUrl, child);
@@ -290,19 +304,32 @@ async function main() {
       JSON.stringify(models).slice(0, 200)
     );
 
+    // From Phase 3 a generation belongs to a persisted conversation, and the
+    // client sends only the new message.
+    const firstConversation = await (
+      await fetch(`${baseUrl}/api/conversations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      })
+    ).json();
+
     const started = await fetch(`${baseUrl}/api/generations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        conversationId: firstConversation.id,
         model: models.models[0].id,
-        messages: [{ role: 'user', content: 'hello' }],
+        content: 'hello',
       }),
     });
     const accepted = await started.json();
     check('generation accepted with 202', started.status === 202, `got ${started.status}`);
     check(
-      'both ids are minted',
-      typeof accepted.generationId === 'string' && typeof accepted.assistantMessageId === 'string',
+      'all ids are minted',
+      typeof accepted.generationId === 'string' &&
+        typeof accepted.userMessageId === 'string' &&
+        typeof accepted.assistantMessageId === 'string',
       JSON.stringify(accepted)
     );
 
@@ -347,7 +374,11 @@ async function main() {
     const unknownModel = await fetch(`${baseUrl}/api/generations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'nope', messages: [{ role: 'user', content: 'x' }] }),
+      body: JSON.stringify({
+        conversationId: firstConversation.id,
+        model: 'nope',
+        content: 'x',
+      }),
     });
     const unknownBody = await unknownModel.json();
     check(
@@ -356,7 +387,147 @@ async function main() {
       JSON.stringify(unknownBody)
     );
 
-    // 4. Clean shutdown.
+    // 4. Persistence (Phase 3), end to end against the built server.
+    console.log('\n   persistence:');
+    const chatsDir = join(dataDir, LOCAL_USER_ID, 'chats');
+    const indexFile = join(dataDir, LOCAL_USER_ID, 'index', 'chats.json');
+
+    const api = {
+      create: async () =>
+        (
+          await fetch(`${baseUrl}/api/conversations`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}',
+          })
+        ).json(),
+      list: async () => (await (await fetch(`${baseUrl}/api/conversations`)).json()).conversations,
+      get: async (id) => {
+        const res = await fetch(`${baseUrl}/api/conversations/${id}`);
+        return { status: res.status, body: await res.json() };
+      },
+      remove: async (id) =>
+        (await fetch(`${baseUrl}/api/conversations/${id}`, { method: 'DELETE' })).status,
+      send: async (id, content) => {
+        const res = await fetch(`${baseUrl}/api/generations`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conversationId: id, model: 'Mock Model', content }),
+        });
+        return { status: res.status, body: await res.json() };
+      },
+    };
+
+    // create → send → generate
+    const conversation = await api.create();
+    check(
+      'conversation created',
+      typeof conversation.id === 'string',
+      JSON.stringify(conversation)
+    );
+
+    const sent = await api.send(conversation.id, 'remember this');
+    check('generation accepted for a conversation', sent.status === 202, `got ${sent.status}`);
+    check(
+      'all three ids are minted',
+      ['assistantMessageId', 'generationId', 'userMessageId'].every(
+        (k) => typeof sent.body[k] === 'string'
+      ),
+      JSON.stringify(sent.body)
+    );
+
+    const markdownPath = join(chatsDir, `${conversation.id}.md`);
+    check(
+      'INV-08: the user message is on disk immediately after 202',
+      (await readFile(markdownPath, 'utf8')).includes('remember this')
+    );
+
+    await readStream(`${baseUrl}/api/generations/${sent.body.generationId}/stream`);
+    // The assistant block is appended after the terminal state; poll briefly.
+    let markdown = '';
+    for (let i = 0; i < 100; i += 1) {
+      markdown = await readFile(markdownPath, 'utf8');
+      if (markdown.includes('cc:assistant')) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    check(
+      'INV-07: exactly one assistant block is persisted',
+      (markdown.match(/cc:assistant/g) || []).length === 1,
+      markdown.slice(0, 200)
+    );
+    check(
+      'the completed state is written as status=complete',
+      markdown.includes('status=complete '),
+      markdown.slice(0, 300)
+    );
+
+    // restart with the same DATA_DIR → persistence
+    await restart();
+    const afterRestart = await api.get(conversation.id);
+    check(
+      'conversation survives a restart',
+      afterRestart.status === 200 && afterRestart.body.messages.length === 2,
+      JSON.stringify(afterRestart.body).slice(0, 200)
+    );
+
+    // delete the index → restart → rebuild
+    await unlink(indexFile);
+    await restart();
+    const rebuilt = await api.list();
+    check(
+      'INV-11: the index rebuilds after being deleted',
+      rebuilt.some((e) => e.id === conversation.id) && rebuilt.every((e) => !e.malformed),
+      JSON.stringify(rebuilt)
+    );
+
+    // hand-edit the Markdown → reflected
+    const edited = (await readFile(markdownPath, 'utf8')).replace(
+      /title: "[^"]*"/,
+      'title: "Edited by hand"'
+    );
+    await writeFile(markdownPath, edited);
+    const afterEdit = await api.get(conversation.id);
+    check(
+      'a hand-edit to Markdown is reflected',
+      afterEdit.body.title === 'Edited by hand',
+      afterEdit.body.title
+    );
+
+    // corrupt one file → isolated
+    const other = await api.create();
+    const corruptPath = join(chatsDir, `${other.id}.md`);
+    await writeFile(corruptPath, '---\nformatVersion: 9\n---\n');
+    await unlink(indexFile);
+    await restart();
+
+    const corruptRead = await api.get(other.id);
+    check(
+      'a corrupt conversation returns CONVERSATION_MALFORMED',
+      corruptRead.status === 422 && corruptRead.body.error?.code === 'CONVERSATION_MALFORMED',
+      JSON.stringify(corruptRead.body)
+    );
+    check(
+      'a corrupt conversation is still listed as malformed',
+      (await api.list()).find((e) => e.id === other.id)?.malformed === true
+    );
+    check(
+      'the healthy conversation still works alongside it',
+      (await api.get(conversation.id)).status === 200
+    );
+    check(
+      'the corrupt file was never rewritten',
+      (await readFile(corruptPath, 'utf8')) === '---\nformatVersion: 9\n---\n'
+    );
+
+    // delete → gone
+    check('a corrupt conversation can be deleted', (await api.remove(other.id)) === 204);
+    check('deleting removes it from the index', !(await api.list()).some((e) => e.id === other.id));
+    check(
+      'deleting removes the Markdown file',
+      !(await readdir(chatsDir)).includes(`${other.id}.md`)
+    );
+
+    // 5. Clean shutdown.
     child.kill('SIGTERM');
     const exited = await Promise.race([
       waitForExit(child),

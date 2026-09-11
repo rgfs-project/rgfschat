@@ -1,30 +1,37 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import type { GenerationAcceptedDto, GenerationEvent } from '@shared/generation.ts';
+import { isCanonicalUuid } from '@shared/conversation.ts';
 import { AppError } from '../errors/AppError.ts';
 import type { GenerationManager } from '../generation/manager.ts';
+import type { GenerationService } from '../generation/service.ts';
 import { validateBody } from '../http/validate.ts';
 import type { Provider } from '../provider/types.ts';
 
 /** Heartbeat interval. Contracts §5 require at least one every 15 s. */
 const SSE_HEARTBEAT_MS = 10_000;
 
-const messageSchema = z.strictObject({
-  role: z.enum(['system', 'user', 'assistant']),
-  content: z.string().max(200_000),
-});
-
+// From Phase 3 the client sends only the new user message; the server assembles
+// history from canonical storage (contracts §4).
 const createGenerationSchema = z.strictObject({
+  conversationId: z.string().min(1).max(200),
   model: z.string().min(1).max(200),
-  messages: z.array(messageSchema).min(1).max(200),
+  content: z.string().min(1).max(200_000),
 });
 
 export interface GenerationRoutesOptions {
   manager: GenerationManager;
   provider: Provider;
+  service: GenerationService;
+  userId: () => string;
 }
 
-export function generationRouter({ manager, provider }: GenerationRoutesOptions): Router {
+export function generationRouter({
+  manager,
+  provider,
+  service,
+  userId,
+}: GenerationRoutesOptions): Router {
   const router = Router();
 
   router.get('/models', async (_req, res) => {
@@ -33,18 +40,21 @@ export function generationRouter({ manager, provider }: GenerationRoutesOptions)
   });
 
   router.post('/generations', validateBody(createGenerationSchema), async (req, res) => {
-    const { model, messages } = req.body as z.infer<typeof createGenerationSchema>;
+    const { conversationId, model, content } = req.body as z.infer<typeof createGenerationSchema>;
+
+    if (!isCanonicalUuid(conversationId)) throw AppError.notFound('Conversation not found.');
 
     // The model is validated against the discovered list before anything is
-    // minted, so an unknown model never creates a generation.
+    // minted or persisted, so an unknown model never creates a generation.
     const models = await provider.listModels();
     if (!models.some((candidate) => candidate.id === model)) {
       throw new AppError('MODEL_NOT_FOUND', 'The requested model is not available.');
     }
 
-    const { generationId, assistantMessageId } = manager.start(model, messages);
+    // Returns only once the user message is durable (INV-08).
+    const result = await service.start(userId(), conversationId, model, content);
 
-    const dto: GenerationAcceptedDto = { generationId, assistantMessageId };
+    const dto: GenerationAcceptedDto = result;
     res.status(202).json(dto);
   });
 

@@ -1,10 +1,23 @@
 import type { HealthDto } from '@shared/api.ts';
-import type {
-  ChatMessage,
-  GenerationAcceptedDto,
-  GenerationSnapshotDto,
-  ModelDto,
-} from '@shared/generation.ts';
+import type { GenerationAcceptedDto, GenerationSnapshotDto, ModelDto } from '@shared/generation.ts';
+import type { Message } from '@shared/conversation.ts';
+
+export interface ConversationSummary {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messageCount: number;
+  malformed: boolean;
+}
+
+export interface ConversationDetail {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: Message[];
+}
 import { isErrorCode, type ErrorCode } from '@shared/errors.ts';
 
 export class ApiError extends Error {
@@ -61,15 +74,51 @@ export async function fetchModels(): Promise<ModelDto[]> {
   return models;
 }
 
+/** The server assembles history from storage; only the new message is sent. */
 export function startGeneration(
+  conversationId: string,
   model: string,
-  messages: ChatMessage[]
+  content: string
 ): Promise<GenerationAcceptedDto> {
   return request<GenerationAcceptedDto>('/api/generations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages }),
+    body: JSON.stringify({ conversationId, model, content }),
   });
+}
+
+export async function listConversations(): Promise<ConversationSummary[]> {
+  const { conversations } = await request<{ conversations: ConversationSummary[] }>(
+    '/api/conversations'
+  );
+  return conversations;
+}
+
+export function createConversation(): Promise<ConversationDetail> {
+  return request<ConversationDetail>('/api/conversations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+}
+
+export function getConversation(id: string): Promise<ConversationDetail> {
+  return request<ConversationDetail>(`/api/conversations/${encodeURIComponent(id)}`);
+}
+
+export function renameConversation(id: string, title: string): Promise<ConversationDetail> {
+  return request<ConversationDetail>(`/api/conversations/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  });
+}
+
+export async function deleteConversation(id: string): Promise<void> {
+  const response = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  if (!response.ok) throw new ApiError('INTERNAL', 'Could not delete the conversation.');
 }
 
 export function fetchGeneration(id: string): Promise<GenerationSnapshotDto> {

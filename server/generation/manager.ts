@@ -200,6 +200,35 @@ export class GenerationManager {
     record.emitter.emit('event', { id: record.lastEventId, event });
   }
 
+  /**
+   * Resolves once the generation reaches a terminal state, with its final
+   * output. Resolves immediately if it is already terminal, so a caller that
+   * attaches late never waits forever.
+   */
+  whenTerminal(id: string): Promise<{ state: TerminalState; content: string; reasoning: string }> {
+    const record = this.#generations.get(id);
+    if (record === undefined) {
+      return Promise.reject(new AppError('GENERATION_NOT_FOUND', 'Generation not found.'));
+    }
+
+    const settled = (): { state: TerminalState; content: string; reasoning: string } => ({
+      state: record.state as TerminalState,
+      content: record.content,
+      reasoning: record.reasoning,
+    });
+
+    if (isTerminal(record.state)) return Promise.resolve(settled());
+
+    return new Promise((resolve) => {
+      const listener = ({ event }: { event: GenerationEvent }): void => {
+        if (event.type !== 'done') return;
+        record.emitter.off('event', listener);
+        resolve(settled());
+      };
+      record.emitter.on('event', listener);
+    });
+  }
+
   get(id: string): GenerationSnapshotDto | null {
     const record = this.#generations.get(id);
     return record === undefined ? null : toSnapshot(record);
