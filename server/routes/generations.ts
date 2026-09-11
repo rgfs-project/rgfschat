@@ -75,12 +75,28 @@ export function generationRouter({
   /** Grouped by provider, with stale/unavailable flags for the UI. */
   router.get('/models', async (req, res) => {
     const groups = await hub.listModels();
-    res.json({
-      providers: groups.map((group) => ({
-        ...group,
-        models: group.models.filter((model) => !hiddenFor(req, group.providerId, model.id)),
-      })),
-    });
+    const visible = groups.map((group) => ({
+      ...group,
+      models: group.models.filter((model) => !hiddenFor(req, group.providerId, model.id)),
+    }));
+
+    /*
+     * The administrator's chosen default travels with the list rather than
+     * living in a separate admin-only endpoint: every user needs it to pick a
+     * model, and it is not sensitive. A default that has since been hidden or
+     * removed is dropped here, so a client is never handed a pair it would be
+     * refused for using.
+     */
+    const configured = settings?.resolved().defaultModel ?? null;
+    const stillUsable =
+      configured !== null &&
+      visible.some(
+        (group) =>
+          group.providerId === configured.providerId &&
+          group.models.some((model) => model.id === configured.modelId)
+      );
+
+    res.json({ providers: visible, defaultModel: stillUsable ? configured : null });
   });
 
   router.post('/generations', validateBody(createGenerationSchema), async (req, res) => {

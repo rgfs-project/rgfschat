@@ -379,6 +379,43 @@ describe('users', () => {
     expect(manager.get(started.generationId, plainUserId)?.state).toBe('cancelled');
   });
 
+  /**
+   * The other half of INV-17: the run stops *and* nobody can keep watching it.
+   * Cancelling alone would leave a disabled user's browser still attached to a
+   * live stream until it happened to reconnect.
+   */
+  it('leaves a disabled user’s observers unable to reach the generation', async () => {
+    const neverEnds = {
+      listModels: () => Promise.resolve([]),
+      contextLength: () => null,
+      async *streamChat() {
+        await new Promise(() => {});
+        yield { type: 'content' as const, text: '' };
+      },
+    };
+    const started = manager.start(plainUserId, 'echo-small', [], neverEnds, {
+      conversationId: 'c1',
+      providerId: 'local',
+    });
+
+    // Watchable while they are active.
+    expect((await plainUser.fetch(`/api/generations/${started.generationId}`)).status).toBe(200);
+
+    await admin.fetch(`/api/admin/users/${plainUserId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'disabled' }),
+    });
+
+    // Their own session is gone, so the stream is refused outright…
+    const own = await plainUser.fetch(`/api/generations/${started.generationId}/stream`);
+    expect(own.status).toBe(401);
+
+    // …and it is not somebody else's to watch either.
+    const other = await admin.fetch(`/api/generations/${started.generationId}`);
+    expect(other.status).toBe(404);
+  });
+
   it('deletes the user directory and locks them out', async () => {
     await users.create({ username: 'doomed', password: 'doomed-password' });
     const doomed = await users.findByUsername('doomed');
@@ -595,6 +632,37 @@ describe('settings and model visibility', () => {
 
     expect(idsFor(asUser)).not.toContain('echo-small');
     expect(idsFor(asAdmin)).toContain('echo-small');
+  });
+
+  it('publishes the configured default model to every user', async () => {
+    await admin.fetch('/api/admin/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ defaultModel: { providerId: 'local', modelId: 'echo-small' } }),
+    });
+
+    const body = (await (await plainUser.fetch('/api/models')).json()) as {
+      defaultModel: { providerId: string; modelId: string } | null;
+    };
+    expect(body.defaultModel).toEqual({ providerId: 'local', modelId: 'echo-small' });
+  });
+
+  it('withholds a default that has since been hidden', async () => {
+    await admin.fetch('/api/admin/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        defaultModel: { providerId: 'local', modelId: 'echo-small' },
+        hiddenModels: [{ providerId: 'local', modelId: 'echo-small' }],
+      }),
+    });
+
+    // Handing back a pair this user would be refused for using is worse than
+    // handing back nothing.
+    const asUser = (await (await plainUser.fetch('/api/models')).json()) as {
+      defaultModel: unknown;
+    };
+    expect(asUser.defaultModel).toBeNull();
   });
 
   it('changes the registration mode without a restart', async () => {

@@ -152,12 +152,15 @@ export interface ProviderModelGroup {
   models: { id: string; inputModalities: string[]; loaded: boolean }[];
 }
 
-export async function fetchModels(signal?: AbortSignal): Promise<ProviderModelGroup[]> {
-  const { providers } = await request<{ providers: ProviderModelGroup[] }>(
-    '/api/models',
-    signalInit(signal)
-  );
-  return providers;
+export interface ModelCatalogue {
+  providers: ProviderModelGroup[];
+  /** The administrator's default, already checked against what is visible. */
+  defaultModel: { providerId: string; modelId: string } | null;
+}
+
+export async function fetchModels(signal?: AbortSignal): Promise<ModelCatalogue> {
+  const body = await request<ModelCatalogue>('/api/models', signalInit(signal));
+  return { providers: body.providers, defaultModel: body.defaultModel ?? null };
 }
 
 /**
@@ -491,6 +494,8 @@ export function fetchAdminSettings(signal?: AbortSignal): Promise<AdminSettingsD
 
 export function updateAdminSettings(body: {
   registrationMode?: 'open' | 'closed';
+  /** `null` clears the configured default. */
+  defaultModel?: { providerId: string; modelId: string } | null;
   hiddenModels?: { providerId: string; modelId: string }[];
 }): Promise<AdminSettingsDto> {
   return request('/api/admin/settings', {

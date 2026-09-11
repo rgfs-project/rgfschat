@@ -78,8 +78,19 @@ function parseSelection(raw: string | null): ModelSelection | null {
   }
 }
 
-/** Prefers a model the provider already has resident, else the first available. */
-function defaultSelection(groups: ProviderGroups): ModelSelection | null {
+/**
+ * The model to start on.
+ *
+ * The administrator's configured default wins when there is one — the server
+ * has already checked it is visible to this user. Otherwise prefer a model the
+ * provider already has resident, so the first message does not pay for a load.
+ */
+function defaultSelection(
+  groups: ProviderGroups,
+  configured: ModelSelection | null
+): ModelSelection | null {
+  if (configured !== null) return configured;
+
   for (const group of groups) {
     if (group.status !== 'ready') continue;
     const loaded = group.models.find((model) => model.loaded);
@@ -92,7 +103,7 @@ function defaultSelection(groups: ProviderGroups): ModelSelection | null {
   return null;
 }
 
-type ProviderGroups = NonNullable<ReturnType<typeof useModels>['data']>;
+type ProviderGroups = NonNullable<ReturnType<typeof useModels>['data']>['providers'];
 
 export interface AppProps {
   user: UserDto;
@@ -181,12 +192,13 @@ export function App({
   const busy = live.state === 'pending' || live.state === 'streaming';
   const scroll = useScrollPin();
 
-  const groups = useMemo<ProviderGroups>(() => models.data ?? [], [models.data]);
+  const groups = useMemo<ProviderGroups>(() => models.data?.providers ?? [], [models.data]);
+  const configuredDefault = models.data?.defaultModel ?? null;
 
   useEffect(() => {
     if (groups.length === 0) return;
-    setFallbackSelection((current) => current ?? defaultSelection(groups));
-  }, [groups]);
+    setFallbackSelection((current) => current ?? defaultSelection(groups, configuredDefault));
+  }, [groups, configuredDefault]);
 
   const selection = useMemo(
     () =>

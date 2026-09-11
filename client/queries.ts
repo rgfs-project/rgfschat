@@ -22,7 +22,7 @@ import {
   startGeneration,
   type ConversationDetail,
   type ConversationSummary,
-  type ProviderModelGroup,
+  type ModelCatalogue,
 } from './api.ts';
 
 /**
@@ -100,7 +100,7 @@ export function useConversations(enabled: boolean): UseQueryResult<ConversationS
   });
 }
 
-export function useModels(enabled: boolean): UseQueryResult<ProviderModelGroup[]> {
+export function useModels(enabled: boolean): UseQueryResult<ModelCatalogue> {
   return useQuery({
     queryKey: keys.models(),
     queryFn: ({ signal }) => fetchModels(signal),

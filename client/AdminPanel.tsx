@@ -22,6 +22,7 @@ import {
   type AdminProviderDto,
   type ProviderWrite,
 } from './api.ts';
+import { Dialog } from './Dialog.tsx';
 import { keys, useModels } from './queries.ts';
 
 /**
@@ -142,12 +143,18 @@ function Problem({ message }: { message: string | null }): React.JSX.Element | n
 
 /* --- users ---------------------------------------------------------------- */
 
+/** A destructive or credential-changing step awaiting confirmation. */
+type UserPrompt =
+  | { kind: 'password'; id: string; username: string }
+  | { kind: 'delete'; id: string; username: string };
+
 function UsersSection({ currentUser }: { currentUser: UserDto }): React.JSX.Element {
   const client = useQueryClient();
   const [error, fail, clear] = useErrorMessage();
   const [creating, setCreating] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [prompt, setPrompt] = useState<UserPrompt | null>(null);
 
   const users = useQuery({
     queryKey: ['admin', 'users'],
@@ -243,12 +250,9 @@ function UsersSection({ currentUser }: { currentUser: UserDto }): React.JSX.Elem
             className="icon-button"
             aria-label={`Set a new password for ${account.username}`}
             title="Set a new password"
-            onClick={() => {
-              const next = window.prompt(`New password for ${account.username}`);
-              if (next !== null && next.length >= 8) {
-                resetPassword.mutate({ id: account.id, password: next });
-              }
-            }}
+            onClick={() =>
+              setPrompt({ kind: 'password', id: account.id, username: account.username })
+            }
           >
             <RefreshCw size={15} />
           </button>
@@ -259,19 +263,49 @@ function UsersSection({ currentUser }: { currentUser: UserDto }): React.JSX.Elem
             aria-label={`Delete ${account.username}`}
             title="Delete"
             disabled={account.id === currentUser.id}
-            onClick={() => {
-              // Typing the name is the server's confirmation too; asking here
-              // keeps the destructive step deliberate on both sides.
-              const typed = window.prompt(`Type ${account.username} to delete this account`);
-              if (typed === account.username) {
-                remove.mutate({ id: account.id, username: typed });
-              }
-            }}
+            onClick={() =>
+              setPrompt({ kind: 'delete', id: account.id, username: account.username })
+            }
           >
             <Trash2 size={15} />
           </button>
         </Row>
       ))}
+
+      {prompt !== null && (
+        <Dialog
+          title={
+            prompt.kind === 'password'
+              ? `New password for ${prompt.username}`
+              : `Delete ${prompt.username}?`
+          }
+          body={
+            prompt.kind === 'password'
+              ? 'Every session they have open is signed out.'
+              : 'Their account and everything they own is removed. Type their username to confirm.'
+          }
+          defaultValue=""
+          fieldLabel={prompt.kind === 'password' ? 'Password' : 'Username'}
+          confirmLabel={prompt.kind === 'password' ? 'Set password' : 'Delete'}
+          destructive={prompt.kind === 'delete'}
+          onCancel={() => setPrompt(null)}
+          onConfirm={(value) => {
+            const pending = prompt;
+            setPrompt(null);
+            if (pending.kind === 'password') {
+              resetPassword.mutate({ id: pending.id, password: value });
+              return;
+            }
+            // Typing the name is the server's confirmation too; requiring it
+            // here as well keeps the destructive step deliberate on both sides.
+            if (value === pending.username) {
+              remove.mutate({ id: pending.id, username: value });
+            } else {
+              fail(new Error('The typed username does not match.'));
+            }
+          }}
+        />
+      )}
 
       {creating ? (
         <form
@@ -538,7 +572,7 @@ function ModelsSection(): React.JSX.Element {
         </button>
       </Row>
 
-      {(models.data ?? []).flatMap((group) =>
+      {(models.data?.providers ?? []).flatMap((group) =>
         group.models.map((model) => {
           const isHidden = hidden.has(`${group.providerId} ${model.id}`);
           return (
@@ -583,17 +617,22 @@ function SettingsSection(): React.JSX.Element {
     queryFn: ({ signal }) => fetchAdminSettings(signal),
   });
 
+  const models = useModels(true);
+
   const save = useMutation({
-    mutationFn: (mode: 'open' | 'closed') => updateAdminSettings({ registrationMode: mode }),
+    mutationFn: (body: Parameters<typeof updateAdminSettings>[0]) => updateAdminSettings(body),
     onSuccess: () => {
       clear();
       void client.invalidateQueries({ queryKey: ['admin', 'settings'] });
       void client.invalidateQueries({ queryKey: keys.session() });
+      void client.invalidateQueries({ queryKey: keys.models() });
     },
     onError: fail,
   });
 
   const mode = settings.data?.resolved.registrationMode ?? 'closed';
+  const current = settings.data?.resolved.defaultModel ?? null;
+  const currentKey = current === null ? '' : `${current.providerId}\u0000${current.modelId}`;
 
   return (
     <>
@@ -605,10 +644,45 @@ function SettingsSection(): React.JSX.Element {
         <select
           aria-label="Registration mode"
           value={mode}
-          onChange={(event) => save.mutate(event.target.value as 'open' | 'closed')}
+          onChange={(event) =>
+            save.mutate({ registrationMode: event.target.value as 'open' | 'closed' })
+          }
         >
           <option value="closed">Closed</option>
           <option value="open">Open</option>
+        </select>
+      </Row>
+
+      <Row
+        label="Default model"
+        description="What a new conversation starts on, before anyone picks something else."
+      >
+        <select
+          aria-label="Default model"
+          value={currentKey}
+          onChange={(event) => {
+            const raw = event.target.value;
+            if (raw === '') {
+              save.mutate({ defaultModel: null });
+              return;
+            }
+            const [providerId, modelId] = raw.split('\u0000');
+            if (providerId !== undefined && modelId !== undefined) {
+              save.mutate({ defaultModel: { providerId, modelId } });
+            }
+          }}
+        >
+          <option value="">No default</option>
+          {(models.data?.providers ?? []).flatMap((group) =>
+            group.models.map((model) => (
+              <option
+                key={`${group.providerId}/${model.id}`}
+                value={`${group.providerId}\u0000${model.id}`}
+              >
+                {model.id}
+              </option>
+            ))
+          )}
         </select>
       </Row>
     </>
@@ -620,9 +694,15 @@ function SettingsSection(): React.JSX.Element {
 function MaintenanceSection(): React.JSX.Element {
   const [error, fail, clear] = useErrorMessage();
   const [result, setResult] = useState<string | null>(null);
+  const [target, setTarget] = useState('');
+
+  const users = useQuery({
+    queryKey: ['admin', 'users'],
+    queryFn: ({ signal }) => fetchAdminUsers(signal),
+  });
 
   const rebuild = useMutation({
-    mutationFn: () => rebuildAdminIndex(),
+    mutationFn: () => rebuildAdminIndex(target === '' ? undefined : target),
     onSuccess: (response) => {
       clear();
       setResult(`Rebuilt the index for ${response.users} user(s).`);
@@ -637,6 +717,18 @@ function MaintenanceSection(): React.JSX.Element {
         label="Conversation index"
         description="Rebuilds the derived index from the conversation files on disk."
       >
+        <select
+          aria-label="Rebuild for"
+          value={target}
+          onChange={(event) => setTarget(event.target.value)}
+        >
+          <option value="">All users</option>
+          {(users.data ?? []).map((account) => (
+            <option key={account.id} value={account.id}>
+              {account.username}
+            </option>
+          ))}
+        </select>
         <button type="button" onClick={() => rebuild.mutate()}>
           <Database size={15} />
           Rebuild

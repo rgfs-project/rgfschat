@@ -52,7 +52,7 @@ const BROKEN = {
 
 beforeEach(() => {
   listConversations.mockResolvedValue([BROKEN]);
-  fetchModels.mockResolvedValue([]);
+  fetchModels.mockResolvedValue({ providers: [], defaultModel: null });
   deleteConversation.mockResolvedValue(undefined);
   getConversation.mockRejectedValue(
     new ApiError('CONVERSATION_MALFORMED', 'This conversation file cannot be read.')
