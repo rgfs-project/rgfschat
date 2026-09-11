@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { LogOut, Moon, PanelLeft, Pencil, Plus, Search, Sun, Trash2 } from 'lucide-react';
+import { KeyRound, LogOut, Moon, PanelLeft, Pencil, Plus, Search, Sun, Trash2 } from 'lucide-react';
 import type { UserDto } from '@shared/auth.ts';
 import type { ConversationSummary } from './api.ts';
 
@@ -13,6 +13,8 @@ import type { ConversationSummary } from './api.ts';
 
 export interface SidebarProps {
   conversations: ConversationSummary[];
+  /** The list has not arrived yet — distinct from having arrived empty. */
+  loading?: boolean;
   currentId: string | null;
   user: UserDto;
   theme: 'light' | 'dark';
@@ -22,6 +24,7 @@ export interface SidebarProps {
   onOpen: (id: string) => void;
   onRename: (id: string, currentTitle: string) => void;
   onDelete: (id: string) => void;
+  onChangePassword: () => void;
   onSignOut: () => void;
 }
 
@@ -41,6 +44,7 @@ const BUCKET_ORDER = ['Today', 'This week', 'This month', 'Earlier'];
 
 export function Sidebar({
   conversations,
+  loading = false,
   currentId,
   user,
   theme,
@@ -50,6 +54,7 @@ export function Sidebar({
   onOpen,
   onRename,
   onDelete,
+  onChangePassword,
   onSignOut,
 }: SidebarProps): React.JSX.Element {
   const [query, setQuery] = useState('');
@@ -111,7 +116,8 @@ export function Sidebar({
       </div>
 
       <nav className="sidebar__list" aria-label="Conversations">
-        {conversations.length === 0 && (
+        {loading && conversations.length === 0 && <p className="sidebar__empty muted">Loading…</p>}
+        {!loading && conversations.length === 0 && (
           <p className="sidebar__empty muted">No conversations yet.</p>
         )}
         {conversations.length > 0 && grouped.length === 0 && (
@@ -181,6 +187,15 @@ export function Sidebar({
           title="Theme"
         >
           {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          onClick={onChangePassword}
+          aria-label="Change password"
+          title="Change password"
+        >
+          <KeyRound size={16} />
         </button>
         <button
           type="button"

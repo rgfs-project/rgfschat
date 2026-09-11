@@ -770,3 +770,52 @@ button.linkish:hover {
 .small {
   font-size: 0.875rem;
 }
+
+/* --- boot, boundaries, notices -------------------------------------------- */
+
+.booting {
+  display: grid;
+  place-items: center;
+  height: 100dvh;
+  background: var(--bg);
+}
+
+/*
+ * A boundary replaces only its own region, so it is sized to sit inside a pane
+ * rather than taking over the viewport.
+ */
+.boundary {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin: 1.5rem;
+  padding: 1.25rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.boundary__title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.boundary__detail {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-family: var(--font-mono);
+  word-break: break-word;
+}
+
+/* An explanation for an arrival the user did not ask for. */
+.notice {
+  margin: 0;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-left-width: 3px;
+  border-radius: 0.5rem;
+  background: var(--surface);
+  font-size: 0.875rem;
+}

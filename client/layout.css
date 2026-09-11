@@ -179,9 +179,11 @@ body {
   /* Fills the scroll port even when nearly empty, so the empty state's
      `margin: auto` has a full column height to centre itself within. */
   min-height: 100%;
-  /* Turns are separated by whitespace alone — there are no dividers or
-     speaker labels, so the gap is the only thing marking the boundary. */
-  gap: 2.75rem;
+  /* Turns are separated by whitespace alone — there are no dividers or speaker
+     labels, so the gap is the only thing marking the boundary. Enough to part
+     them clearly, but not so much that a one-word reply floats away from the
+     question it answers. */
+  gap: 1.75rem;
 }
 
 .composer-region {

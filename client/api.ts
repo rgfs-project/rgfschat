@@ -64,6 +64,47 @@ export function setCsrfToken(token: string | null): void {
   csrfToken = token;
 }
 
+/**
+ * Notified once when the server rejects a request as unauthenticated.
+ *
+ * A session can expire at any moment, so *any* request may be the one that
+ * discovers it. Handling that at each call site would mean every one of them
+ * re-implementing the same transition, and a missed site would leave the app
+ * showing a signed-in shell that can no longer do anything. Detecting it in
+ * the one place every request already passes through makes that impossible.
+ */
+type AuthExpiredListener = () => void;
+const authExpiredListeners = new Set<AuthExpiredListener>();
+
+export function onAuthExpired(listener: AuthExpiredListener): () => void {
+  authExpiredListeners.add(listener);
+  return () => authExpiredListeners.delete(listener);
+}
+
+/**
+ * Suppressed while the session itself is being fetched.
+ *
+ * `GET /api/session` answers "nobody is signed in" with a normal 200 and a
+ * null user, but sign-in and sign-out probes can legitimately 401. Those are
+ * answers, not expiries, and must not fire the transition.
+ */
+let suppressAuthExpiry = 0;
+
+function notifyAuthExpired(): void {
+  if (suppressAuthExpiry > 0) return;
+  for (const listener of authExpiredListeners) listener();
+}
+
+/**
+ * `{ signal }` only when there is one.
+ *
+ * Under `exactOptionalPropertyTypes` an explicit `signal: undefined` is not the
+ * same as an absent one, and `RequestInit` will not accept it.
+ */
+function signalInit(signal: AbortSignal | undefined): RequestInit {
+  return signal === undefined ? {} : { signal };
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? 'GET').toUpperCase();
   const needsCsrf = method !== 'GET' && method !== 'HEAD';
@@ -78,16 +119,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         ...init?.headers,
       },
     });
-  } catch {
+  } catch (cause) {
+    // An abort is the data layer superseding this request, not a failure to
+    // reach the server; surfacing it as one would show a spurious error.
+    if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
     throw new ApiError('NETWORK', 'Could not reach the server.');
   }
 
   const body: unknown = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw (
-      readErrorBody(body) ?? new ApiError('INTERNAL', 'The server returned an unexpected error.')
-    );
+    const error =
+      readErrorBody(body) ?? new ApiError('INTERNAL', 'The server returned an unexpected error.');
+    if (error.code === 'UNAUTHENTICATED') notifyAuthExpired();
+    throw error;
   }
 
   return body as T;
@@ -107,8 +152,11 @@ export interface ProviderModelGroup {
   models: { id: string; inputModalities: string[]; loaded: boolean }[];
 }
 
-export async function fetchModels(): Promise<ProviderModelGroup[]> {
-  const { providers } = await request<{ providers: ProviderModelGroup[] }>('/api/models');
+export async function fetchModels(signal?: AbortSignal): Promise<ProviderModelGroup[]> {
+  const { providers } = await request<{ providers: ProviderModelGroup[] }>(
+    '/api/models',
+    signalInit(signal)
+  );
   return providers;
 }
 
@@ -183,9 +231,10 @@ export function regenerate(
   );
 }
 
-export async function listConversations(): Promise<ConversationSummary[]> {
+export async function listConversations(signal?: AbortSignal): Promise<ConversationSummary[]> {
   const { conversations } = await request<{ conversations: ConversationSummary[] }>(
-    '/api/conversations'
+    '/api/conversations',
+    signalInit(signal)
   );
   return conversations;
 }
@@ -198,8 +247,16 @@ export function createConversation(): Promise<ConversationDetail> {
   });
 }
 
-export function getConversation(id: string): Promise<ConversationDetail> {
-  return request<ConversationDetail>(`/api/conversations/${encodeURIComponent(id)}`);
+/**
+ * `signal` is threaded through so the data layer can cancel a read that has
+ * been superseded — opening conversation B while A is still in flight should
+ * stop A, not merely ignore it once it arrives.
+ */
+export function getConversation(id: string, signal?: AbortSignal): Promise<ConversationDetail> {
+  return request<ConversationDetail>(
+    `/api/conversations/${encodeURIComponent(id)}`,
+    signalInit(signal)
+  );
 }
 
 export function renameConversation(id: string, title: string): Promise<ConversationDetail> {
@@ -241,30 +298,47 @@ export function generationStreamUrl(id: string, lastEventId?: number): string {
 
 // --- auth ---------------------------------------------------------------
 
-export function fetchSession(): Promise<SessionDto> {
-  return request<SessionDto>('/api/auth/session');
+/** Runs `fn` without treating a 401 as the session expiring. */
+export async function withoutAuthExpiry<T>(fn: () => Promise<T>): Promise<T> {
+  suppressAuthExpiry += 1;
+  try {
+    return await fn();
+  } finally {
+    suppressAuthExpiry -= 1;
+  }
+}
+
+export function fetchSession(signal?: AbortSignal): Promise<SessionDto> {
+  // Answers "nobody is signed in" with a 200 and a null user, but a probe that
+  // 401s here is still an answer rather than a session that just expired.
+  return withoutAuthExpiry(() => request<SessionDto>('/api/auth/session', signalInit(signal)));
 }
 
 export function login(
   username: string,
   password: string
 ): Promise<{ user: UserDto; csrfToken: string }> {
-  return request<{ user: UserDto; csrfToken: string }>('/api/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  });
+  // A rejected credential is not an expiring session.
+  return withoutAuthExpiry(() =>
+    request<{ user: UserDto; csrfToken: string }>('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    })
+  );
 }
 
 export function register(
   username: string,
   password: string
 ): Promise<{ user: UserDto; csrfToken: string }> {
-  return request<{ user: UserDto; csrfToken: string }>('/api/auth/register', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username, password }),
-  });
+  return withoutAuthExpiry(() =>
+    request<{ user: UserDto; csrfToken: string }>('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    })
+  );
 }
 
 export async function logout(): Promise<void> {

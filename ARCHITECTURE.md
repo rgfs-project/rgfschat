@@ -176,7 +176,7 @@ Every invariant is enforced in code and covered by at least one test whose title
 | INV-20 | SSE replay never silently skips events; a too-old `Last-Event-ID` triggers a full resync                        | 6     | `server/generation/manager.ts` (`catchUp`)                        | `server/generation/streaming.test.ts`, `e2e/streaming.spec.ts`            |
 | INV-21 | After a restart, no generation remains non-terminal, and partial output is persisted once                       | 6     | `server/generation/recovery.ts`                                   | `server/generation/streaming.test.ts`                                     |
 | INV-22 | Rendered Markdown never executes script or raw HTML                                                             | 7     | `client/Markdown.tsx` (`skipHtml`, no `rehype-raw`, `safeUrl`)    | `client/Markdown.test.tsx`                                                |
-| INV-23 | A stale response never overwrites newer client state                                                            | 8     | pending                                                           | pending                                                                   |
+| INV-23 | A stale response never overwrites newer client state                                                            | 8     | `client/queries.ts` (per-id keys + `AbortSignal`)                 | `client/state.test.tsx`, `e2e/state.spec.ts`                              |
 | INV-24 | Admin authorization is enforced server-side on every admin route                                                | 9     | pending                                                           | pending                                                                   |
 | INV-25 | Secrets are write-only: no API response ever contains a configured secret                                       | 9     | pending                                                           | pending                                                                   |
 | INV-26 | There is always at least one active admin                                                                       | 9     | pending                                                           | pending                                                                   |
@@ -507,6 +507,76 @@ a window, since it emits a run of intermediate positions — but it only happens
 "jump to latest", where the user has just asked to go to the bottom.
 
 Unpinned, arriving content raises a "jump to latest" control instead of moving the viewport.
+
+### Client data layer
+
+Every server read and write goes through `client/queries.ts`, built on TanStack
+Query. The properties this phase needs — request ownership, deduplication of
+identical in-flight requests, cancellation on supersession, and stale-response
+rejection — are then properties of _one_ mechanism rather than of each call
+site. What it replaced was an `AbortController` and a loading flag per
+component, which had no answer at all to a slow read for conversation A landing
+after the reader had already opened B.
+
+Query keys are built in one place (`keys`), so a key cannot be spelled two ways:
+a mutation invalidating `['conversation', id]` while a hook reads
+`['conversations', id]` fails silently and looks like a caching bug.
+
+Defaults suit a self-hosted app talking to a server on the same machine:
+`refetchOnWindowFocus` is off, because the user is the only writer and a refetch
+on every focus is pure noise; retries are off, because a local failure is a real
+failure worth showing rather than a flaky network worth papering over, and
+silent retries would make the error boundaries fire late.
+
+**The cold start is concurrent.** Session, conversation list and models are all
+started on the shell's first render rather than waiting to be mounted by an
+authenticated `App`. None of the three needs another's _result_ — only for the
+user to turn out to be signed in, which can be settled afterwards by discarding
+what was fetched. Previously first paint was three round trips deep for no
+reason. If the session resolves unauthenticated, the speculative results are
+removed from the cache so one user's list can never be shown to the next.
+
+**The shell never unmounts.** The composer draft and the open conversation live
+above the authenticated region, so a session expiring mid-sentence and the user
+signing back in returns them to the same conversation with their unsent text
+intact. Held inside `App` they would be destroyed by the very transition they
+need to survive.
+
+**Any request may discover an expired session.** `request()` in `client/api.ts`
+raises one `onAuthExpired` notification when the server answers
+`UNAUTHENTICATED`, and the shell makes the transition once. Handling it per call
+site would mean every one of them re-implementing the same move, and a missed
+one would leave a signed-in shell that can no longer do anything. Auth probes
+(`session`, `login`, `register`) suppress it: a rejected credential is an answer,
+not an expiry.
+
+**Optimistic sends reconcile, and roll back.** The user's message is shown with a
+client-temporary id which is replaced by the server's `userMessageId` from the
+`202`. The cache is the single source of truth throughout, so there is never a
+second copy to keep in step. A failed send restores the pre-send snapshot and
+returns the text to the composer — the transcript then says what is true, which
+is that the server never received it.
+
+### INV-23: a stale response never overwrites newer state
+
+Enforced structurally rather than by comparing timestamps. Each conversation is
+its own cache entry keyed by id, so a read for A can only ever land in A's entry
+and cannot overwrite what is on screen for B. Reads also carry an `AbortSignal`,
+so opening B actively cancels A's request rather than merely ignoring it when it
+arrives. An aborted fetch is re-thrown as an `AbortError` rather than being
+reported as an unreachable server, so superseding a request shows no error.
+
+Verified in `client/state.test.tsx` against a server stand-in that holds each
+request open, which is the only way the ordering is observable: against a mock
+that answers instantly, every ordering looks correct.
+
+### Error boundaries
+
+Placed per region — shell, sidebar, transcript — rather than once at the root,
+so the blast radius matches the failure: a conversation whose content throws
+while rendering costs the reader that pane, not the navigation they need to get
+away from it. The transcript's boundary is keyed on the open conversation, so
+navigating away clears a failure rather than stranding the reader on it.
 
 ## 12. Attachments
 

@@ -1,5 +1,7 @@
+import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { UserDto } from '@shared/auth.ts';
 import type * as ApiModule from './api.ts';
@@ -29,6 +31,7 @@ vi.mock('./api.ts', async () => {
 
 // Imported after the mock is registered.
 const { App } = await import('./App.tsx');
+const { createQueryClient } = await import('./queries.ts');
 
 const USER: UserDto = {
   id: 'u-1',
@@ -56,9 +59,43 @@ beforeEach(() => {
   );
 });
 
+/**
+ * Renders `App` the way the shell does, with its own query client so no cache
+ * survives from one test into the next.
+ */
+function renderApp(): { setCurrentId: ReturnType<typeof vi.fn> } {
+  const setCurrentId = vi.fn();
+  let currentId: string | null = null;
+
+  function Harness(): React.JSX.Element {
+    const [id, setId] = useState<string | null>(currentId);
+    return (
+      <App
+        user={USER}
+        currentId={id}
+        onSelectConversation={(next) => {
+          currentId = next;
+          setCurrentId(next);
+          setId(next);
+        }}
+        draft=""
+        onDraftChange={vi.fn()}
+        onSignOut={vi.fn()}
+      />
+    );
+  }
+
+  render(
+    <QueryClientProvider client={createQueryClient()}>
+      <Harness />
+    </QueryClientProvider>
+  );
+  return { setCurrentId };
+}
+
 async function openBrokenConversation(): Promise<void> {
   const user = userEvent.setup();
-  render(<App user={USER} onSignOut={vi.fn()} />);
+  renderApp();
 
   // An exact name: "Delete Broken conversation" also contains the title.
   await user.click(await screen.findByRole('button', { name: 'Broken conversation' }));

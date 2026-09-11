@@ -7,9 +7,15 @@ export interface SignInProps {
   /** Registration is only offered when the server says it is open. */
   registrationOpen: boolean;
   onSignedIn: (user: UserDto) => void;
+  /** Explains an arrival here that the user did not ask for, e.g. an expiry. */
+  notice?: string | null;
 }
 
-export function SignIn({ registrationOpen, onSignedIn }: SignInProps): React.JSX.Element {
+export function SignIn({
+  registrationOpen,
+  onSignedIn,
+  notice = null,
+}: SignInProps): React.JSX.Element {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -44,6 +50,12 @@ export function SignIn({ registrationOpen, onSignedIn }: SignInProps): React.JSX
       <form className="signin__card" onSubmit={(e) => void submit(e)}>
         <h1>ChatUI</h1>
         <p className="muted small">{registering ? 'Create an account.' : 'Sign in to continue.'}</p>
+
+        {notice !== null && (
+          <p role="status" className="notice">
+            {notice}
+          </p>
+        )}
 
         {error !== null && (
           <p role="alert" className="error">

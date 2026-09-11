@@ -274,3 +274,48 @@ async function findOnlyConversationFile(dataDir: string): Promise<string> {
   }
   throw new Error('seed: no conversation file found');
 }
+
+/**
+ * Gives every existing conversation a distinct body, so a test can tell which
+ * one is on screen.
+ *
+ * Same reasoning as `seedMessages`: there is no API for appending a message, and
+ * driving a generation per conversation would test the provider rather than the
+ * switching behaviour under test.
+ */
+export async function seedDistinctConversations(dataDir: string): Promise<string[]> {
+  const { parseConversation, serializeConversation } =
+    await import('../server/storage/markdown.ts');
+
+  const files = await listConversationFiles(dataDir);
+  const markers: string[] = [];
+
+  for (const [index, file] of files.entries()) {
+    const parsed = parseConversation(await readFile(file, 'utf8'));
+    if (!parsed.ok) throw new Error('seed: conversation did not parse');
+
+    const marker = `marker-for-conversation-${index}`;
+    markers.push(marker);
+    await writeFile(
+      file,
+      serializeConversation({
+        ...parsed.conversation,
+        title: `Conversation ${index}`,
+        messages: [{ type: 'user', id: randomUUID(), body: marker }],
+      }),
+      'utf8'
+    );
+  }
+
+  return markers;
+}
+
+async function listConversationFiles(dataDir: string): Promise<string[]> {
+  for (const userId of await readdir(dataDir)) {
+    const chats = join(dataDir, userId, 'chats');
+    const entries = await readdir(chats).catch(() => [] as string[]);
+    const files = entries.filter((name) => name.endsWith('.md')).sort();
+    if (files.length > 0) return files.map((name) => join(chats, name));
+  }
+  throw new Error('seed: no conversation files found');
+}

@@ -1,28 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, PanelLeft } from 'lucide-react';
-import type { Message as MessageModel } from '@shared/conversation.ts';
 import type { UserDto } from '@shared/auth.ts';
-import {
-  ApiError,
-  cancelGeneration,
-  createConversation,
-  deleteConversation,
-  deleteMessage,
-  editMessage,
-  fetchModels,
-  getConversation,
-  listConversations,
-  regenerate,
-  renameConversation,
-  startGeneration,
-  type ConversationSummary,
-  type ProviderModelGroup,
-} from './api.ts';
+import { ApiError, cancelGeneration } from './api.ts';
 import { Composer } from './Composer.tsx';
+import { ChangePassword } from './ChangePassword.tsx';
 import { Dialog } from './Dialog.tsx';
+import { ErrorBoundary } from './ErrorBoundary.tsx';
 import { Message, StreamingMessage } from './Message.tsx';
 import type { ModelSelection } from './ModelPicker.tsx';
 import { Sidebar } from './Sidebar.tsx';
+import {
+  keys,
+  useConversation,
+  useConversations,
+  useCreateConversation,
+  useDeleteConversation,
+  useDeleteMessage,
+  useEditMessage,
+  useModels,
+  useRegenerate,
+  useRenameConversation,
+  useSendMessage,
+} from './queries.ts';
 import { useGeneration } from './useGeneration.ts';
 import { useScrollPin } from './useScrollPin.ts';
 
@@ -77,7 +77,7 @@ function parseSelection(raw: string | null): ModelSelection | null {
 }
 
 /** Prefers a model the provider already has resident, else the first available. */
-function defaultSelection(groups: ProviderModelGroup[]): ModelSelection | null {
+function defaultSelection(groups: ProviderGroups): ModelSelection | null {
   for (const group of groups) {
     if (group.status !== 'ready') continue;
     const loaded = group.models.find((model) => model.loaded);
@@ -90,23 +90,44 @@ function defaultSelection(groups: ProviderModelGroup[]): ModelSelection | null {
   return null;
 }
 
+type ProviderGroups = NonNullable<ReturnType<typeof useModels>['data']>;
+
+export interface AppProps {
+  user: UserDto;
+  /** Owned by the shell so it survives a session expiry and re-login. */
+  currentId: string | null;
+  onSelectConversation: (id: string | null) => void;
+  draft: string;
+  onDraftChange: (value: string) => void;
+  onSignOut: () => void;
+}
+
 export function App({
   user,
+  currentId,
+  onSelectConversation,
+  draft,
+  onDraftChange,
   onSignOut,
-}: {
-  user: UserDto;
-  onSignOut: () => void;
-}): React.JSX.Element {
-  const [groups, setGroups] = useState<ProviderModelGroup[]>([]);
-  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  const [currentId, setCurrentId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<MessageModel[]>([]);
-  const [malformed, setMalformed] = useState(false);
-  const [prompt, setPrompt] = useState('');
+}: AppProps): React.JSX.Element {
+  const client = useQueryClient();
+
+  const conversations = useConversations(true);
+  const models = useModels(true);
+  const conversation = useConversation(currentId);
+
+  const createConversation = useCreateConversation();
+  const renameConversation = useRenameConversation();
+  const deleteConversation = useDeleteConversation();
+  const editMessage = useEditMessage();
+  const deleteMessage = useDeleteMessage();
+  const sendMessage = useSendMessage();
+  const regenerate = useRegenerate();
+
   const [generationId, setGenerationId] = useState<string | null>(() => readStored(ACTIVE_KEY));
-  const [awaitingMessageId, setAwaitingMessageId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<PendingDialog | null>(null);
+  const [changingPassword, setChangingPassword] = useState(false);
 
   const [collapsed, setCollapsed] = useState(() => readStored(SIDEBAR_KEY) === 'true');
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
@@ -130,11 +151,24 @@ export function App({
   const busy = live.state === 'pending' || live.state === 'streaming';
   const scroll = useScrollPin();
 
+  const groups = useMemo<ProviderGroups>(() => models.data ?? [], [models.data]);
+
+  useEffect(() => {
+    if (groups.length === 0) return;
+    setFallbackSelection((current) => current ?? defaultSelection(groups));
+  }, [groups]);
+
   const selection = useMemo(
     () =>
       (currentId !== null ? selectionByConversation[currentId] : undefined) ?? fallbackSelection,
     [currentId, selectionByConversation, fallbackSelection]
   );
+
+  /** The conversation could not be parsed; only deletion is offered. */
+  const malformed =
+    conversation.error instanceof ApiError && conversation.error.code === 'CONVERSATION_MALFORMED';
+
+  const messages = useMemo(() => conversation.data?.messages ?? [], [conversation.data]);
 
   useEffect(() => {
     document.documentElement.dataset['theme'] = theme;
@@ -146,94 +180,30 @@ export function App({
   }, [collapsed]);
 
   const { onContentChange } = scroll;
-  // Content changed: follow the bottom, or offer the jump.
+  // Content changed: follow the bottom, or leave the reader where they are.
   useEffect(() => {
     onContentChange();
   }, [messages, live.content, live.reasoning, onContentChange]);
 
-  const refreshList = useCallback(async () => {
-    try {
-      setConversations(await listConversations());
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not load conversations.');
-    }
-  }, []);
-
-  const openConversation = useCallback(async (id: string, awaitMessageId?: string) => {
-    setError(null);
-    setCurrentId(id);
-    setMalformed(false);
-
-    try {
-      let detail = await getConversation(id);
-
-      if (detail.activeGenerationId !== null) {
-        writeStored(ACTIVE_KEY, detail.activeGenerationId);
-        setGenerationId(detail.activeGenerationId);
-      }
-
-      // The assistant block is written just after the stream ends, so a reload
-      // triggered by `done` can race the write.
-      if (awaitMessageId !== undefined) {
-        for (let attempt = 0; attempt < 20; attempt += 1) {
-          if (detail.messages.some((message) => message.id === awaitMessageId)) break;
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          detail = await getConversation(id);
-        }
-      }
-
-      setMessages(detail.messages);
-    } catch (err) {
-      setMessages([]);
-      const isMalformed = err instanceof ApiError && err.code === 'CONVERSATION_MALFORMED';
-      setMalformed(isMalformed);
-      setError(isMalformed ? null : 'Could not open the conversation.');
-    }
-  }, []);
-
+  /*
+   * A generation the server already has running is adopted from the
+   * conversation itself, so a reload — or a different tab — resumes it without
+   * relying on this client having remembered anything.
+   */
+  const activeGenerationId = conversation.data?.activeGenerationId ?? null;
   useEffect(() => {
-    const controller = new AbortController();
+    if (activeGenerationId === null) return;
+    writeStored(ACTIVE_KEY, activeGenerationId);
+    setGenerationId(activeGenerationId);
+  }, [activeGenerationId]);
 
-    fetchModels()
-      .then((list) => {
-        if (controller.signal.aborted) return;
-        setGroups(list);
-        setFallbackSelection((current) => current ?? defaultSelection(list));
-      })
-      .catch(() => setError('Could not load models.'));
-
-    void refreshList();
-    return () => controller.abort();
-  }, [refreshList]);
-
-  // A reload with a remembered generation reopens its conversation.
-  useEffect(() => {
-    const remembered = readStored(ACTIVE_KEY);
-    if (remembered === null) return;
-
-    let cancelled = false;
-    void listConversations()
-      .then(async (list) => {
-        for (const summary of list) {
-          if (cancelled) return;
-          const detail = await getConversation(summary.id).catch(() => null);
-          if (detail?.activeGenerationId === remembered) {
-            setCurrentId(detail.id);
-            setMessages(detail.messages);
-            return;
-          }
-        }
-        writeStored(ACTIVE_KEY, null);
-      })
-      .catch(() => undefined);
-
-    return () => {
-      cancelled = true;
-    };
-    // Mount only.
-  }, []);
-
-  // Fold a settled generation back into the stored transcript.
+  /*
+   * Fold a settled generation back into the stored transcript.
+   *
+   * Keyed by generation id rather than guarded by a "have I run" flag: the
+   * question is whether *this* generation has been settled, which is a fact
+   * about the data, not about how many times an effect happened to run.
+   */
   const settledRef = useRef<string | null>(null);
   useEffect(() => {
     if (generationId === null) return;
@@ -249,15 +219,14 @@ export function App({
       );
     }
 
-    const pending = awaitingMessageId ?? undefined;
     writeStored(ACTIVE_KEY, null);
     setGenerationId(null);
-    setAwaitingMessageId(null);
 
+    void client.invalidateQueries({ queryKey: keys.conversations() });
     if (currentId !== null) {
-      void openConversation(currentId, pending).then(() => refreshList());
+      void client.invalidateQueries({ queryKey: keys.conversation(currentId) });
     }
-  }, [live.state, generationId, currentId, awaitingMessageId, openConversation, refreshList]);
+  }, [live.state, generationId, currentId, client]);
 
   const onSelectModel = useCallback(
     (next: ModelSelection) => {
@@ -270,147 +239,129 @@ export function App({
     [currentId]
   );
 
-  const onCreate = useCallback(async () => {
+  const onCreate = useCallback(() => {
     setError(null);
-    try {
-      const created = await createConversation();
-      setMessages([]);
-      setMalformed(false);
-      setCurrentId(created.id);
-      await refreshList();
-    } catch {
-      setError('Could not create a conversation.');
-    }
-  }, [refreshList]);
+    createConversation.mutate(undefined, {
+      onSuccess: (created) => onSelectConversation(created.id),
+      onError: () => setError('Could not create a conversation.'),
+    });
+  }, [createConversation, onSelectConversation]);
 
   const applyRename = useCallback(
-    async (id: string, nextTitle: string) => {
-      try {
-        await renameConversation(id, nextTitle);
-        await refreshList();
-      } catch {
-        setError('Could not rename the conversation.');
-      }
+    (id: string, title: string) => {
+      renameConversation.mutate(
+        { id, title },
+        { onError: () => setError('Could not rename the conversation.') }
+      );
     },
-    [refreshList]
+    [renameConversation]
   );
 
   const onDeleteConversation = useCallback(
-    async (id: string) => {
-      try {
-        await deleteConversation(id);
-        if (currentId === id) {
-          setCurrentId(null);
-          setMessages([]);
-          setMalformed(false);
-        }
-        await refreshList();
-      } catch {
-        setError('Could not delete the conversation.');
-      }
+    (id: string) => {
+      deleteConversation.mutate(id, {
+        onSuccess: () => {
+          if (currentId === id) onSelectConversation(null);
+        },
+        onError: () => setError('Could not delete the conversation.'),
+      });
     },
-    [currentId, refreshList]
+    [deleteConversation, currentId, onSelectConversation]
   );
 
   const send = useCallback(async () => {
-    const text = prompt.trim();
+    const text = draft.trim();
     if (text === '' || selection === null || busy) return;
 
     setError(null);
-    setPrompt('');
+    onDraftChange('');
 
     /*
      * Typing is the act of starting a conversation, so one is created on the
-     * first send rather than being a precondition for typing at all. Requiring
-     * it up front meant the composer sat disabled behind a "select a
-     * conversation first" placeholder — a dead field explaining its own
-     * deadness, where the obvious thing to do was simply to begin.
+     * first send rather than being a precondition for typing at all.
      */
     let conversationId = currentId;
     if (conversationId === null) {
       try {
-        const created = await createConversation();
+        const created = await createConversation.mutateAsync();
         conversationId = created.id;
-        setCurrentId(created.id);
-        setMessages([]);
-        setMalformed(false);
+        onSelectConversation(created.id);
       } catch {
         setError('Could not create a conversation.');
+        onDraftChange(text);
         return;
       }
     }
 
-    setMessages((previous) => [
-      ...previous,
-      { type: 'user', id: `pending-${Date.now()}`, body: text },
-    ]);
-
     try {
-      const accepted = await startGeneration(
+      const accepted = await sendMessage.mutateAsync({
         conversationId,
-        selection.providerId,
-        selection.modelId,
-        text
-      );
+        providerId: selection.providerId,
+        model: selection.modelId,
+        content: text,
+      });
       writeStored(ACTIVE_KEY, accepted.generationId);
-      setAwaitingMessageId(accepted.assistantMessageId);
       setGenerationId(accepted.generationId);
-      await refreshList();
     } catch (err) {
+      // The optimistic message has already been rolled back by the mutation;
+      // the text goes back in the composer so it is not simply lost.
       setError(err instanceof ApiError ? err.message : 'Could not start the generation.');
-      void openConversation(conversationId);
+      onDraftChange(text);
     }
-  }, [prompt, selection, busy, currentId, openConversation, refreshList]);
+  }, [
+    draft,
+    selection,
+    busy,
+    currentId,
+    createConversation,
+    sendMessage,
+    onDraftChange,
+    onSelectConversation,
+  ]);
 
   const onRegenerate = useCallback(async () => {
     if (currentId === null || selection === null || busy) return;
 
     setError(null);
     try {
-      const accepted = await regenerate(currentId, selection.providerId, selection.modelId);
+      const accepted = await regenerate.mutateAsync({
+        conversationId: currentId,
+        providerId: selection.providerId,
+        model: selection.modelId,
+      });
       writeStored(ACTIVE_KEY, accepted.generationId);
-      setAwaitingMessageId(accepted.assistantMessageId);
       setGenerationId(accepted.generationId);
-      setMessages((previous) =>
-        previous.at(-1)?.type === 'assistant' ? previous.slice(0, -1) : previous
-      );
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not regenerate.');
     }
-  }, [currentId, selection, busy]);
+  }, [currentId, selection, busy, regenerate]);
 
   const onEditMessage = useCallback(
-    async (messageId: string, body: string) => {
+    (messageId: string, body: string) => {
       if (currentId === null) return;
-      try {
-        const detail = await editMessage(currentId, messageId, body);
-        setMessages(detail.messages);
-        await refreshList();
-      } catch (err) {
-        setError(err instanceof ApiError ? err.message : 'Could not edit the message.');
-      }
+      editMessage.mutate(
+        { conversationId: currentId, messageId, body },
+        { onError: () => setError('Could not edit the message.') }
+      );
     },
-    [currentId, refreshList]
+    [currentId, editMessage]
   );
 
   const onDeleteMessage = useCallback(
-    async (messageId: string) => {
+    (messageId: string) => {
       if (currentId === null) return;
-
-      try {
-        const detail = await deleteMessage(currentId, messageId);
-        if (detail === null) {
-          setCurrentId(null);
-          setMessages([]);
-        } else {
-          setMessages(detail.messages);
+      deleteMessage.mutate(
+        { conversationId: currentId, messageId },
+        {
+          onSuccess: (detail) => {
+            // Every message gone takes the conversation with it.
+            if (detail === null) onSelectConversation(null);
+          },
+          onError: () => setError('Could not delete the message.'),
         }
-        await refreshList();
-      } catch (err) {
-        setError(err instanceof ApiError ? err.message : 'Could not delete the message.');
-      }
+      );
     },
-    [currentId, refreshList]
+    [currentId, deleteMessage, onSelectConversation]
   );
 
   const stop = useCallback(async () => {
@@ -422,25 +373,34 @@ export function App({
     }
   }, [generationId]);
 
-  const title = conversations.find((c) => c.id === currentId)?.title ?? 'New chat';
+  const list = conversations.data ?? [];
+  const title = list.find((c) => c.id === currentId)?.title ?? 'New chat';
   const showEmptyState = !malformed && messages.length === 0 && !busy;
+
+  const noModels = models.isSuccess && groups.length === 0;
+  const allProvidersUnavailable =
+    models.isSuccess && groups.length > 0 && groups.every((g) => g.status === 'unavailable');
 
   return (
     <div className="shell" data-sidebar={collapsed ? 'collapsed' : 'expanded'}>
       {!collapsed && (
-        <Sidebar
-          conversations={conversations}
-          currentId={currentId}
-          user={user}
-          theme={theme}
-          onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
-          onCollapse={() => setCollapsed(true)}
-          onCreate={() => void onCreate()}
-          onOpen={(id) => void openConversation(id)}
-          onRename={(id, currentTitle) => setDialog({ kind: 'rename', id, title: currentTitle })}
-          onDelete={(id) => setDialog({ kind: 'delete-conversation', id })}
-          onSignOut={onSignOut}
-        />
+        <ErrorBoundary region="sidebar">
+          <Sidebar
+            conversations={list}
+            loading={conversations.isPending}
+            currentId={currentId}
+            user={user}
+            theme={theme}
+            onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+            onCollapse={() => setCollapsed(true)}
+            onCreate={onCreate}
+            onOpen={onSelectConversation}
+            onRename={(id, currentTitle) => setDialog({ kind: 'rename', id, title: currentTitle })}
+            onDelete={(id) => setDialog({ kind: 'delete-conversation', id })}
+            onChangePassword={() => setChangingPassword(true)}
+            onSignOut={onSignOut}
+          />
+        </ErrorBoundary>
       )}
 
       <main className="main">
@@ -459,64 +419,80 @@ export function App({
           <h2 className="main__title">{title}</h2>
         </header>
 
-        <div className="transcript" ref={scroll.ref} data-testid="transcript">
-          <div className="transcript__inner">
-            {error !== null && (
-              <p role="alert" className="error-banner">
-                {error}
-              </p>
-            )}
-
-            {malformed && (
-              <div className="malformed">
-                <h3>This conversation cannot be read</h3>
-                <p className="muted">
-                  Its file on disk is not valid <code>formatVersion: 1</code> Markdown. Nothing has
-                  been changed or repaired — the file is exactly as it was found, so you can inspect
-                  or fix it by hand under <code>data/</code>. Deleting it here is the only action
-                  available.
+        {/* Keyed on the conversation so a failure in one does not persist into
+            the next the reader opens. */}
+        <ErrorBoundary region="transcript" resetKey={currentId}>
+          <div className="transcript" ref={scroll.ref} data-testid="transcript">
+            <div className="transcript__inner">
+              {error !== null && (
+                <p role="alert" className="error-banner">
+                  {error}
                 </p>
-                <button
-                  type="button"
-                  className="button-primary"
-                  onClick={() =>
-                    currentId !== null && setDialog({ kind: 'delete-conversation', id: currentId })
-                  }
-                >
-                  Delete conversation
-                </button>
-              </div>
-            )}
+              )}
 
-            {showEmptyState && (
-              <div className="empty-state">
-                <h2>What are we testing today?</h2>
-                <p className="muted">{selection?.modelId ?? 'No model selected'}</p>
-              </div>
-            )}
+              {malformed && (
+                <div className="malformed">
+                  <h3>This conversation cannot be read</h3>
+                  <p className="muted">
+                    Its file on disk is not valid <code>formatVersion: 1</code> Markdown. Nothing
+                    has been changed or repaired — the file is exactly as it was found, so you can
+                    inspect or fix it by hand under <code>data/</code>. Deleting it here is the only
+                    action available.
+                  </p>
+                  <button
+                    type="button"
+                    className="button-primary"
+                    onClick={() =>
+                      currentId !== null &&
+                      setDialog({ kind: 'delete-conversation', id: currentId })
+                    }
+                  >
+                    Delete conversation
+                  </button>
+                </div>
+              )}
 
-            {!malformed &&
-              messages.map((message, index) => (
-                <Message
-                  key={`${message.id}-${index}`}
-                  message={message}
-                  isLast={index === messages.length - 1}
-                  busy={busy}
-                  onEdit={(id, body) => void onEditMessage(id, body)}
-                  onDelete={(id) => setDialog({ kind: 'delete-message', id })}
-                  onRegenerate={() => void onRegenerate()}
+              {showEmptyState && (
+                <div className="empty-state">
+                  <h2>What are we testing today?</h2>
+                  {noModels ? (
+                    <p className="muted">
+                      No models are configured. Add a provider in{' '}
+                      <code>data/_system/providers.json</code> and restart.
+                    </p>
+                  ) : allProvidersUnavailable ? (
+                    <p className="muted">
+                      Every provider is unreachable. Check that the model server is running.
+                    </p>
+                  ) : (
+                    <p className="muted">{selection?.modelId ?? 'No model selected'}</p>
+                  )}
+                </div>
+              )}
+
+              {!malformed &&
+                messages.map((message, index) => (
+                  <Message
+                    key={message.id}
+                    message={message}
+                    isLast={index === messages.length - 1}
+                    busy={busy}
+                    onEdit={onEditMessage}
+                    onDelete={(id) => setDialog({ kind: 'delete-message', id })}
+                    onRegenerate={() => void onRegenerate()}
+                  />
+                ))}
+
+              {busy && (
+                <StreamingMessage
+                  content={live.content}
+                  reasoning={live.reasoning}
+                  state={live.state}
                 />
-              ))}
-
-            {busy && (
-              <StreamingMessage
-                content={live.content}
-                reasoning={live.reasoning}
-                state={live.state}
-              />
-            )}
+              )}
+            </div>
           </div>
-        </div>
+        </ErrorBoundary>
 
         <div className="composer-region">
           <div className="composer-region__inner">
@@ -535,8 +511,8 @@ export function App({
             )}
 
             <Composer
-              value={prompt}
-              onChange={setPrompt}
+              value={draft}
+              onChange={onDraftChange}
               onSend={() => void send()}
               onStop={() => void stop()}
               busy={busy}
@@ -550,15 +526,17 @@ export function App({
         </div>
       </main>
 
+      {changingPassword && <ChangePassword onClose={() => setChangingPassword(false)} />}
+
       {dialog !== null && (
         <Dialog
           {...dialogProps(dialog)}
           onCancel={() => setDialog(null)}
           onConfirm={(value) => {
             setDialog(null);
-            if (dialog.kind === 'rename') void applyRename(dialog.id, value);
-            if (dialog.kind === 'delete-conversation') void onDeleteConversation(dialog.id);
-            if (dialog.kind === 'delete-message') void onDeleteMessage(dialog.id);
+            if (dialog.kind === 'rename') applyRename(dialog.id, value);
+            if (dialog.kind === 'delete-conversation') onDeleteConversation(dialog.id);
+            if (dialog.kind === 'delete-message') onDeleteMessage(dialog.id);
           }}
         />
       )}
