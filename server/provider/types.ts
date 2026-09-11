@@ -20,8 +20,6 @@ export interface ChatRequest {
  * llama.cpp-specific stays in the implementation.
  */
 export interface Provider {
-  readonly name: string;
-
   listModels(signal?: AbortSignal): Promise<ModelDto[]>;
 
   /** Streams a completion. Throws a normalized `AppError` on any upstream failure. */

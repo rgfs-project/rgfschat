@@ -26,19 +26,16 @@ export class LlamaCppProvider implements Provider {
   readonly #contextLengths = new Map<string, number>();
   readonly #policy: HostPolicy;
   readonly #resolver: Resolver | undefined;
-  /** Identifies this instance in conversation metadata; defaults for Phase 2-4. */
-  readonly name: string;
 
   constructor(
     config: ProviderConfig,
     logger: Logger,
-    options: { policy?: HostPolicy; resolver?: Resolver; name?: string } = {}
+    options: { policy?: HostPolicy; resolver?: Resolver } = {}
   ) {
     this.#config = config;
     this.#logger = logger;
     this.#policy = options.policy ?? DEFAULT_HOST_POLICY;
     this.#resolver = options.resolver;
-    this.name = options.name ?? 'llamacpp';
   }
 
   #headers(extra: Record<string, string> = {}): Record<string, string> {
@@ -291,13 +288,5 @@ export class LlamaCppProvider implements Provider {
         yield { type: 'finish', reason: choice.finish_reason };
       }
     }
-  }
-
-  /**
-   * Records a model's context window once it is known, so later phases can
-   * budget against the real value without paying for a probe.
-   */
-  rememberContextLength(model: string, tokens: number): void {
-    if (Number.isInteger(tokens) && tokens > 0) this.#contextLengths.set(model, tokens);
   }
 }

@@ -148,7 +148,6 @@ describe('GenerationManager', () => {
     // A provider that keeps yielding after the manager has finished.
     let yielded = 0;
     const chatty: Provider = {
-      name: 'chatty',
       listModels: () => Promise.resolve([]),
       contextLength: () => null,
       async *streamChat(): AsyncIterable<ProviderChunk> {
@@ -282,7 +281,6 @@ describe('GenerationManager', () => {
     // The cap only applies on the next start, so create one more.
     const managerWithCap = new GenerationManager({
       provider: {
-        name: 'noop',
         listModels: () => Promise.resolve([]),
         contextLength: () => null,
         async *streamChat() {},

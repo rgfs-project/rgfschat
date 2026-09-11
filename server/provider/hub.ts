@@ -62,7 +62,6 @@ export class ProviderHub {
           {
             policy: options.policy,
             ...(options.resolver !== undefined ? { resolver: options.resolver } : {}),
-            name: entry.id,
           }
         ));
   }

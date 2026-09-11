@@ -223,13 +223,10 @@ describe('the provider abstraction holds for a second implementation', () => {
   }
 
   it('lists providers and models grouped, without leaking secrets', async () => {
-    const hub = hubWith(
-      { a: new EchoProvider({ name: 'a' }), b: new EchoProvider({ name: 'b' }) },
-      [
-        entry({ id: 'a', name: 'Provider A', apiKey: 'super-secret-a' }),
-        entry({ id: 'b', name: 'Provider B', apiKey: 'super-secret-b' }),
-      ]
-    );
+    const hub = hubWith({ a: new EchoProvider(), b: new EchoProvider() }, [
+      entry({ id: 'a', name: 'Provider A', apiKey: 'super-secret-a' }),
+      entry({ id: 'b', name: 'Provider B', apiKey: 'super-secret-b' }),
+    ]);
 
     const providers = await hub.listProviders();
     const grouped = await hub.listModels();

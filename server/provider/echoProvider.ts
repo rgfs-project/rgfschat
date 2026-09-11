@@ -13,7 +13,6 @@ import type { ChatRequest, Provider, ProviderChunk } from './types.ts';
  * nothing llama.cpp-shaped has leaked upward.
  */
 export interface EchoProviderOptions {
-  name?: string;
   models?: ModelDto[];
   /** Produces the reply for a request; defaults to echoing the last message. */
   reply?: (request: ChatRequest) => { reasoning?: string; content: string };
@@ -24,7 +23,6 @@ export interface EchoProviderOptions {
 }
 
 export class EchoProvider implements Provider {
-  readonly name: string;
   readonly #models: ModelDto[];
   readonly #reply: NonNullable<EchoProviderOptions['reply']>;
   readonly #contextTokens: number | null;
@@ -34,7 +32,6 @@ export class EchoProvider implements Provider {
   listModelsCalls = 0;
 
   constructor(options: EchoProviderOptions = {}) {
-    this.name = options.name ?? 'echo';
     this.#models = options.models ?? [
       { id: 'echo-small', inputModalities: ['text'], loaded: true },
       { id: 'echo-large', inputModalities: ['text', 'image'], loaded: false },

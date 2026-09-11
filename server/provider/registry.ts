@@ -92,7 +92,6 @@ export class ProviderRegistry {
   readonly #paths: StoragePaths;
   readonly #logger: Logger;
   readonly #policy: HostPolicy;
-  #entries: ProviderConfigEntry[] = [];
 
   constructor(options: { paths: StoragePaths; logger: Logger; policy: HostPolicy }) {
     this.#paths = options.paths;
@@ -135,7 +134,6 @@ export class ProviderRegistry {
       };
       await this.save([entry]);
       this.#logger.info('Bootstrapped providers.json from the environment', { id: entry.id });
-      this.#entries = [entry];
       return { providers: [entry], rejected: [] };
     }
 
@@ -144,14 +142,12 @@ export class ProviderRegistry {
       parsed = JSON.parse(raw);
     } catch {
       this.#logger.error('providers.json is not valid JSON; no providers loaded', {});
-      this.#entries = [];
       return { providers: [], rejected: [{ index: -1, reason: 'file is not valid JSON' }] };
     }
 
     const file = fileSchema.safeParse(parsed);
     if (!file.success) {
       this.#logger.error('providers.json has an unexpected shape; no providers loaded', {});
-      this.#entries = [];
       return { providers: [], rejected: [{ index: -1, reason: 'unexpected file shape' }] };
     }
 
@@ -193,7 +189,6 @@ export class ProviderRegistry {
       this.#logger.warn('Disabled an invalid provider entry', { index, reason });
     }
 
-    this.#entries = providers;
     return { providers, rejected };
   }
 
@@ -203,17 +198,5 @@ export class ProviderRegistry {
       this.#file(),
       `${JSON.stringify({ version: 1, providers: entries }, null, 2)}\n`
     );
-  }
-
-  list(): ProviderConfigEntry[] {
-    return [...this.#entries];
-  }
-
-  get(id: string): ProviderConfigEntry | null {
-    return this.#entries.find((entry) => entry.id === id) ?? null;
-  }
-
-  get size(): number {
-    return this.#entries.length;
   }
 }

@@ -734,12 +734,10 @@ describe('conversations stay provider independent (contracts §4)', () => {
   /** Two providers with distinct models, both reachable from one conversation. */
   async function bootTwoProviders(): Promise<void> {
     const alpha = new EchoProvider({
-      name: 'alpha',
       models: [{ id: 'alpha-1', inputModalities: ['text'], loaded: true }],
       reply: () => ({ content: 'from alpha' }),
     });
     const beta = new EchoProvider({
-      name: 'beta',
       models: [{ id: 'beta-1', inputModalities: ['text'], loaded: true }],
       reply: () => ({ content: 'from beta' }),
     });
