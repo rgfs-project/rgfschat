@@ -90,13 +90,16 @@
 }
 
 /* The user speaks in a bubble; the assistant answers as a document. Only one
-   side needs a container for the alternation to be legible. */
+   side needs a container for the alternation to be legible.
+
+   The radius is half the height of a single-line bubble, so one line reads as a
+   pill and longer messages keep the same corner rather than squaring off. */
 .msg--user {
   align-self: flex-end;
   max-width: 80%;
   background: var(--surface-2);
-  border-radius: 1.375rem;
-  padding: 0.75rem 1.25rem;
+  border-radius: 1.625rem;
+  padding: 0.75rem 1.375rem;
 }
 
 .msg--user .msg__body {
