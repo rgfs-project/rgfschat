@@ -1,10 +1,13 @@
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createLogger } from '../logger.ts';
 import { ensureDir } from '../storage/atomic.ts';
+import { ConversationStore } from '../storage/conversations.ts';
 import { StoragePaths } from '../storage/paths.ts';
+import type { Message } from '@shared/conversation.ts';
 import { ModelCatalog } from './catalog.ts';
 import { EchoProvider } from './echoProvider.ts';
 import { ProviderHub } from './hub.ts';
@@ -308,5 +311,113 @@ describe('the provider abstraction holds for a second implementation', () => {
     // EchoProvider reports modalities, so vision is discovered rather than assumed.
     expect(provider?.capabilitySource).toBe('discovery');
     expect(provider?.capabilities.vision).toBe(true);
+  });
+});
+
+/**
+ * Conversations are provider-independent (phase 5, "Conversations").
+ *
+ * The tests above all prove things about the *hub* — which providers it knows
+ * and what it will resolve. That is a different question from whether stored
+ * conversations survive provider churn, and the two are easy to conflate: a
+ * hub that correctly forgets provider `b` tells you nothing about the
+ * transcript on disk that still references it.
+ *
+ * These drive the real ConversationStore so the assertions are about bytes in
+ * the file, not about in-memory objects.
+ */
+describe('conversations are independent of the providers that produced them', () => {
+  const USER = '0a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d';
+
+  function store(): ConversationStore {
+    return new ConversationStore({ paths, logger });
+  }
+
+  /**
+   * A user turn and the assistant reply that a given provider produced.
+   *
+   * Ids are real UUIDs because the format requires it — the parser rejects
+   * anything else, so a conversation built with `u1`/`a1` would fail to reload
+   * for a reason that has nothing to do with what is under test here.
+   */
+  function turn(n: number, provider: string, model: string): Message[] {
+    return [
+      { type: 'user', id: randomUUID(), body: `question ${n}` },
+      {
+        type: 'assistant',
+        id: randomUUID(),
+        status: 'complete',
+        provider,
+        model,
+        body: `answer ${n}`,
+      },
+    ];
+  }
+
+  /** A hub over the given entries, all backed by EchoProvider. */
+  function hubOver(entries: ProviderConfigEntry[]): ProviderHub {
+    const hub = new ProviderHub({
+      logger,
+      policy: DEFAULT_HOST_POLICY,
+      defaultContextTokens: 8_192,
+      maxOutputTokens: 128,
+      factory: () => new EchoProvider(),
+    });
+    hub.setProviders(entries);
+    return hub;
+  }
+
+  it('keeps per-message attribution when the provider changes mid-conversation', async () => {
+    const conversations = store();
+    await conversations.init(USER);
+    const { id } = await conversations.create(USER, 'Switching providers');
+
+    await conversations.appendMessages(USER, id, turn(1, 'a', 'echo-small'));
+    // The user switches provider without starting a new conversation.
+    await conversations.appendMessages(USER, id, turn(2, 'b', 'echo-large'));
+
+    // Reloaded from disk, not reused from memory.
+    const reloaded = await conversations.load(USER, id);
+    const assistants = reloaded.messages.filter((m) => m.type === 'assistant');
+
+    expect(assistants).toHaveLength(2);
+    expect(assistants[0]).toMatchObject({ provider: 'a', model: 'echo-small' });
+    expect(assistants[1]).toMatchObject({ provider: 'b', model: 'echo-large' });
+    // The earlier turn is not retagged to the provider now in use.
+    expect(reloaded.messages.map((m) => m.body)).toEqual([
+      'question 1',
+      'answer 1',
+      'question 2',
+      'answer 2',
+    ]);
+  });
+
+  it('leaves stored conversations byte-identical when a provider is removed', async () => {
+    const hub = hubOver([entry({ id: 'a' }), entry({ id: 'b' })]);
+    await hub.listModels();
+
+    const conversations = store();
+    await conversations.init(USER);
+    const { id } = await conversations.create(USER, 'Produced by b');
+    await conversations.appendMessages(USER, id, turn(1, 'b', 'echo-small'));
+
+    const file = paths.conversationFile(USER, id);
+    const before = await readFile(file, 'utf8');
+
+    // Provider b is dropped from configuration entirely.
+    hub.setProviders([entry({ id: 'a' })]);
+    await expect(hub.resolveModel('b', 'echo-small')).rejects.toMatchObject({
+      code: 'PROVIDER_NOT_FOUND',
+    });
+
+    expect(await readFile(file, 'utf8')).toBe(before);
+
+    // And it still reads, still crediting the provider that no longer exists.
+    const reloaded = await conversations.load(USER, id);
+    expect(reloaded.messages.at(-1)).toMatchObject({
+      provider: 'b',
+      model: 'echo-small',
+      body: 'answer 1',
+    });
   });
 });
