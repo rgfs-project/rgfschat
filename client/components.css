@@ -124,12 +124,36 @@
   font-style: italic;
 }
 
+/*
+ * Taken out of flow on purpose.
+ *
+ * In flow and merely `opacity: 0`, the controls still occupy their full height
+ * inside the message — which padded every user bubble out to nearly twice the
+ * height of the line it contained, as though the bubble had enormous padding.
+ * Absolute keeps the bubble hugging its text; the controls only ever appear on
+ * hover, so briefly overlapping the gap below costs nothing.
+ */
 .msg__actions {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 1;
   display: flex;
   gap: 0.125rem;
-  margin-top: 0.375rem;
+  margin-top: 0.125rem;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 120ms ease;
+}
+
+.msg--assistant .msg__actions {
+  right: auto;
+  left: 0;
+}
+
+.msg:hover .msg__actions,
+.msg:focus-within .msg__actions {
+  pointer-events: auto;
 }
 
 .msg:hover .msg__actions,
