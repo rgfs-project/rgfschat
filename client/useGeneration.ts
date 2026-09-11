@@ -27,6 +27,15 @@ const IDLE: LiveGeneration = {
  */
 export function useGeneration(generationId: string | null): LiveGeneration {
   const [live, setLive] = useState<LiveGeneration>(IDLE);
+  /**
+   * Highest event id applied.
+   *
+   * EventSource replays this as `Last-Event-ID` on its own reconnects, and the
+   * server replays or resyncs from it. The client never deduplicates to
+   * compensate for the server — if text arrived twice, that is a server bug and
+   * hiding it here would only make it harder to find.
+   */
+  const lastEventId = useRef(0);
   // Deltas arrive far faster than React should re-render; they are accumulated
   // here and flushed on an animation frame.
   const pending = useRef<{ content: string; reasoning: string }>({ content: '', reasoning: '' });
@@ -58,6 +67,7 @@ export function useGeneration(generationId: string | null): LiveGeneration {
 
     setLive({ content: '', reasoning: '', state: 'pending', errorCode: undefined });
     pending.current = { content: '', reasoning: '' };
+    lastEventId.current = 0;
 
     const source = new EventSource(generationStreamUrl(generationId));
 
@@ -69,7 +79,23 @@ export function useGeneration(generationId: string | null): LiveGeneration {
         return;
       }
 
+      const id = Number.parseInt(raw.lastEventId, 10);
+      if (Number.isFinite(id)) lastEventId.current = id;
+
       switch (event.type) {
+        case 'resync':
+          // The server could not replay from where we were, so it handed over
+          // the whole state. Replace rather than append: what we had may
+          // overlap or be missing events entirely.
+          flush();
+          pending.current = { content: '', reasoning: '' };
+          setLive({
+            content: event.snapshot.content,
+            reasoning: event.snapshot.reasoning,
+            state: event.snapshot.state,
+            errorCode: event.snapshot.errorCode,
+          });
+          break;
         case 'snapshot':
           setLive({
             content: event.snapshot.content,
@@ -97,7 +123,7 @@ export function useGeneration(generationId: string | null): LiveGeneration {
       }
     };
 
-    for (const name of ['snapshot', 'content', 'reasoning', 'state', 'done']) {
+    for (const name of ['snapshot', 'resync', 'content', 'reasoning', 'state', 'done']) {
       source.addEventListener(name, handle as EventListener);
     }
 

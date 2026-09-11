@@ -24,7 +24,8 @@
     "verify": "node scripts/verify.mjs",
     "probe:provider": "tsx --env-file-if-exists=.env scripts/probe-provider.ts",
     "index:rebuild": "node scripts/rebuild-index.mjs",
-    "user:create": "tsx --env-file-if-exists=.env server/scripts/createUser.ts"
+    "user:create": "tsx --env-file-if-exists=.env server/scripts/createUser.ts",
+    "test:e2e": "npm run build && playwright test"
   },
   "dependencies": {
     "argon2": "^0.45.1",
@@ -38,6 +39,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",
+    "@playwright/test": "^1.63.0",
     "@types/express": "^5.0.0",
     "@types/node": "^22.13.0",
     "@types/react": "^19.0.0",

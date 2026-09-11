@@ -115,6 +115,14 @@ export function App(): React.JSX.Element {
     try {
       let detail = await getConversation(id);
 
+      // Resume whatever the server says is still running here. This is what
+      // makes a reload mid-generation pick the stream back up, and it works in
+      // a tab that never started the run.
+      if (detail.activeGenerationId !== null) {
+        writeStored(ACTIVE_KEY, detail.activeGenerationId);
+        setGenerationId(detail.activeGenerationId);
+      }
+
       if (awaitMessageId !== undefined) {
         for (let attempt = 0; attempt < 20; attempt += 1) {
           if (detail.messages.some((message) => message.id === awaitMessageId)) break;
@@ -148,6 +156,36 @@ export function App(): React.JSX.Element {
     void refreshList();
     return () => controller.abort();
   }, [refreshList]);
+
+  // A reload with a remembered generation reopens its conversation, so the
+  // stream is resumed with its history rather than in an empty view.
+  useEffect(() => {
+    const remembered = readStored(ACTIVE_KEY);
+    if (remembered === null || currentId !== null) return;
+
+    let cancelled = false;
+    void listConversations()
+      .then(async (list) => {
+        for (const summary of list) {
+          if (cancelled) return;
+          const detail = await getConversation(summary.id);
+          if (detail.activeGenerationId === remembered) {
+            setCurrentId(detail.id);
+            setMessages(detail.messages);
+            return;
+          }
+        }
+        // Nothing is running any more; stop pointing at it.
+        writeStored(ACTIVE_KEY, null);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+    // Runs once on mount; `currentId` is read only as a guard.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // When a generation settles, reload the conversation from the server rather
   // than patching local state: the Markdown is the record, and it now contains

@@ -17,6 +17,13 @@ export interface ConversationDetail {
   createdAt: string;
   updatedAt: string;
   messages: Message[];
+  /**
+   * The run currently streaming into this conversation, if any.
+   *
+   * Discovered from the server rather than remembered locally, so a reload in a
+   * different tab — or after losing localStorage — still resumes it.
+   */
+  activeGenerationId: string | null;
 }
 import { isErrorCode, type ErrorCode } from '@shared/errors.ts';
 import type { SessionDto, UserDto } from '@shared/auth.ts';
@@ -225,8 +232,11 @@ export function cancelGeneration(id: string): Promise<GenerationSnapshotDto> {
   });
 }
 
-export function generationStreamUrl(id: string): string {
-  return `/api/generations/${encodeURIComponent(id)}/stream`;
+export function generationStreamUrl(id: string, lastEventId?: number): string {
+  const base = `/api/generations/${encodeURIComponent(id)}/stream`;
+  // EventSource sets the Last-Event-ID header itself; the query parameter is
+  // for callers that cannot set headers.
+  return lastEventId === undefined ? base : `${base}?lastEventId=${lastEventId}`;
 }
 
 // --- auth ---------------------------------------------------------------

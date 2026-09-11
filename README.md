@@ -4,10 +4,10 @@ A self-hosted chat workspace. Conversations are plain Markdown files on disk, ge
 owned by the server, and the model provider is replaceable.
 
 This repository is built in phases against a project contract kept outside the repository.
-**Phase 5** is complete: the foundation and HTTP
-conventions, server-owned generations with SSE streaming, canonical Markdown persistence with
-a rebuildable index, accounts with sessions and CSRF protection, and multiple model providers
-with SSRF-protected discovery.
+**Phase 6** is complete: the foundation and HTTP
+conventions, canonical Markdown persistence with a rebuildable index, accounts with sessions
+and CSRF protection, multiple model providers with SSRF-protected discovery, and
+reconnectable streaming that survives a reload, a dropped connection, or a restart.
 
 ## Prerequisites
 
@@ -54,9 +54,14 @@ npm run typecheck
 npm test
 npm run build
 npm run verify
+npm run test:e2e
 ```
 
 `npm run index:rebuild` rebuilds the derived conversation index from the Markdown.
+
+`test:e2e` drives a real browser against the built server with Playwright: reloading
+mid-generation, losing the network and reconnecting, and cancelling. Install the browser once
+with `npx playwright install chromium`.
 
 `verify` is the one that matters most: it builds, boots the **real** server on a free port
 with a throwaway `DATA_DIR`, and checks the health DTO, the canonical 404, and clean
@@ -203,6 +208,11 @@ data/<user-uuid>/index/chats.json               derived — a cache, safe to del
 
 Conversations are the source of truth. Edit one in your editor and the change is picked up on
 the next read; run `npm run index:rebuild` (or just restart) to refresh the cached list.
+
+If the server stops mid-reply, the partial text is kept: on the next start it is written to
+the conversation marked `interrupted`, rather than vanishing or pretending to be a complete
+answer. Closing the tab does **not** cancel a generation — reopening the conversation picks
+the stream back up where it was.
 
 **Backups: copy all of `data/`.** `index/` is optional — it is rebuilt from the Markdown when
 missing, unparseable, or left half-written by a crash. Deleting `data/<user-uuid>/` removes

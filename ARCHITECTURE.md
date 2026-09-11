@@ -5,7 +5,7 @@ maintained **outside this repository** alongside the phase prompts that drive th
 This document records what is **actually built** and where each invariant is enforced.
 If this file and the contract disagree, the contract wins and the discrepancy is a bug.
 
-Current state: **Phase 5 complete.**
+Current state: **Phase 6 complete.**
 
 ## 1. Process shape
 
@@ -173,8 +173,8 @@ Every invariant is enforced in code and covered by at least one test whose title
 | INV-17 | Reducing a user's privileges or disabling them revokes all their sessions                                       | 4     | `server/auth/middleware.ts` (record loaded per request)           | `server/auth/auth.test.ts`                                                |
 | INV-18 | Only server-validated `(providerId, modelId)` pairs are ever sent to a provider                                 | 5     | `server/provider/hub.ts` + `catalog.requireModel`                 | `server/provider/providers.test.ts`, `server/storage/persistence.test.ts` |
 | INV-19 | Every provider endpoint passes SSRF validation on create/edit and at request time                               | 5     | `server/provider/ssrf.ts`                                         | `server/provider/ssrf.test.ts`                                            |
-| INV-20 | SSE replay never silently skips events; a too-old `Last-Event-ID` triggers a full resync                        | 6     | pending                                                           | pending                                                                   |
-| INV-21 | After a restart, no generation remains non-terminal, and partial output is persisted once                       | 6     | pending                                                           | pending                                                                   |
+| INV-20 | SSE replay never silently skips events; a too-old `Last-Event-ID` triggers a full resync                        | 6     | `server/generation/manager.ts` (`catchUp`)                        | `server/generation/streaming.test.ts`, `e2e/streaming.spec.ts`            |
+| INV-21 | After a restart, no generation remains non-terminal, and partial output is persisted once                       | 6     | `server/generation/recovery.ts`                                   | `server/generation/streaming.test.ts`                                     |
 | INV-22 | Rendered Markdown never executes script or raw HTML                                                             | 7     | pending                                                           | pending                                                                   |
 | INV-23 | A stale response never overwrites newer client state                                                            | 8     | pending                                                           | pending                                                                   |
 | INV-24 | Admin authorization is enforced server-side on every admin route                                                | 9     | pending                                                           | pending                                                                   |
@@ -377,8 +377,80 @@ before the caller read any of it.
 
 ## 10. Streaming
 
-SSE observation is implemented — see §4b. Replay from `Last-Event-ID`, resync,
-checkpoints, and the restart policy are Phase 6.
+### Replay and resync (INV-20)
+
+Every event carries a monotonically increasing id per generation, and the last
+`SSE_REPLAY_EVENTS` (default **2000**) are held in a ring buffer. 2000 is about a
+long reply's worth of chunks, so an ordinary reconnect replays exactly rather
+than resyncing, while the memory held per generation stays small and bounded.
+
+On connect, the server decides from `Last-Event-ID`:
+
+| Client state                | Response                                |
+| --------------------------- | --------------------------------------- |
+| no id (fresh observer)      | one `snapshot`, then live events        |
+| id equals ours              | nothing; straight to live events        |
+| id inside the window        | exactly the missed events, then live    |
+| id older than the window    | one `resync` carrying the full snapshot |
+| id ahead of anything issued | one `resync` — the id is not ours       |
+
+That last row matters: treating a future id as "up to date" would leave a stale
+tab permanently silent. **A gap is never left silent.** The server guarantees
+correct replay and the client never deduplicates to compensate — if text arrived
+twice that is a server bug, and hiding it in the client would only make it
+harder to find. On `resync` the client _replaces_ its state rather than
+appending, since what it held may overlap or be missing events entirely.
+
+A terminal generation gets its catch-up and then the stream closes, rather than
+holding a connection that will never produce another event.
+
+### Checkpoints
+
+`_system/generations/<id>.json` holds owner, conversation, ids, state, output so
+far, last event id, and timestamps. Written on **every state transition** and,
+while streaming, at most once per `GENERATION_CHECKPOINT_MS` (default 1000 ms) —
+never one write per token.
+
+Writes are **chained per generation**. Two in flight at once race at the final
+rename, so a `streaming` write issued just before a `completed` one could land
+_after_ it and resurrect the older state, which recovery would then treat as an
+interrupted run.
+
+Checkpoints are disposable and are never read as conversation history; the
+canonical Markdown stays authoritative.
+
+### Restart policy (INV-21)
+
+In-flight generations do not survive a restart. What survives is the honesty of
+the record. Before the listener accepts a single request, `recoverGenerations`
+walks every checkpoint: a non-terminal one has its partial output appended with
+`status=interrupted`, then the checkpoint is cleared.
+
+The subtle part is a crash _between_ those two steps. A second run would
+otherwise append the same message twice, so the scan checks whether an assistant
+message with that id is already present and skips the write — exactly once,
+however many times recovery runs (INV-07). A checkpoint whose conversation was
+deleted is discarded; one whose conversation cannot be written is logged and
+left for inspection rather than blocking startup.
+
+### Abandonment
+
+A generation with no observers is **not** abandoned; it runs to completion.
+Only terminal generations are evicted, after `GENERATION_RETENTION_MS`.
+
+`activeGenerationId` on `GET /api/conversations/:id` reports a run only while it
+is genuinely non-terminal. The in-flight map is cleared after the canonical
+write, which leaves a window where the run has finished but the entry remains —
+reporting it there made a reloading client subscribe to a finished generation
+and render a second, permanently pending reply.
+
+### Serving the client
+
+In production the server also serves `dist/client` with an SPA fallback, so
+`npm start` is a complete application rather than an API needing a separate
+static host. `/api` is matched first and keeps its canonical JSON 404s; the
+fallback is GET/HEAD only, so a mistyped POST still fails loudly instead of
+returning HTML.
 
 ## 11. Attachments
 

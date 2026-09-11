@@ -233,9 +233,23 @@ export class GenerationService {
     return { generationId, assistantMessageId };
   }
 
-  /** Whether a conversation currently has a non-terminal generation. */
+  /**
+   * The conversation's generation, if one is genuinely still running.
+   *
+   * `#active` is cleared only once the canonical write has landed, which leaves
+   * a window where the run has reached a terminal state but the entry is still
+   * present. Reporting it during that window makes a reloading client subscribe
+   * to a finished generation and render a second, permanently pending reply —
+   * so the manager's state is the authority here, not the map.
+   */
   activeGenerationId(userId: string, conversationId: string): string | null {
-    return this.#active.get(conversationKey(userId, conversationId)) ?? null;
+    const generationId = this.#active.get(conversationKey(userId, conversationId));
+    if (generationId === undefined) return null;
+
+    const snapshot = this.#manager.get(generationId, userId);
+    if (snapshot === null || isTerminalState(snapshot.state)) return null;
+
+    return generationId;
   }
 
   /**

@@ -225,6 +225,44 @@ async function startMockProvider({ chunkDelayMs = 0 } = {}) {
   };
 }
 
+/** Reads an SSE stream until `stopAfter` events, then hangs up mid-flight. */
+async function readStreamUntil(url, stopAfter) {
+  const response = await afetch(url);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const ids = [];
+  const events = [];
+  let buffer = '';
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundary;
+    while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+
+      let id = null;
+      let data = '';
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('id:')) id = Number(line.slice(3).trim());
+        if (line.startsWith('data:')) data = line.slice(5).trim();
+      }
+      if (data === '') continue;
+      events.push(JSON.parse(data));
+      if (id !== null) ids.push(id);
+
+      if (events.length >= stopAfter) {
+        await reader.cancel();
+        return { ids, events };
+      }
+    }
+  }
+  return { ids, events };
+}
+
 /** Reads an SSE stream to its end, returning parsed events and accumulated text. */
 async function readStream(url) {
   const response = await afetch(url);
@@ -669,7 +707,73 @@ async function main() {
       !(await readdir(chatsDir)).includes(`${other.id}.md`)
     );
 
-    // 6. Multi-user isolation and logout.
+    // 6. Reconnection (Phase 6): a dropped stream resumed with Last-Event-ID
+    //    must not produce a second canonical assistant write.
+    console.log('\n   reconnection:');
+    const reconnectConversation = await (
+      await afetch(`${baseUrl}/api/conversations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      })
+    ).json();
+
+    const reconnectRun = await (
+      await afetch(`${baseUrl}/api/generations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId: reconnectConversation.id,
+          providerId: group.providerId,
+          model: 'Mock Model',
+          content: 'reconnect please',
+        }),
+      })
+    ).json();
+
+    // Read part of the stream, then hang up mid-flight.
+    const partial = await readStreamUntil(
+      `${baseUrl}/api/generations/${reconnectRun.generationId}/stream`,
+      2
+    );
+    check(
+      'a partial read yields events with ids',
+      partial.ids.length >= 1,
+      JSON.stringify(partial.ids)
+    );
+
+    // Reconnect from where we left off.
+    const resumed = await readStream(
+      `${baseUrl}/api/generations/${reconnectRun.generationId}/stream?lastEventId=${partial.ids.at(-1)}`
+    );
+    const replayedIds = resumed.ids.filter((id) => id <= partial.ids.at(-1));
+    check(
+      'INV-20: the resumed stream replays only what was missed',
+      replayedIds.length === 0 || resumed.events[0]?.type === 'resync',
+      JSON.stringify({ replayedIds, first: resumed.events[0]?.type })
+    );
+    check(
+      'the resumed stream reaches a terminal event',
+      resumed.events.at(-1)?.type === 'done' ||
+        resumed.events.some((e) => e.type === 'resync' || e.type === 'snapshot'),
+      JSON.stringify(resumed.events.at(-1))
+    );
+
+    // Give the canonical write time to land, then count assistant blocks.
+    const reconnectPath = join(chatsDir, `${reconnectConversation.id}.md`);
+    let reconnectMarkdown = '';
+    for (let i = 0; i < 100; i += 1) {
+      reconnectMarkdown = await readFile(reconnectPath, 'utf8');
+      if (reconnectMarkdown.includes('cc:assistant')) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    check(
+      'INV-07: reconnecting produced exactly one canonical assistant write',
+      (reconnectMarkdown.match(/cc:assistant/g) || []).length === 1,
+      reconnectMarkdown.slice(0, 200)
+    );
+
+    // 6b. Multi-user isolation and logout.
     console.log('\n   isolation:');
     const ownConversation = await (
       await afetch(`${baseUrl}/api/conversations`, {

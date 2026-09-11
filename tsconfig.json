@@ -31,5 +31,5 @@
       "@shared/*": ["shared/*"]
     }
   },
-  "include": ["client", "server", "shared", "scripts", "*.config.ts"]
+  "include": ["client", "server", "shared", "scripts", "e2e", "*.config.ts"]
 }

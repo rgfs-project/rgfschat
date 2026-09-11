@@ -1,3 +1,5 @@
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createApp } from './app.ts';
 import { loadConfig } from './config.ts';
 import { GenerationManager } from './generation/manager.ts';
@@ -68,6 +70,9 @@ async function main(): Promise<void> {
 
   const app = createApp({
     logger,
+    // The server binary lives at dist/server/index.js, so the built client is
+    // its sibling.
+    clientDir: join(dirname(fileURLToPath(import.meta.url)), '..', 'client'),
     hub,
     manager,
     store,
