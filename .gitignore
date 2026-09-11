@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+coverage/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Persistent data (contracts §1) — the directory is a boundary, its contents are never committed
+data/*
+!data/.gitkeep
+
+# Editor / OS
+.DS_Store
+*.log
+.vscode/
+.idea/
