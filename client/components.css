@@ -563,11 +563,24 @@
   outline: none;
 }
 
+/*
+ * Attach and model on the left as one group, send on the right.
+ *
+ * `space-between` spread all three evenly, which left the model selector
+ * stranded in the middle of the bar. The two things that decide what is *in*
+ * the message belong together; the send button is the only thing that belongs
+ * at the other end, and `margin-left: auto` on it is what says so — rather
+ * than a wrapper element that exists only to hold two children.
+ */
 .composer__bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.25rem;
+}
+
+.composer__send,
+.composer__send--stop {
+  margin-left: auto;
 }
 
 .composer__send {

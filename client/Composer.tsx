@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, Paperclip, Square } from 'lucide-react';
+import { ArrowUp, Plus, Square } from 'lucide-react';
 import type { ProviderModelGroup } from './api.ts';
 import { AttachmentChips } from './AttachmentChips.tsx';
 import { ModelPicker, type ModelSelection } from './ModelPicker.tsx';
@@ -171,7 +171,7 @@ export function Composer({
               aria-label="Attach files"
               title={attachments.remaining === 0 ? 'Attachment limit reached' : 'Attach files'}
             >
-              <Paperclip size={16} />
+              <Plus size={18} />
             </button>
           </>
         )}
