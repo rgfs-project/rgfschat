@@ -129,7 +129,7 @@ export function Sidebar({
 
       <div className="sidebar__actions">
         <button type="button" className="nav-button" onClick={onCreate}>
-          <Plus size={18} />
+          <Plus size={15} />
           New chat
         </button>
 
@@ -137,7 +137,7 @@ export function Sidebar({
             is what actually protects these routes (INV-24). */}
         {user.role === 'admin' && (
           <button type="button" className="nav-button" onClick={onOpenAdmin}>
-            <Shield size={18} />
+            <Shield size={15} />
             Admin
           </button>
         )}
@@ -147,7 +147,7 @@ export function Sidebar({
             shape of a field here would promise the wrong thing — and it is one
             of the three ways out of this pane, so it looks like the other two. */}
         <button type="button" className="nav-button" onClick={onSearch}>
-          <Search size={18} />
+          <Search size={15} />
           Search
         </button>
       </div>
