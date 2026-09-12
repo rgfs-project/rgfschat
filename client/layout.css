@@ -103,12 +103,18 @@ body {
  * the conversation title all sit on one line, and the title keeps the same
  * offset from the visible left edge whether the sidebar is open or shut.
  */
+/*
+ * Inset like the rows below it rather than by the shared gutter, so the
+ * control's box ends on the same edge every row ends on. The wordmark takes
+ * the rows' own 10px back (below), which puts its first letter on the column
+ * the nav icons and the conversation titles start from.
+ */
 .sidebar__brand {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: 0 var(--gutter);
+  padding: 0 0.5rem;
   height: var(--header-height);
   border-bottom: 1px solid var(--border);
 }
@@ -117,6 +123,9 @@ body {
    as a heading competing with the conversation titles below it. */
 .brand {
   margin: 0;
+  /* The inset a row gives its own text, so the mark starts on the column the
+     nav icons and the conversation titles start on. */
+  padding-left: 0.625rem;
   font-family: var(--font-display);
   font-style: italic;
   font-weight: 500;
