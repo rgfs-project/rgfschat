@@ -89,6 +89,16 @@ export class ConversationStore {
     return parsed.conversation;
   }
 
+  /**
+   * The stored file, unparsed.
+   *
+   * For export: what leaves the server is then byte-for-byte what is on disk,
+   * rather than a re-serialization that could differ from it.
+   */
+  async raw(userId: string, conversationId: string): Promise<string> {
+    return this.#read(userId, conversationId);
+  }
+
   async #read(userId: string, conversationId: string): Promise<string> {
     const file = this.#paths.conversationFile(userId, conversationId);
     try {

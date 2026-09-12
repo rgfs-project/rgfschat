@@ -10,6 +10,7 @@ import { AuditLog } from './admin/audit.ts';
 import { SettingsStore } from './admin/settings.ts';
 import { ConversationStore } from './storage/conversations.ts';
 import { ChatIndex } from './storage/index.ts';
+import { PreferencesStore } from './storage/preferences.ts';
 import { StoragePaths } from './storage/paths.ts';
 import { GenerationService } from './generation/service.ts';
 import { CheckpointStore } from './generation/checkpoints.ts';
@@ -50,6 +51,7 @@ async function main(): Promise<void> {
 
   const store = new ConversationStore({ paths: paths0, logger });
   const index = new ChatIndex({ store, logger });
+  const preferences = new PreferencesStore(paths0, logger);
 
   /*
    * Loaded before the generation service is built, because the service asks it
@@ -95,6 +97,7 @@ async function main(): Promise<void> {
     manager,
     store,
     index,
+    preferences,
     service,
     users,
     sessions,

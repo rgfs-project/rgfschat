@@ -127,10 +127,16 @@ describe('a malformed conversation', () => {
   });
 
   it('marks the conversation in the list and withholds rename', async () => {
+    const user = userEvent.setup();
     await openBrokenConversation();
 
-    expect(screen.queryByRole('button', { name: /^Rename / })).toBeNull();
-    expect(screen.getByRole('button', { name: /^Delete Broken conversation/ })).toBeTruthy();
+    await user.click(await screen.findByRole('button', { name: /^Actions for Broken/ }));
+
+    // Rename and Download both have to read the file, so neither is offered
+    // for one that cannot be parsed. Deleting it does not need to read it.
+    expect(screen.queryByRole('menuitem', { name: 'Rename' })).toBeNull();
+    expect(screen.queryByRole('menuitem', { name: 'Download' })).toBeNull();
+    expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeTruthy();
   });
 
   it('deletes only after the confirmation is accepted', async () => {

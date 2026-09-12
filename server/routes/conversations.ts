@@ -2,7 +2,8 @@ import { Router, type Request } from 'express';
 import { z } from 'zod';
 import { TITLE_MAX_LENGTH, type Conversation } from '@shared/conversation.ts';
 import type { ConversationStore } from '../storage/conversations.ts';
-import { entryFor, type ChatIndex } from '../storage/index.ts';
+import { entryFor, type ChatIndex, type ChatIndexEntry } from '../storage/index.ts';
+import type { PreferencesStore } from '../storage/preferences.ts';
 import { validateBody } from '../http/validate.ts';
 import { isCanonicalUuid } from '@shared/conversation.ts';
 import { AppError } from '../errors/AppError.ts';
@@ -26,6 +27,7 @@ const titleSchema = z
 const createSchema = z.strictObject({ title: titleSchema.optional() });
 const patchSchema = z.strictObject({ title: titleSchema });
 const editMessageSchema = z.strictObject({ body: z.string().min(1).max(200_000) });
+const pinSchema = z.strictObject({ pinned: z.boolean() });
 
 /** Long enough for a sentence someone half-remembers, short enough to bound. */
 const SEARCH_QUERY_MAX_LENGTH = 200;
@@ -68,6 +70,8 @@ function snippetAt(body: string, at: number, length: number): string {
 export interface ConversationRoutesOptions {
   store: ConversationStore;
   index: ChatIndex;
+  /** Absent in tests that do not exercise pinning. */
+  preferences?: PreferencesStore;
   /** Lets a reloading client rediscover the run it was watching. */
   activeGenerationId?: (userId: string, conversationId: string) => string | null;
 }
@@ -110,12 +114,72 @@ function toDto(id: string, conversation: Conversation, activeGenerationId: strin
 export function conversationRouter({
   store,
   index,
+  preferences,
   activeGenerationId,
 }: ConversationRoutesOptions): Router {
   const router = Router();
 
+  /**
+   * Merges in what the reader has pinned.
+   *
+   * Joined here rather than stored in the index, which is derived and may be
+   * rebuilt from the conversation files at any time — a pin written into it
+   * would vanish the first time that happened (INV-11).
+   */
+  async function withPins(userId: string, entries: ChatIndexEntry[]): Promise<unknown[]> {
+    const pinned = (await preferences?.pinned(userId)) ?? new Set<string>();
+    return entries.map((entry) => ({ ...entry, pinned: pinned.has(entry.id) }));
+  }
+
   router.get('/conversations', async (req, res) => {
-    res.json({ conversations: await index.list(ownerOf(req)) });
+    const user = ownerOf(req);
+    res.json({ conversations: await withPins(user, await index.list(user)) });
+  });
+
+  /**
+   * Pins or unpins a conversation for the caller.
+   *
+   * A separate route from the title PATCH because it is a different kind of
+   * thing: the title is the conversation's, the pin is the reader's, and they
+   * are stored in different places for that reason.
+   */
+  router.put('/conversations/:id/pin', validateBody(pinSchema), async (req, res) => {
+    const id = requireId(req.params.id);
+    const { pinned } = req.body as z.infer<typeof pinSchema>;
+    const user = ownerOf(req);
+
+    if (preferences === undefined) throw AppError.internal('Pinning is not configured');
+    // Refuses to pin what does not exist, so a bad id cannot leave a pin
+    // pointing at nothing.
+    if (!(await store.exists(user, id))) throw AppError.notFound('Conversation not found.');
+
+    await preferences.setPinned(user, id, pinned);
+    res.json({ id, pinned });
+  });
+
+  /**
+   * The conversation as the file on disk, for keeping.
+   *
+   * Served from the stored Markdown rather than re-serialized from the parsed
+   * form: what is downloaded is then exactly what the server has, byte for
+   * byte, including anything a future format adds that this build would drop.
+   */
+  router.get('/conversations/:id/export', async (req, res) => {
+    const id = requireId(req.params.id);
+    const user = ownerOf(req);
+
+    const conversation = await store.load(user, id);
+    const raw = await store.raw(user, id);
+
+    // Quotes and backslashes escaped, and a plain-ASCII fallback first: a title
+    // is user-controlled text going into a header.
+    const name = conversation.title.replace(/[^\w .-]+/g, '_').slice(0, 80) || 'conversation';
+    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${name}.md"; filename*=UTF-8''${encodeURIComponent(`${conversation.title}.md`)}`
+    );
+    res.send(raw);
   });
 
   /**
@@ -277,6 +341,8 @@ export function conversationRouter({
     // recoverable by a rebuild; a dangling reference to a live file is not.
     await store.delete(user, id);
     await index.remove(user, id);
+    // And the pin, which would otherwise outlive what it pointed at.
+    await preferences?.forget(user, id);
 
     res.status(204).end();
   });

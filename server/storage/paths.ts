@@ -78,6 +78,18 @@ export class StoragePaths {
     return this.#contain(resolve(this.indexDir(userId), 'chats.json'));
   }
 
+  /**
+   * `data/<user>/preferences.json` — small, authoritative, the reader's own.
+   *
+   * Which conversations are pinned cannot live in the conversation file: that
+   * format is frozen at four front-matter keys (contracts §3). Nor in the chat
+   * index, which is derived and may be deleted and rebuilt at any time. So it
+   * has a file of its own, beside them and belonging to neither.
+   */
+  preferencesFile(userId: string): string {
+    return this.#contain(resolve(this.userDir(userId), 'preferences.json'));
+  }
+
   attachmentsDir(userId: string): string {
     return this.#contain(resolve(this.userDir(userId), 'attachments'));
   }

@@ -79,7 +79,10 @@
 }
 
 .conversation:hover .conversation__actions,
-.conversation:focus-within .conversation__actions {
+.conversation:focus-within .conversation__actions,
+/* Held open while its menu is: the pointer has left the row to use the menu,
+   and a trigger that vanishes under the menu it opened reads as a glitch. */
+.conversation__actions.is-open {
   opacity: 1;
 }
 
@@ -116,12 +119,15 @@
    side needs a container for the alternation to be legible.
 
    The radius is half the height of a single-line bubble, so one line reads as a
-   pill and longer messages keep the same corner rather than squaring off. */
+   pill and longer messages keep the same corner rather than squaring off. The
+   bottom-right is a quarter of that: the corner nearest the side the message
+   came from is turned down, which points the bubble at its author the way a
+   tail does without drawing one. */
 .msg--user {
   align-self: flex-end;
   max-width: 80%;
   background: var(--surface-2);
-  border-radius: 1.625rem;
+  border-radius: 1.625rem 1.625rem 0.40625rem 1.625rem;
   padding: 0.75rem 1.375rem;
 }
 
@@ -245,8 +251,13 @@
 .msg.is-found {
   outline: 2px solid var(--border-strong);
   outline-offset: 0.5rem;
-  border-radius: 1.625rem;
   animation: found-fade 2s var(--ease-out) forwards;
+}
+
+/* The user bubble already has a shape and the outline follows it; the
+   assistant's turn has none, so the ring is given one. */
+.msg--assistant.is-found {
+  border-radius: 1.625rem;
 }
 
 @keyframes found-fade {
@@ -1005,6 +1016,106 @@ button.linkish:hover {
 /* The backdrop dims what is behind it, so the dialog reads as modal. */
 .modal {
   backdrop-filter: blur(2px);
+}
+
+/* --- menus ---------------------------------------------------------------- */
+
+/*
+ * A popup menu. Fixed, because it is portalled to the body and positioned
+ * against a trigger that lives inside a scroll container — absolute would put
+ * it relative to the page rather than to what the reader can see.
+ */
+.menu {
+  position: fixed;
+  z-index: 300;
+  min-width: 11rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  padding: 0.375rem;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
+  animation: scale-in var(--motion-fast) var(--ease-out);
+}
+
+.menu__item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.5rem 0.625rem;
+  border-radius: 0.5rem;
+  text-align: left;
+  color: var(--text);
+  font-size: 0.9375rem;
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
+}
+
+.menu__item.is-active {
+  background: var(--surface-2);
+}
+
+.menu__item:active {
+  transform: scale(0.97);
+}
+
+.menu__icon {
+  display: inline-flex;
+  color: var(--muted);
+}
+
+/* Destructive actions are separated from what is above them, so the click that
+   ends one gesture cannot fall through to the one that cannot be undone. The
+   same rule separates anything else that leaves rather than changes. */
+.menu__item.is-destructive,
+.menu__item.is-separated {
+  margin-top: 0.375rem;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 0.5rem 0.5rem;
+  padding-top: 0.625rem;
+}
+
+/* No colour: the palette is achromatic on purpose, and destructive is carried
+   by the separator above it, as it is on the dialogs' destructive button. */
+
+/* --- account row ---------------------------------------------------------- */
+
+.account {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  width: 100%;
+  padding: 0.5rem;
+  border-radius: 0.75rem;
+  /* A button centres its text; this one is a row, and the name belongs beside
+     the avatar rather than floating in the middle of the footer. */
+  text-align: left;
+  color: var(--text);
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
+}
+
+.account:hover {
+  background: var(--surface-2);
+}
+
+.account:active {
+  transform: scale(0.98);
+}
+
+.account__chevron {
+  flex: none;
+  color: var(--muted);
+  transition: transform var(--motion-fast) var(--ease-out);
+}
+
+.account__chevron.is-open {
+  transform: rotate(180deg);
 }
 
 /* --- search palette ------------------------------------------------------- */

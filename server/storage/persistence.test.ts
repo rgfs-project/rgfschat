@@ -16,6 +16,7 @@ import { EchoProvider } from '../provider/echoProvider.ts';
 import { startMockProvider, type MockProvider } from '../provider/mockServer.ts';
 import { ConversationStore } from './conversations.ts';
 import { ChatIndex, type ChatIndexEntry } from './index.ts';
+import { PreferencesStore } from './preferences.ts';
 import { StoragePaths } from './paths.ts';
 import { ARGON2_TEST_OPTIONS, UserStore } from '../auth/users.ts';
 import { SessionManager } from '../auth/sessions.ts';
@@ -41,6 +42,7 @@ let dataDir: string;
 let paths: StoragePaths;
 let store: ConversationStore;
 let index: ChatIndex;
+let preferences: PreferencesStore;
 let service: GenerationService;
 let manager: GenerationManager;
 let mock: MockProvider | undefined;
@@ -101,12 +103,15 @@ async function boot(options: Parameters<typeof startMockProvider>[0] = {}): Prom
   });
   await users.create({ username: 'tester', password: 'correct horse battery', id: USER });
 
+  preferences = new PreferencesStore(paths, logger);
+
   const app = createApp({
     logger,
     hub,
     manager,
     store,
     index,
+    preferences,
     service,
     users,
     sessions,
@@ -197,6 +202,23 @@ const api = {
     return {
       status: res.status,
       results: ((await res.json()) as { results?: unknown[] }).results ?? [],
+    };
+  },
+  async pin(conversationId: string, pinned: boolean) {
+    const res = await afetch(`${base}/api/conversations/${conversationId}/pin`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pinned }),
+    });
+    return { status: res.status, body: (await res.json().catch(() => null)) as never };
+  },
+  async exportOne(conversationId: string) {
+    const res = await afetch(`${base}/api/conversations/${conversationId}/export`);
+    return {
+      status: res.status,
+      disposition: res.headers.get('content-disposition') ?? '',
+      type: res.headers.get('content-type') ?? '',
+      body: await res.text(),
     };
   },
   async send(conversationId: string, content: string, model = 'GPT', providerId = 'local') {
@@ -362,6 +384,107 @@ describe('conversation search', () => {
 
     expect(await api.search('')).toMatchObject({ status: 200, results: [] });
     expect((await api.search('x'.repeat(201))).status).toBe(400);
+  });
+});
+
+/**
+ * Pinning is the reader's, not the conversation's.
+ *
+ * Which makes where it is stored the thing worth testing: the Markdown's front
+ * matter is frozen at four keys, and the index is derived and rebuilt from the
+ * files, so a pin kept in either would be either invalid or lost.
+ */
+describe('pinning', () => {
+  beforeEach(boot);
+
+  it('is reported in the list and survives an index rebuild', async () => {
+    const { body } = await api.create('Kept');
+    const id = body.id as string;
+
+    expect((await api.list()).find((e) => e.id === id)).toMatchObject({ pinned: false });
+
+    expect((await api.pin(id, true)).status).toBe(200);
+    expect((await api.list()).find((e) => e.id === id)).toMatchObject({ pinned: true });
+
+    // The index is derived: throwing it away must not throw the pin away.
+    await index.rebuild(USER);
+    expect((await api.list()).find((e) => e.id === id)).toMatchObject({ pinned: true });
+
+    // And the conversation file itself is untouched by any of it.
+    const raw = await readFile(paths.conversationFile(USER, id), 'utf8');
+    expect(raw).not.toContain('pinned');
+
+    expect((await api.pin(id, false)).status).toBe(200);
+    expect((await api.list()).find((e) => e.id === id)).toMatchObject({ pinned: false });
+  });
+
+  it('refuses to pin a conversation that does not exist', async () => {
+    expect((await api.pin(randomUUID(), true)).status).toBe(404);
+    expect((await api.pin('not-a-uuid', true)).status).toBe(404);
+  });
+
+  it('is dropped when the conversation is deleted', async () => {
+    const { body } = await api.create('Doomed');
+    const id = body.id as string;
+    await api.pin(id, true);
+
+    expect(await api.remove(id)).toBe(204);
+    expect(await preferences.pinned(USER)).not.toContain(id);
+  });
+
+  it("is one reader's alone", async () => {
+    const { body } = await api.create('Mine');
+    const id = body.id as string;
+    await api.pin(id, true);
+
+    const other = '11111111-2222-4333-8444-555555555555';
+    expect(await preferences.pinned(other)).toEqual(new Set());
+  });
+
+  it('ignores a preferences file that cannot be read', async () => {
+    const { body } = await api.create('Kept');
+    const id = body.id as string;
+    await api.pin(id, true);
+
+    await writeFile(paths.preferencesFile(USER), '{ not json');
+
+    // Degraded, not broken: the list still answers, without the pin.
+    expect((await api.list()).find((e) => e.id === id)).toMatchObject({ pinned: false });
+  });
+});
+
+describe('export', () => {
+  beforeEach(boot);
+
+  it('serves the stored file byte for byte, named after the conversation', async () => {
+    const { body } = await api.create('Trip planning');
+    const id = body.id as string;
+    await api.send(id, 'hello there');
+    await service.settled(USER, id);
+
+    const exported = await api.exportOne(id);
+    expect(exported.status).toBe(200);
+    expect(exported.type).toContain('text/markdown');
+    expect(exported.disposition).toContain('filename="Trip planning.md"');
+    expect(exported.body).toBe(await readFile(paths.conversationFile(USER, id), 'utf8'));
+  });
+
+  it('keeps a hostile title out of the header', async () => {
+    const { body } = await api.create('a"b; drop=1');
+    const id = body.id as string;
+
+    const exported = await api.exportOne(id);
+    expect(exported.status).toBe(200);
+    // No quote and no semicolon survive into the quoted filename, so neither
+    // can end the header field early; the percent-encoded copy keeps the real
+    // title for clients that read it.
+    expect(exported.disposition).toContain('filename="a_b_ drop_1.md"');
+    expect(exported.disposition).not.toContain('drop=1.md"');
+    expect(exported.disposition).toContain("filename*=UTF-8''");
+  });
+
+  it("404s for a conversation that is not the caller's", async () => {
+    expect((await api.exportOne(randomUUID())).status).toBe(404);
   });
 });
 

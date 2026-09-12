@@ -9,6 +9,7 @@ import type { ProviderHub } from './provider/hub.ts';
 import { generationRouter } from './routes/generations.ts';
 import { healthRouter } from './routes/health.ts';
 import { conversationRouter } from './routes/conversations.ts';
+import type { PreferencesStore } from './storage/preferences.ts';
 import { authRouter } from './routes/auth.ts';
 import { adminRouter } from './routes/admin.ts';
 import { authenticate, requireAdmin, requireAuth, requireCsrf } from './auth/middleware.ts';
@@ -36,6 +37,8 @@ export interface AppOptions {
   clientDir?: string;
   store?: ConversationStore;
   index?: ChatIndex;
+  /** Per-reader state that belongs in neither the file nor the index. */
+  preferences?: PreferencesStore;
   service?: GenerationService;
   users?: UserStore;
   sessions?: SessionManager;
@@ -61,6 +64,7 @@ export function createApp({
   manager,
   store,
   index,
+  preferences,
   service,
   users,
   sessions,
@@ -111,6 +115,7 @@ export function createApp({
       conversationRouter({
         store,
         index,
+        ...(preferences === undefined ? {} : { preferences }),
         ...(service !== undefined
           ? {
               activeGenerationId: (userId: string, conversationId: string) =>

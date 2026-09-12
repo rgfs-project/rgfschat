@@ -9,6 +9,8 @@ export interface ConversationSummary {
   updatedAt: string;
   messageCount: number;
   malformed: boolean;
+  /** Kept at the top of the list by the reader. */
+  pinned?: boolean;
 }
 
 export interface ConversationDetail {
@@ -247,6 +249,40 @@ export async function listConversations(signal?: AbortSignal): Promise<Conversat
     signalInit(signal)
   );
   return conversations;
+}
+
+export function pinConversation(id: string, pinned: boolean): Promise<{ pinned: boolean }> {
+  return request<{ pinned: boolean }>(`/api/conversations/${id}/pin`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pinned }),
+  });
+}
+
+/**
+ * Hands the conversation's Markdown to the browser as a file.
+ *
+ * Fetched rather than linked, because the export route needs the session's
+ * CSRF header like every other call here; a bare `<a href>` would arrive
+ * without it.
+ */
+export async function downloadConversation(id: string, title: string): Promise<void> {
+  const response = await fetch(`/api/conversations/${id}/export`, {
+    credentials: 'same-origin',
+    headers: { Accept: 'text/markdown', ...csrfHeader() },
+  });
+  if (!response.ok) throw new ApiError('INTERNAL', 'Could not download the conversation.');
+
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${title.replace(/[^\w .-]+/g, '_').slice(0, 80) || 'conversation'}.md`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  // Revoked on the next tick: released synchronously, the click may not have
+  // started reading it yet.
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 export interface SearchHit {

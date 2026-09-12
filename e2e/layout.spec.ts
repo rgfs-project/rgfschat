@@ -178,9 +178,10 @@ test.describe('overlays are not clipped', () => {
 
     await page.locator('.conversation').first().hover();
     await page
-      .getByRole('button', { name: /^Delete / })
+      .getByRole('button', { name: /^Actions for / })
       .first()
       .click();
+    await page.getByRole('menuitem', { name: 'Delete' }).click();
 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();

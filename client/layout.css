@@ -165,8 +165,7 @@ body {
 .sidebar__footer {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 1rem;
+  padding: 0.625rem 0.75rem;
   border-top: 1px solid var(--border);
 }
 

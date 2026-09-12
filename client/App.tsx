@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, PanelLeft } from 'lucide-react';
 import type { UserDto } from '@shared/auth.ts';
-import { ApiError, cancelGeneration } from './api.ts';
+import { ApiError, cancelGeneration, downloadConversation } from './api.ts';
 import { Composer } from './Composer.tsx';
 import { AdminPanel } from './AdminPanel.tsx';
 import { ChangePassword } from './ChangePassword.tsx';
@@ -22,6 +22,7 @@ import {
   useEditMessage,
   useModels,
   useRegenerate,
+  usePinConversation,
   useRenameConversation,
   useSendMessage,
 } from './queries.ts';
@@ -139,6 +140,7 @@ export function App({
   const createConversation = useCreateConversation();
   const renameConversation = useRenameConversation();
   const deleteConversation = useDeleteConversation();
+  const pinConversation = usePinConversation();
   const editMessage = useEditMessage();
   const deleteMessage = useDeleteMessage();
   const sendMessage = useSendMessage();
@@ -355,6 +357,20 @@ export function App({
     [renameConversation]
   );
 
+  const onPinConversation = useCallback(
+    (id: string, pinned: boolean) => {
+      pinConversation.mutate(
+        { id, pinned },
+        { onError: () => setError('Could not change the pin.') }
+      );
+    },
+    [pinConversation]
+  );
+
+  const onDownloadConversation = useCallback((id: string, title: string) => {
+    downloadConversation(id, title).catch(() => setError('Could not download the conversation.'));
+  }, []);
+
   const onDeleteConversation = useCallback(
     (id: string) => {
       deleteConversation.mutate(id, {
@@ -568,6 +584,8 @@ export function App({
             onSearch={() => setSearchOpen(true)}
             onRename={(id, currentTitle) => setDialog({ kind: 'rename', id, title: currentTitle })}
             onDelete={(id) => setDialog({ kind: 'delete-conversation', id })}
+            onPin={onPinConversation}
+            onDownload={onDownloadConversation}
             onChangePassword={() => setChangingPassword(true)}
             onOpenAdmin={() => setAdminOpen(true)}
             onSignOut={onSignOut}

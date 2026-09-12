@@ -18,6 +18,7 @@ import {
   getConversation,
   listConversations,
   regenerate,
+  pinConversation,
   renameConversation,
   searchConversations,
   startGeneration,
@@ -148,6 +149,43 @@ export function useSearch(query: string): UseQueryResult<SearchResult[]> {
 }
 
 /* --- writes -------------------------------------------------------------- */
+
+/**
+ * Pinning, applied to the cached list before the server answers.
+ *
+ * A pin is a filing gesture: the row is expected to move the instant it is
+ * clicked, and waiting a round trip to see whether it did makes the list feel
+ * like it is arguing. The previous list is restored if the write fails.
+ */
+export function usePinConversation(): UseMutationResult<
+  { pinned: boolean },
+  Error,
+  { id: string; pinned: boolean },
+  { previous: ConversationSummary[] | undefined }
+> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, pinned }) => pinConversation(id, pinned),
+    onMutate: async ({ id, pinned }) => {
+      await client.cancelQueries({ queryKey: keys.conversations() });
+      const previous = client.getQueryData<ConversationSummary[]>(keys.conversations());
+
+      client.setQueryData<ConversationSummary[]>(keys.conversations(), (current) =>
+        current?.map((conversation) =>
+          conversation.id === id ? { ...conversation, pinned } : conversation
+        )
+      );
+
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      client.setQueryData(keys.conversations(), context?.previous);
+    },
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: keys.conversations() });
+    },
+  });
+}
 
 export function useCreateConversation(): UseMutationResult<ConversationDetail, Error, void> {
   const client = useQueryClient();
