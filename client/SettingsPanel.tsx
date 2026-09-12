@@ -1,15 +1,26 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Brain, Database, KeyRound, SlidersHorizontal, Trash2, X } from 'lucide-react';
+import {
+  Brain,
+  Database,
+  KeyRound,
+  Plus,
+  SlidersHorizontal,
+  Trash2,
+  Upload,
+  X,
+} from 'lucide-react';
 import type { UserDto } from '@shared/auth.ts';
 import {
   ApiError,
-  changePassword,
   clearMyHistory,
   deleteMyMemory,
+  importExport,
   saveMyMemory,
   setMyDefaultModel,
+  updateMyAccount,
+  type ImportReport,
 } from './api.ts';
 import { Dialog } from './Dialog.tsx';
 import { ModelSelect, type ModelChoice } from './ModelSelect.tsx';
@@ -26,13 +37,14 @@ import { keys, useModels, useMyMemories, useMyPreferences } from './queries.ts';
  * behind it take no user to act on.
  */
 
-type Section = 'account' | 'model' | 'history' | 'memory';
+type Section = 'account' | 'model' | 'history' | 'memory' | 'import';
 
 const SECTIONS: { id: Section; label: string; icon: typeof KeyRound }[] = [
   { id: 'account', label: 'Account', icon: KeyRound },
   { id: 'model', label: 'Model', icon: SlidersHorizontal },
   { id: 'history', label: 'Chat history', icon: Database },
   { id: 'memory', label: 'Memory', icon: Brain },
+  { id: 'import', label: 'Import', icon: Upload },
 ];
 
 export function SettingsPanel({
@@ -83,6 +95,7 @@ export function SettingsPanel({
           {section === 'model' && <DefaultModel />}
           {section === 'history' && <ChatHistory user={user} />}
           {section === 'memory' && <Memory />}
+          {section === 'import' && <ImportChats />}
         </div>
       </div>
     </div>,
@@ -117,74 +130,102 @@ function message(error: unknown, fallback: string): string {
 
 /* --- account -------------------------------------------------------------- */
 
+/**
+ * Username and password, changed together.
+ *
+ * One form and one button, because both are the same request behind the same
+ * proof: a session cookie says who you were when you signed in, which is not
+ * the same as someone at the keyboard now being you. The new password is
+ * optional so a rename does not force one.
+ */
 function Account({ user }: { user: UserDto }): React.JSX.Element {
+  const client = useQueryClient();
+  const [username, setUsername] = useState(user.username);
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const change = useMutation({
-    mutationFn: () => changePassword(current, next),
+  const renaming = username.trim() !== '' && username.trim() !== user.username;
+  const changed = renaming || next !== '';
+
+  const save = useMutation({
+    mutationFn: () =>
+      updateMyAccount({
+        ...(renaming ? { username: username.trim() } : {}),
+        currentPassword: current,
+        ...(next === '' ? {} : { newPassword: next }),
+      }),
     onSuccess: () => {
       setDone(true);
       setCurrent('');
       setNext('');
+      // The session carries the username the header and the account row show.
+      void client.invalidateQueries({ queryKey: keys.session() });
     },
-    onError: (err) => setError(message(err, 'Could not change your password.')),
+    onError: (err) => setError(message(err, 'Could not save those changes.')),
   });
 
   return (
-    <>
-      <Row label="Signed in as" description="Your username cannot be changed from here.">
-        <span className="panel__row-desc">{user.username}</span>
-      </Row>
+    <form
+      className="panel__form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        setError(null);
+        setDone(false);
+        save.mutate();
+      }}
+    >
+      <p className="panel__row-desc">
+        Changing your username or password needs your current password.
+      </p>
 
-      <form
-        className="panel__form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          setError(null);
-          setDone(false);
-          change.mutate();
-        }}
-      >
-        {error !== null && (
-          <p role="alert" className="error">
-            {error}
-          </p>
-        )}
-        {done && <p className="notice">Your password has been changed.</p>}
+      {error !== null && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
+      {done && <p className="notice">Saved.</p>}
 
-        <label className="field">
-          <span>Current password</span>
-          <input
-            type="password"
-            autoComplete="current-password"
-            value={current}
-            onChange={(event) => setCurrent(event.target.value)}
-          />
-        </label>
-        <label className="field">
-          <span>New password</span>
-          <input
-            type="password"
-            autoComplete="new-password"
-            value={next}
-            onChange={(event) => setNext(event.target.value)}
-          />
-        </label>
+      <label className="field">
+        <span>Username</span>
+        <input
+          value={username}
+          autoComplete="username"
+          onChange={(event) => setUsername(event.target.value)}
+        />
+      </label>
+      <label className="field">
+        <span>Current password</span>
+        <input
+          type="password"
+          autoComplete="current-password"
+          value={current}
+          onChange={(event) => setCurrent(event.target.value)}
+        />
+      </label>
+      <label className="field">
+        <span>
+          New password <span className="muted">— leave blank to keep it</span>
+        </span>
+        <input
+          type="password"
+          autoComplete="new-password"
+          value={next}
+          onChange={(event) => setNext(event.target.value)}
+        />
+      </label>
 
-        <div className="panel__form-actions">
-          <button
-            type="submit"
-            className="button-primary"
-            disabled={current === '' || next === '' || change.isPending}
-          >
-            Change password
-          </button>
-        </div>
-      </form>
-    </>
+      <div className="panel__form-actions">
+        <button
+          type="submit"
+          className="button-primary"
+          disabled={!changed || current === '' || save.isPending}
+        >
+          Save changes
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -215,7 +256,6 @@ function DefaultModel(): React.JSX.Element {
       >
         <ModelSelect
           label="Default model"
-          noneLabel="The instance's default"
           groups={models.data?.providers ?? []}
           value={preferences.data?.defaultModel ?? null}
           onChange={(choice) => {
@@ -303,23 +343,24 @@ function ChatHistory({ user }: { user: UserDto }): React.JSX.Element {
 /**
  * What the model is told about this reader before every conversation.
  *
- * Shown as what it is — files of Markdown — rather than as an opaque setting,
- * because a memory that cannot be read back is one nobody can correct.
+ * A list of plain statements rather than named documents: a memory is usually
+ * one sentence, and making somebody name a file before they can write one down
+ * is a tax on the feature. The list is shown in full because a memory nobody
+ * can read back is one nobody can correct — and nothing is added to it except
+ * by the person reading it.
  */
 function Memory(): React.JSX.Element {
   const client = useQueryClient();
   const memories = useMyMemories();
+  const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState<{ name: string; content: string } | null>(null);
-  const [removing, setRemoving] = useState<string | null>(null);
 
   const invalidate = (): void => void client.invalidateQueries({ queryKey: keys.memories() });
 
-  const save = useMutation({
-    mutationFn: ({ name, content }: { name: string; content: string }) =>
-      saveMyMemory(name, content),
+  const add = useMutation({
+    mutationFn: (content: string) => saveMyMemory(content),
     onSuccess: () => {
-      setEditing(null);
+      setDraft('');
       invalidate();
     },
     onError: (err) => setError(message(err, 'Could not save that memory.')),
@@ -335,107 +376,136 @@ function Memory(): React.JSX.Element {
 
   return (
     <>
+      <p className="panel__row-desc">
+        Told to the model at the start of every chat, in every conversation. Nothing is added here
+        on its own — this list is exactly what it is told.
+      </p>
+
       {error !== null && (
         <p role="alert" className="error">
           {error}
         </p>
       )}
-
       {memories.isPending && <p className="muted">Loading…</p>}
-      {!memories.isPending && list.length === 0 && (
-        <p className="muted">
-          Nothing is remembered yet. Anything added here is given to the model at the start of every
-          conversation.
+
+      <ul className="memories">
+        {list.map((memory) => (
+          <li key={memory.name} className="memories__item">
+            <span className="memories__text">{memory.content.trim()}</span>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={`Forget: ${memory.content.trim().slice(0, 40)}`}
+              title="Forget this"
+              onClick={() => {
+                setError(null);
+                remove.mutate(memory.name);
+              }}
+            >
+              <X size={15} />
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      <form
+        className="memories__add"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (draft.trim() === '') return;
+          setError(null);
+          add.mutate(draft.trim());
+        }}
+      >
+        <input
+          value={draft}
+          placeholder="My dog's name is Beans"
+          aria-label="Something to remember"
+          onChange={(event) => setDraft(event.target.value)}
+        />
+        <button
+          type="submit"
+          className="icon-button"
+          aria-label="Remember this"
+          title="Remember this"
+          disabled={draft.trim() === '' || add.isPending}
+        >
+          <Plus size={16} />
+        </button>
+      </form>
+    </>
+  );
+}
+
+/* --- import --------------------------------------------------------------- */
+
+/**
+ * Bringing conversations in from a Claude export.
+ *
+ * The whole zip is accepted, or any single file out of it, because that is
+ * what people have to hand — and what was uploaded is decided by reading the
+ * bytes rather than by trusting the name.
+ */
+function ImportChats(): React.JSX.Element {
+  const client = useQueryClient();
+  const input = useRef<HTMLInputElement | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [report, setReport] = useState<ImportReport | null>(null);
+
+  const upload = useMutation({
+    mutationFn: (file: File) => importExport(file),
+    onSuccess: (result) => {
+      setReport(result);
+      void client.invalidateQueries({ queryKey: keys.conversations() });
+      void client.invalidateQueries({ queryKey: keys.memories() });
+    },
+    onError: (err) => setError(message(err, 'Could not read that export.')),
+  });
+
+  return (
+    <>
+      <p className="panel__row-desc">
+        Import a Claude data export — the zip from Settings → Privacy → Export data, or the
+        conversations.json inside it. Conversations already here are left alone, so importing the
+        same export twice imports it once.
+      </p>
+
+      {error !== null && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
+      {report !== null && (
+        <p className="notice">
+          {report.imported} conversation{report.imported === 1 ? '' : 's'} imported
+          {report.memories > 0 ? `, ${report.memories} memory/memories` : ''}
+          {report.skippedExisting > 0 ? `, ${report.skippedExisting} already here` : ''}
+          {report.skippedEmpty > 0 ? `, ${report.skippedEmpty} empty` : ''}.
+          {report.toolBlocks > 0 ? ` ${report.toolBlocks} tool block(s) left out.` : ''}
         </p>
       )}
 
-      {list.map((memory) => (
-        <Row
-          key={memory.name}
-          label={memory.name}
-          description={`${Math.max(1, Math.round(memory.bytes / 1024))}KB · ${memory.content.split('\n')[0]?.slice(0, 80) ?? ''}`}
-        >
-          <button
-            type="button"
-            onClick={() => setEditing({ name: memory.name, content: memory.content })}
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={`Delete ${memory.name}`}
-            title="Delete"
-            onClick={() => setRemoving(memory.name)}
-          >
-            <Trash2 size={15} />
-          </button>
-        </Row>
-      ))}
+      <input
+        ref={input}
+        type="file"
+        accept=".zip,.json,application/zip,application/json"
+        className="sr-only"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = '';
+          if (file === undefined) return;
+          setError(null);
+          setReport(null);
+          upload.mutate(file);
+        }}
+      />
 
       <div className="panel__actions">
-        <button type="button" onClick={() => setEditing({ name: '', content: '' })}>
-          Add a memory
+        <button type="button" onClick={() => input.current?.click()} disabled={upload.isPending}>
+          <Upload size={15} />
+          {upload.isPending ? 'Importing…' : 'Import chats'}
         </button>
       </div>
-
-      {editing !== null && (
-        <form
-          className="panel__form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            setError(null);
-            save.mutate(editing);
-          }}
-        >
-          <label className="field">
-            <span>Name</span>
-            <input
-              value={editing.name}
-              placeholder="how-i-write"
-              onChange={(event) => setEditing({ ...editing, name: event.target.value })}
-            />
-          </label>
-          <label className="field">
-            <span>What to remember</span>
-            <textarea
-              className="panel__textarea"
-              rows={8}
-              value={editing.content}
-              onChange={(event) => setEditing({ ...editing, content: event.target.value })}
-            />
-          </label>
-
-          <div className="panel__form-actions">
-            <button type="button" className="linkish" onClick={() => setEditing(null)}>
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="button-primary"
-              disabled={editing.name === '' || editing.content.trim() === '' || save.isPending}
-            >
-              Save
-            </button>
-          </div>
-        </form>
-      )}
-
-      {removing !== null && (
-        <Dialog
-          title="Delete this memory?"
-          body={`${removing} is removed from disk and will no longer be given to the model.`}
-          confirmLabel="Delete"
-          destructive
-          onCancel={() => setRemoving(null)}
-          onConfirm={() => {
-            const name = removing;
-            setRemoving(null);
-            setError(null);
-            remove.mutate(name);
-          }}
-        />
-      )}
     </>
   );
 }

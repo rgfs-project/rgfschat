@@ -29,6 +29,9 @@ export interface SelectProps {
   disabled?: boolean;
 }
 
+/** Room the list keeps between itself and the window's edge. */
+const EDGE_MARGIN_PX = 8;
+
 export function Select({
   value,
   options,
@@ -53,7 +56,21 @@ export function Select({
     if (trigger === null) return;
 
     const rect = trigger.getBoundingClientRect();
-    setPosition({ left: rect.left, top: rect.bottom + 4, width: rect.width });
+    const menu = menuRef.current?.getBoundingClientRect();
+
+    /*
+     * Clamped to the window, like the popup menu is. The list is at least as
+     * wide as its trigger and often wider — an option can be a whole sentence
+     * — so a trigger near the right-hand edge of a panel put the end of every
+     * label past the edge of the screen.
+     */
+    const width = menu === undefined ? rect.width : Math.max(rect.width, menu.width);
+    const left = Math.max(
+      EDGE_MARGIN_PX,
+      Math.min(rect.left, window.innerWidth - width - EDGE_MARGIN_PX)
+    );
+
+    setPosition({ left, top: rect.bottom + 4, width: rect.width });
   }, []);
 
   useLayoutEffect(() => {

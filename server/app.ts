@@ -137,9 +137,11 @@ export function createApp({
     index !== undefined &&
     manager !== undefined &&
     preferences !== undefined &&
-    memories !== undefined
+    memories !== undefined &&
+    users !== undefined &&
+    sessions !== undefined
   ) {
-    app.use('/api', meRouter({ store, index, manager, preferences, memories }));
+    app.use('/api', meRouter({ store, index, manager, preferences, memories, users, sessions }));
   }
 
   if (hub !== undefined && manager !== undefined && service !== undefined) {

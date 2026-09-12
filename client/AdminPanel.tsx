@@ -740,7 +740,6 @@ function SettingsSection(): React.JSX.Element {
       >
         <ModelSelect
           label="Default model"
-          noneLabel="No default"
           groups={models.data?.providers ?? []}
           value={current}
           onChange={(choice) => save.mutate({ defaultModel: choice })}

@@ -282,6 +282,43 @@ export class UserStore {
     return ok ? record : null;
   }
 
+  /**
+   * Changes an account's username.
+   *
+   * Under the registry lock, and against the registry rather than the record,
+   * because uniqueness is a property of the set: two renames racing towards the
+   * same name would each find it free.
+   *
+   * The id never changes, so nothing that refers to this account — a session, a
+   * conversation directory, a pin — has to be rewritten.
+   */
+  async rename(userId: string, username: string): Promise<UserDto> {
+    const next = normalizeUsername(username);
+    if (!isValidUsername(next)) {
+      throw AppError.validation('Username must be 3-32 characters of a-z, 0-9, _, . or -');
+    }
+
+    return this.#lock.run(REGISTRY_KEY, async () => {
+      const record = await this.#read(userId);
+      if (record === null) throw AppError.notFound('Account not found.');
+      if (record.username === next) return toDto(record);
+
+      const taken = await this.findByUsername(next);
+      if (taken !== null) throw new AppError('CONFLICT', 'That username is already taken.');
+
+      const updated: UserRecord = {
+        ...record,
+        username: next,
+        updatedAt: this.#now().toISOString(),
+      };
+      await this.#write(updated);
+      await this.rebuildRegistry();
+
+      this.#logger.info('Account renamed', { userId });
+      return toDto(updated);
+    });
+  }
+
   async setPassword(userId: string, password: string): Promise<void> {
     const record = await this.#read(userId);
     if (record === null) throw AppError.notFound('Account not found.');

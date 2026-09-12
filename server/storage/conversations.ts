@@ -90,6 +90,27 @@ export class ConversationStore {
   }
 
   /**
+   * Writes a conversation that came from somewhere else.
+   *
+   * Serialized and then read back through the parser before it counts as
+   * written: an import that leaves behind a file the server would call
+   * malformed has not imported anything, and finding that out at write time is
+   * the difference between a failed import and a broken conversation.
+   */
+  async writeImported(
+    userId: string,
+    conversationId: string,
+    conversation: Conversation
+  ): Promise<void> {
+    await ensureDir(this.#paths.chatsDir(userId));
+    await atomicWriteFile(
+      this.#paths.conversationFile(userId, conversationId),
+      serializeConversation(conversation)
+    );
+    await this.load(userId, conversationId);
+  }
+
+  /**
    * The stored file, unparsed.
    *
    * For export: what leaves the server is then byte-for-byte what is on disk,

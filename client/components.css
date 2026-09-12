@@ -1379,9 +1379,16 @@ button.linkish:hover {
   border-radius: 0.625rem;
 }
 
+/*
+ * Square. It holds one glyph, and the section buttons' horizontal padding —
+ * inherited from the rule above, which exists to line their *text* up — made
+ * it 4px wider than it is tall, so the one control in the rail that is only an
+ * icon was the one that did not look like an icon button.
+ */
 .panel__close {
   align-self: flex-start;
-  width: auto;
+  width: var(--panel-control-height);
+  padding: 0;
   margin-bottom: 0.5rem;
 }
 
@@ -1456,6 +1463,70 @@ button.linkish:hover {
   align-items: center;
   gap: 0.5rem;
   flex: none;
+}
+
+/* --- memories -------------------------------------------------------------- */
+
+/*
+ * A list of statements, not of documents. Each is shown as written, up to a
+ * few lines: a memory the reader cannot read back is one they cannot correct,
+ * and an imported one can be a whole page.
+ */
+.memories {
+  list-style: none;
+  margin: 0.75rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.memories__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  background: var(--surface-2);
+  border-radius: 0.625rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.memories__text {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* The field the next one is written in, shaped like the rows above it so the
+   list reads as something you add to rather than a form beneath it. */
+.memories__add {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  padding: 0.375rem 0.375rem 0.375rem 0.75rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 0.625rem;
+}
+
+.memories__add input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  outline: none;
+  color: var(--text);
+  font-size: 0.8125rem;
+}
+
+.memories__add input::placeholder {
+  color: var(--muted);
 }
 
 /* --- select --------------------------------------------------------------- */
@@ -1548,6 +1619,7 @@ button.linkish:hover {
    shape — without this the button rule outranks it on specificity and hands it
    a button's padding and minimum width. */
 .panel__row-control button:not(.icon-button):not(.select),
+.panel__actions button:not(.icon-button),
 .panel__form-actions button:not(.button-primary):not(.linkish) {
   display: inline-flex;
   align-items: center;
@@ -1572,7 +1644,10 @@ button.linkish:hover {
   min-width: 7rem;
 }
 
+/* A row of actions that belong to the pane rather than to one of its rows. */
 .panel__actions {
+  display: flex;
+  gap: 0.5rem;
   margin-top: 1.25rem;
 }
 

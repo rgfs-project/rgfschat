@@ -313,6 +313,53 @@ export function clearMyHistory(withinHours?: number): Promise<{ deleted: number 
   });
 }
 
+/** Username and password together, behind the current password. */
+export async function updateMyAccount(body: {
+  username?: string;
+  currentPassword: string;
+  newPassword?: string;
+}): Promise<UserDto> {
+  const { user } = await request<{ user: UserDto }>('/api/me/account', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return user;
+}
+
+export interface ImportReport {
+  imported: number;
+  skippedExisting: number;
+  skippedEmpty: number;
+  memories: number;
+  toolBlocks: number;
+  attachments: number;
+}
+
+/**
+ * Uploads an export for the server to read.
+ *
+ * Sent as raw bytes rather than a form, because it is one file and the server
+ * has no other field to read: a multipart body would be a parser to maintain
+ * for a boundary nobody needs.
+ */
+export async function importExport(file: File): Promise<ImportReport> {
+  const response = await fetch('/api/me/import', {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/octet-stream',
+      ...csrfHeader(),
+    },
+    body: file,
+  });
+
+  const body: unknown = await response.json().catch(() => null);
+  if (!response.ok)
+    throw readErrorBody(body) ?? new ApiError('INTERNAL', 'Could not read that export.');
+  return body as ImportReport;
+}
+
 export interface MemoryDto {
   name: string;
   content: string;
@@ -328,11 +375,15 @@ export async function fetchMyMemories(signal?: AbortSignal): Promise<MemoryDto[]
   return memories;
 }
 
-export function saveMyMemory(name: string, content: string): Promise<{ memory: MemoryDto }> {
+/**
+ * Writes one memory. The name is optional — a memory is usually a sentence,
+ * and the server derives a filename from it when none is given.
+ */
+export function saveMyMemory(content: string, name?: string): Promise<{ memory: MemoryDto }> {
   return request<{ memory: MemoryDto }>('/api/me/memories', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, content }),
+    body: JSON.stringify({ content, ...(name === undefined ? {} : { name }) }),
   });
 }
 
