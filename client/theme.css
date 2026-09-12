@@ -48,6 +48,9 @@
    * markdown, or the transcript: animating content that is already streaming in
    * fights the reader, and a body that fades on every token is unreadable.
    */
+  /* The admin rail's close control and section buttons share one height. */
+  --admin-control-height: 2.625rem;
+
   /* One size for every button, so a row of them lines up. */
   --button-font-size: 0.875rem;
   --button-padding: 0.5rem 0.875rem;

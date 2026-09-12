@@ -23,6 +23,7 @@ import {
   type ProviderWrite,
 } from './api.ts';
 import { Dialog } from './Dialog.tsx';
+import { Select } from './Select.tsx';
 import { keys, useModels } from './queries.ts';
 
 /**
@@ -217,33 +218,32 @@ function UsersSection({ currentUser }: { currentUser: UserDto }): React.JSX.Elem
             account.conversationCount === 1 ? '' : 's'
           }`}
         >
-          <select
-            aria-label={`Role for ${account.username}`}
+          <Select
+            label={`Role for ${account.username}`}
             value={account.role}
-            onChange={(event) =>
-              update.mutate({
-                id: account.id,
-                changes: { role: event.target.value as 'user' | 'admin' },
-              })
+            options={[
+              { value: 'user', label: 'user' },
+              { value: 'admin', label: 'admin' },
+            ]}
+            onChange={(next) =>
+              update.mutate({ id: account.id, changes: { role: next as 'user' | 'admin' } })
             }
-          >
-            <option value="user">user</option>
-            <option value="admin">admin</option>
-          </select>
+          />
 
-          <select
-            aria-label={`Status for ${account.username}`}
+          <Select
+            label={`Status for ${account.username}`}
             value={account.status}
-            onChange={(event) =>
+            options={[
+              { value: 'active', label: 'active' },
+              { value: 'disabled', label: 'disabled' },
+            ]}
+            onChange={(next) =>
               update.mutate({
                 id: account.id,
-                changes: { status: event.target.value as 'active' | 'disabled' },
+                changes: { status: next as 'active' | 'disabled' },
               })
             }
-          >
-            <option value="active">active</option>
-            <option value="disabled">disabled</option>
-          </select>
+          />
 
           <button
             type="button"
@@ -641,27 +641,34 @@ function SettingsSection(): React.JSX.Element {
         label="Registration"
         description="Whether anyone can create their own account. Overrides the environment once set here."
       >
-        <select
-          aria-label="Registration mode"
+        <Select
+          label="Registration mode"
           value={mode}
-          onChange={(event) =>
-            save.mutate({ registrationMode: event.target.value as 'open' | 'closed' })
-          }
-        >
-          <option value="closed">Closed</option>
-          <option value="open">Open</option>
-        </select>
+          options={[
+            { value: 'closed', label: 'Closed' },
+            { value: 'open', label: 'Open' },
+          ]}
+          onChange={(next) => save.mutate({ registrationMode: next as 'open' | 'closed' })}
+        />
       </Row>
 
       <Row
         label="Default model"
         description="What a new conversation starts on, before anyone picks something else."
       >
-        <select
-          aria-label="Default model"
+        <Select
+          label="Default model"
           value={currentKey}
-          onChange={(event) => {
-            const raw = event.target.value;
+          options={[
+            { value: '', label: 'No default' },
+            ...(models.data?.providers ?? []).flatMap((group) =>
+              group.models.map((model) => ({
+                value: `${group.providerId}\u0000${model.id}`,
+                label: model.id,
+              }))
+            ),
+          ]}
+          onChange={(raw) => {
             if (raw === '') {
               save.mutate({ defaultModel: null });
               return;
@@ -671,19 +678,7 @@ function SettingsSection(): React.JSX.Element {
               save.mutate({ defaultModel: { providerId, modelId } });
             }
           }}
-        >
-          <option value="">No default</option>
-          {(models.data?.providers ?? []).flatMap((group) =>
-            group.models.map((model) => (
-              <option
-                key={`${group.providerId}/${model.id}`}
-                value={`${group.providerId}\u0000${model.id}`}
-              >
-                {model.id}
-              </option>
-            ))
-          )}
-        </select>
+        />
       </Row>
     </>
   );
@@ -717,18 +712,18 @@ function MaintenanceSection(): React.JSX.Element {
         label="Conversation index"
         description="Rebuilds the derived index from the conversation files on disk."
       >
-        <select
-          aria-label="Rebuild for"
+        <Select
+          label="Rebuild for"
           value={target}
-          onChange={(event) => setTarget(event.target.value)}
-        >
-          <option value="">All users</option>
-          {(users.data ?? []).map((account) => (
-            <option key={account.id} value={account.id}>
-              {account.username}
-            </option>
-          ))}
-        </select>
+          options={[
+            { value: '', label: 'All users' },
+            ...(users.data ?? []).map((account) => ({
+              value: account.id,
+              label: account.username,
+            })),
+          ]}
+          onChange={setTarget}
+        />
         <button type="button" onClick={() => rebuild.mutate()}>
           <Database size={15} />
           Rebuild
