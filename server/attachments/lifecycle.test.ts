@@ -7,6 +7,7 @@ import { createLogger } from '../logger.ts';
 import { ConversationStore } from '../storage/conversations.ts';
 import { ChatIndex } from '../storage/index.ts';
 import { StoragePaths } from '../storage/paths.ts';
+import { pngBytes } from './testImages.ts';
 import { AttachmentStore } from './store.ts';
 import { reconcileAttachments } from './reconcile.ts';
 import { referencedIds, resolveAttachments } from './resolve.ts';
@@ -31,7 +32,7 @@ async function* once(bytes: Uint8Array): AsyncGenerator<Uint8Array> {
 }
 
 const utf8 = (content: string): Uint8Array => new Uint8Array(Buffer.from(content, 'utf8'));
-const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01, 0x02]);
+const PNG = pngBytes();
 
 beforeEach(async () => {
   dataDir = await mkdtemp(join(tmpdir(), 'attachment-lifecycle-'));
@@ -42,6 +43,7 @@ beforeEach(async () => {
     maxBytes: 1_000_000,
     maxTotalBytesPerUser: 10_000_000,
     pendingTtlMs: 60_000,
+    maxImagePixels: 50_000_000,
   });
   await attachments.ensureUserDir(USER);
 });

@@ -21,6 +21,7 @@ import {
 } from '../storage/atomic.ts';
 import { KeyedLock } from '../storage/locks.ts';
 import type { StoragePaths } from '../storage/paths.ts';
+import { imageDimensions } from './dimensions.ts';
 import { sniff } from './sniff.ts';
 
 /**
@@ -68,6 +69,15 @@ export interface AttachmentMeta {
 export interface AttachmentLimits {
   /** Per file. Enforced while streaming, not after. */
   maxBytes: number;
+  /**
+   * The most pixels an image may declare.
+   *
+   * Separate from the byte limit because they defend against different things.
+   * A 100 kB PNG can declare 60 000 x 60 000 and expand to fourteen gigabytes
+   * in whatever decodes it; the file is small, so a size limit never fires.
+   * What has to be checked is the header's claim.
+   */
+  maxImagePixels: number;
   /** Across everything one user has stored, pending and linked alike. */
   maxTotalBytesPerUser: number;
   /** How long an unreferenced upload survives before collection. */
@@ -186,6 +196,10 @@ export class AttachmentStore {
       // A file shorter than the sniff window is identified from all of it.
       if (mediaType === null) mediaType = this.#identify(head, shown);
 
+      // Checked once the header is in hand and before the bytes are kept, so a
+      // bomb costs only the header it took to recognise it.
+      this.#assertRepresentable(mediaType, head);
+
       await handle.sync();
     } catch (error) {
       await handle.close();
@@ -222,6 +236,34 @@ export class AttachmentStore {
     );
 
     return { meta };
+  }
+
+  /**
+   * Refuses an image whose declared size is beyond what may be stored.
+   *
+   * Unreadable dimensions are refused too. `null` from the reader means the
+   * header could not be parsed, which is not the same as "small" — an image
+   * whose cost cannot be bounded is one this application will not accept,
+   * however plausible its magic bytes were.
+   */
+  #assertRepresentable(mediaType: AcceptedMediaType, head: Buffer): void {
+    if (kindOf(mediaType) !== 'image') return;
+
+    const dimensions = imageDimensions(mediaType, new Uint8Array(head));
+    if (dimensions === null) {
+      throw new AppError(
+        'UNSUPPORTED_MEDIA_TYPE',
+        'That image could not be read. It may be damaged or truncated.'
+      );
+    }
+
+    const pixels = dimensions.width * dimensions.height;
+    if (pixels > this.#limits.maxImagePixels) {
+      throw new AppError(
+        'UNSUPPORTED_MEDIA_TYPE',
+        `That image is ${dimensions.width}x${dimensions.height}, which is larger than this server will accept.`
+      );
+    }
   }
 
   #identify(head: Buffer, filename: string): AcceptedMediaType {

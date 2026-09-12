@@ -11,6 +11,7 @@ import { ARGON2_TEST_OPTIONS, UserStore } from '../auth/users.ts';
 import { signIn, type TestClient } from '../auth/testClient.ts';
 import { StoragePaths } from '../storage/paths.ts';
 import { AttachmentStore } from '../attachments/store.ts';
+import { pngBytes } from '../attachments/testImages.ts';
 
 /**
  * The attachment routes over real HTTP.
@@ -28,9 +29,7 @@ let base: string;
 let owner: TestClient;
 let other: TestClient;
 
-const PNG = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-]);
+const PNG = Buffer.from(pngBytes());
 
 /** A multipart body, built by hand so the test controls every byte of it. */
 function multipart(
@@ -81,6 +80,7 @@ beforeEach(async () => {
     maxBytes: 1024,
     maxTotalBytesPerUser: 4096,
     pendingTtlMs: 60_000,
+    maxImagePixels: 50_000_000,
   });
 
   const app = createApp({

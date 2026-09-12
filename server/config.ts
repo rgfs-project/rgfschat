@@ -101,6 +101,18 @@ const envSchema = z.object({
     .min(60_000)
     .max(30 * 24 * 60 * 60 * 1000)
     .default(24 * 60 * 60 * 1000),
+  /**
+   * The most pixels an image may declare (Phase 12).
+   *
+   * 50 megapixels is far beyond any screenshot or phone photo and far below
+   * what a decompression bomb declares.
+   */
+  ATTACHMENT_MAX_IMAGE_PIXELS: z.coerce
+    .number()
+    .int()
+    .min(10_000)
+    .max(500_000_000)
+    .default(50_000_000),
   /** Characters of a text attachment inlined into a prompt before truncation. */
   ATTACHMENT_MAX_INLINE_CHARS: z.coerce.number().int().min(1_000).max(2_000_000).default(100_000),
 });
@@ -129,6 +141,8 @@ export interface AttachmentConfig {
   pendingTtlMs: number;
   /** Characters, not bytes: what is counted is what goes into a prompt. */
   maxInlineChars: number;
+  /** Declared pixels, checked from the header rather than by decoding. */
+  maxImagePixels: number;
 }
 
 export interface StreamingConfig {
@@ -202,6 +216,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ATTACHMENT_MAX_TOTAL_BYTES_PER_USER,
     ATTACHMENT_PENDING_TTL_MS,
     ATTACHMENT_MAX_INLINE_CHARS,
+    ATTACHMENT_MAX_IMAGE_PIXELS,
   } = parsed.data;
 
   return {
@@ -221,6 +236,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       maxTotalBytesPerUser: ATTACHMENT_MAX_TOTAL_BYTES_PER_USER,
       pendingTtlMs: ATTACHMENT_PENDING_TTL_MS,
       maxInlineChars: ATTACHMENT_MAX_INLINE_CHARS,
+      maxImagePixels: ATTACHMENT_MAX_IMAGE_PIXELS,
     },
     streaming: {
       checkpointMs: GENERATION_CHECKPOINT_MS,

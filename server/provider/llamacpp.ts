@@ -94,16 +94,24 @@ export class LlamaCppProvider implements Provider {
   readonly #contextLengths = new Map<string, number>();
   readonly #policy: HostPolicy;
   readonly #resolver: Resolver | undefined;
+  readonly #maxResponseBytes: number;
 
   constructor(
     config: ProviderConfig,
     logger: Logger,
-    options: { policy?: HostPolicy; resolver?: Resolver } = {}
+    options: { policy?: HostPolicy; resolver?: Resolver; maxResponseBytes?: number } = {}
   ) {
     this.#config = config;
     this.#logger = logger;
     this.#policy = options.policy ?? DEFAULT_HOST_POLICY;
     this.#resolver = options.resolver;
+    /*
+     * 64 MB is far beyond any reply a context window can produce — a 128k
+     * context is a few hundred kilobytes of text — and far below what an
+     * unbounded stream costs. Generous on purpose: this is a backstop against
+     * a provider behaving pathologically, not a second output limit.
+     */
+    this.#maxResponseBytes = options.maxResponseBytes ?? 64 * 1024 * 1024;
   }
 
   #headers(extra: Record<string, string> = {}): Record<string, string> {
@@ -284,13 +292,42 @@ export class LlamaCppProvider implements Provider {
     const reader = (response.body as ReadableStream<Uint8Array>).getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let received = 0;
 
     try {
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
 
+        /*
+         * A cap on what one generation may stream back.
+         *
+         * The provider is configured by an administrator and reached over the
+         * network, which makes it something this process trusts but cannot
+         * control: a compromised or simply broken one can stream without end,
+         * and every byte is accumulated in memory and checkpointed to disk.
+         * The reply is bounded by `maxOutputTokens` in the *request*, and this
+         * is the matching bound on the answer — a limit that only the polite
+         * case observes is not a limit.
+         */
+        received += value.byteLength;
+        if (received > this.#maxResponseBytes) {
+          throw new AppError(
+            'PROVIDER_ERROR',
+            'The model provider sent more data than this server will accept.'
+          );
+        }
+
         buffer += decoder.decode(value, { stream: true });
+
+        /*
+         * A frame that never ends is the same attack without the byte count:
+         * a stream of data with no blank line accumulates in `buffer`
+         * untouched by the loop below. Bounded at the same order as the cap.
+         */
+        if (buffer.length > this.#maxResponseBytes) {
+          throw new AppError('PROVIDER_ERROR', 'The model provider sent a malformed response.');
+        }
 
         let boundary: number;
         while ((boundary = buffer.indexOf('\n\n')) !== -1) {

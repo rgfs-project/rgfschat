@@ -14,6 +14,7 @@ import { DEFAULT_HOST_POLICY } from '../provider/ssrf.ts';
 import { ConversationStore } from '../storage/conversations.ts';
 import { ChatIndex } from '../storage/index.ts';
 import { StoragePaths } from '../storage/paths.ts';
+import { pngBytes } from './testImages.ts';
 import { AttachmentStore } from './store.ts';
 
 /**
@@ -42,7 +43,7 @@ async function* once(bytes: Uint8Array): AsyncGenerator<Uint8Array> {
   yield bytes;
 }
 
-const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]);
+const PNG = pngBytes();
 const utf8 = (text: string): Uint8Array => new Uint8Array(Buffer.from(text, 'utf8'));
 
 beforeEach(async () => {
@@ -55,6 +56,7 @@ beforeEach(async () => {
     maxBytes: 1_000_000,
     maxTotalBytesPerUser: 10_000_000,
     pendingTtlMs: 60_000,
+    maxImagePixels: 50_000_000,
   });
   await attachments.ensureUserDir(USER);
   await attachments.ensureUserDir(OTHER);
