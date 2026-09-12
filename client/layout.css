@@ -198,7 +198,9 @@ body {
   flex: none;
   display: flex;
   align-items: center;
-  gap: var(--gutter);
+  /* The control and the title are two elements in one bar; the gutter is what
+     holds the bar off the edge, not what separates them. */
+  gap: 0.5rem;
   padding: 0 var(--gutter);
   height: var(--header-height);
   border-bottom: 1px solid var(--border);

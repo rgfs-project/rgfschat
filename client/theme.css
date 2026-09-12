@@ -66,12 +66,15 @@
   /* 56px, the reference's. The bar holds one line of type on each side of the
      seam; the extra 12px it had were empty on both. */
   --header-height: 3.5rem;
-  /* The main header's inset, and the gap between its control and its title.
-     It matches the inset the sidebar gives its own rows, so the space before
-     the title is the same space that sits after the collapse control on the
-     other side of the seam — and the same space either of them leaves when it
-     is the one at the window's edge. */
-  --gutter: 0.5rem;
+  /*
+   * The main header's inset: 15px, which is where the collapse control's glyph
+   * sits on the other side of the border — the row inset of 8 plus the 7 the
+   * icon button holds around its own glyph. Measuring to the control's box
+   * instead would put the title 8 from the border against the glyph's 15, and
+   * it is the glyphs either side of the seam that a reader lines up, not the
+   * invisible boxes around them.
+   */
+  --gutter: 0.9375rem;
   --radius: 0.75rem;
 
   --font-sans:
