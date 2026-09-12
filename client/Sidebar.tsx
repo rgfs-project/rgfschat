@@ -123,8 +123,9 @@ export function Sidebar({
 
         {/* A button, not a field. What it opens searches message bodies on the
             server, which a box sitting in the sidebar cannot do; keeping the
-            shape of a field here would promise the wrong thing. */}
-        <button type="button" className="nav-button nav-button--quiet" onClick={onSearch}>
+            shape of a field here would promise the wrong thing — and it is one
+            of the three ways out of this pane, so it looks like the other two. */}
+        <button type="button" className="nav-button" onClick={onSearch}>
           <Search size={18} />
           Search chats
         </button>
