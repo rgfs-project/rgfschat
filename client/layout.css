@@ -243,7 +243,10 @@ body {
 }
 
 .transcript__inner {
-  padding: 2.5rem 1.25rem 2rem;
+  /* The bottom is deeper than the top on purpose. The last message's controls
+     hang below it and eat most of this padding themselves, so it has to cover
+     their height as well as the gap — otherwise they sit against the composer. */
+  padding: 2.5rem 1.25rem 4.5rem;
   display: flex;
   flex-direction: column;
   /* Fills the scroll port even when nearly empty, so the empty state's

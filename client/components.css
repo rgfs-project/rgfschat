@@ -144,11 +144,14 @@
   right: 0;
   z-index: 1;
   display: flex;
-  gap: 0.125rem;
-  margin-top: 0.125rem;
+  /* Enough that the two controls read as separate targets rather than one
+     two-glyph block, and enough below the message that they are not touching
+     the text they belong to. */
+  gap: 0.375rem;
+  margin-top: 0.625rem;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 120ms ease;
+  transition: opacity var(--motion-fast) var(--ease-out);
 }
 
 .msg--assistant .msg__actions {
@@ -973,9 +976,18 @@ button.linkish:hover {
   background: var(--surface);
 }
 
+/*
+ * Padded like a rail item rather than sized like a bare icon button, so its
+ * glyph sits on the same left edge as the section icons below it. A 2rem
+ * square centres its icon, which put it a few pixels inside everything else.
+ */
 .admin__close {
   align-self: flex-start;
-  margin-bottom: 0.75rem;
+  width: auto;
+  height: auto;
+  padding: 0.625rem 0.75rem;
+  margin-bottom: 0.5rem;
+  border-radius: 0.625rem;
 }
 
 .admin__rail-item {
@@ -1071,6 +1083,18 @@ button.linkish:hover {
   border: 1px solid var(--border-strong);
   border-radius: 0.5rem;
   font-size: var(--button-font-size);
+}
+
+/*
+ * One width down the right-hand edge of the rows.
+ *
+ * These labels differ in length — Refresh, Visible, Hidden — so left to
+ * themselves each button is a different size and the column of them has a
+ * ragged edge. A floor on the width lines them up, and the label stays centred
+ * inside it.
+ */
+.admin__row-control button:not(.icon-button) {
+  min-width: 7rem;
 }
 
 .admin__actions {
