@@ -18,6 +18,19 @@ import { AppError } from '../errors/AppError.ts';
 /** Reserved top-level directory for process-owned state. Never a valid user id. */
 export const SYSTEM_DIR = '_system';
 
+/** The only shape a memory's name may take, on disk and over the API. */
+const MEMORY_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+export const MEMORY_NAME_MAX_LENGTH = 64;
+
+export function isMemoryName(value: string): boolean {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= MEMORY_NAME_MAX_LENGTH &&
+    MEMORY_NAME.test(value)
+  );
+}
+
 export class StoragePaths {
   readonly #root: string;
 
@@ -88,6 +101,22 @@ export class StoragePaths {
    */
   preferencesFile(userId: string): string {
     return this.#contain(resolve(this.userDir(userId), 'preferences.json'));
+  }
+
+  /**
+   * `data/<user>/memories/<name>.md` — one note, editable by hand.
+   *
+   * The name is request-controlled, so it is validated rather than escaped
+   * (INV-12): lowercase letters, digits and single hyphens, which is also what
+   * makes a memory's name usable as its identity in the API.
+   */
+  memoryFile(userId: string, name: string): string {
+    if (!isMemoryName(name)) throw AppError.internal('Invalid memory name for path construction');
+    return this.#contain(resolve(this.memoriesDir(userId), `${name}.md`));
+  }
+
+  memoriesDir(userId: string): string {
+    return this.#contain(resolve(this.userDir(userId), 'memories'));
   }
 
   attachmentsDir(userId: string): string {

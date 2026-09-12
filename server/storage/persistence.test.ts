@@ -17,6 +17,7 @@ import { startMockProvider, type MockProvider } from '../provider/mockServer.ts'
 import { ConversationStore } from './conversations.ts';
 import { ChatIndex, type ChatIndexEntry } from './index.ts';
 import { PreferencesStore } from './preferences.ts';
+import { MemoryStore } from './memories.ts';
 import { StoragePaths } from './paths.ts';
 import { ARGON2_TEST_OPTIONS, UserStore } from '../auth/users.ts';
 import { SessionManager } from '../auth/sessions.ts';
@@ -43,6 +44,7 @@ let paths: StoragePaths;
 let store: ConversationStore;
 let index: ChatIndex;
 let preferences: PreferencesStore;
+let memories: MemoryStore;
 let service: GenerationService;
 let manager: GenerationManager;
 let mock: MockProvider | undefined;
@@ -104,6 +106,7 @@ async function boot(options: Parameters<typeof startMockProvider>[0] = {}): Prom
   await users.create({ username: 'tester', password: 'correct horse battery', id: USER });
 
   preferences = new PreferencesStore(paths, logger);
+  memories = new MemoryStore(paths, logger);
 
   const app = createApp({
     logger,
@@ -112,6 +115,7 @@ async function boot(options: Parameters<typeof startMockProvider>[0] = {}): Prom
     store,
     index,
     preferences,
+    memories,
     service,
     users,
     sessions,
@@ -485,6 +489,160 @@ describe('export', () => {
 
   it("404s for a conversation that is not the caller's", async () => {
     expect((await api.exportOne(randomUUID())).status).toBe(404);
+  });
+});
+
+/**
+ * What a reader can change about their own account.
+ *
+ * The scoping is the property worth testing: these routes take no user to act
+ * on, so the only account they can reach is the caller's.
+ */
+describe("a reader's own settings", () => {
+  beforeEach(boot);
+
+  const me = (path: string, init: RequestInit = {}) =>
+    afetch(`${base}/api/me${path}`, {
+      ...init,
+      ...(init.body === undefined ? {} : { headers: { 'Content-Type': 'application/json' } }),
+    });
+
+  it('remembers a default model and gives it back', async () => {
+    expect(await (await me('/preferences')).json()).toEqual({ defaultModel: null });
+
+    const set = await me('/preferences', {
+      method: 'PATCH',
+      body: JSON.stringify({ defaultModel: { providerId: 'local', modelId: 'GPT' } }),
+    });
+    expect(set.status).toBe(200);
+
+    expect(await (await me('/preferences')).json()).toEqual({
+      defaultModel: { providerId: 'local', modelId: 'GPT' },
+    });
+
+    // Clearing returns the reader to the instance default.
+    await me('/preferences', { method: 'PATCH', body: JSON.stringify({ defaultModel: null }) });
+    expect(await (await me('/preferences')).json()).toEqual({ defaultModel: null });
+  });
+
+  it('keeps a default model and a pin in the same file without losing either', async () => {
+    const { body } = await api.create('Kept');
+    const id = body.id as string;
+
+    await api.pin(id, true);
+    await me('/preferences', {
+      method: 'PATCH',
+      body: JSON.stringify({ defaultModel: { providerId: 'local', modelId: 'GPT' } }),
+    });
+
+    expect(await preferences.pinned(USER)).toContain(id);
+    expect((await preferences.read(USER)).defaultModel).toEqual({
+      providerId: 'local',
+      modelId: 'GPT',
+    });
+  });
+
+  it("clears only the caller's own conversations", async () => {
+    const mine = await api.create('Mine');
+    await service.settled(USER, mine.body.id as string);
+
+    const other = '11111111-2222-4333-8444-555555555555';
+    await store.init(other);
+    const theirs = await store.create(other, 'Theirs');
+    await index.rebuild(other);
+
+    const res = await me('/history/clear', {
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
+    });
+    expect(res.status).toBe(200);
+
+    expect(await api.list()).toEqual([]);
+    // The other account still has its conversation, file and all.
+    expect(await store.exists(other, theirs.id)).toBe(true);
+  });
+
+  it('refuses to clear without an explicit confirmation', async () => {
+    await api.create('Kept');
+    const res = await me('/history/clear', { method: 'POST', body: JSON.stringify({}) });
+
+    expect(res.status).toBe(400);
+    expect(await api.list()).toHaveLength(1);
+  });
+
+  it('stores a memory as a file and reads it back', async () => {
+    const written = await me('/memories', {
+      method: 'PUT',
+      body: JSON.stringify({ name: 'how-i-write', content: 'Short sentences.' }),
+    });
+    expect(written.status).toBe(200);
+
+    const { memories: list } = (await (await me('/memories')).json()) as {
+      memories: { name: string; content: string }[];
+    };
+    expect(list).toMatchObject([{ name: 'how-i-write', content: 'Short sentences.' }]);
+
+    // On disk, as Markdown, under the name it was given.
+    expect(await readFile(paths.memoryFile(USER, 'how-i-write'), 'utf8')).toBe('Short sentences.');
+
+    expect((await me('/memories/how-i-write', { method: 'DELETE' })).status).toBe(204);
+    expect(await memories.list(USER)).toEqual([]);
+  });
+
+  it('refuses a name that would leave the memories directory', async () => {
+    for (const name of ['../escape', 'Has Spaces', 'UPPER', '']) {
+      const res = await me('/memories', {
+        method: 'PUT',
+        body: JSON.stringify({ name, content: 'x' }),
+      });
+      expect(res.status, name).toBe(400);
+    }
+    expect(await memories.list(USER)).toEqual([]);
+  });
+
+  /**
+   * INV-14: identity comes from the session, never from the request.
+   *
+   * Written after a sabotage survived the rest of this block: proving that no
+   * route *offers* a way to name another account is not the same as proving
+   * one cannot be smuggled in. This sends the parameter anyway.
+   */
+  it('ignores a user named in the request', async () => {
+    const other = '11111111-2222-4333-8444-555555555555';
+    await store.init(other);
+    const theirs = await store.create(other, 'Theirs');
+    await index.rebuild(other);
+
+    await api.create('Mine');
+
+    const cleared = await afetch(`${base}/api/me/history/clear?userId=${other}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: true }),
+    });
+    expect(cleared.status).toBe(200);
+
+    // The caller's own went; the account they tried to name is untouched.
+    expect(await api.list()).toEqual([]);
+    expect(await store.exists(other, theirs.id)).toBe(true);
+
+    await afetch(`${base}/api/me/memories?userId=${other}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'smuggled', content: 'x' }),
+    });
+    expect(await memories.list(other)).toEqual([]);
+    expect((await memories.list(USER)).map((m) => m.name)).toEqual(['smuggled']);
+  });
+
+  it("is one reader's memory alone", async () => {
+    await me('/memories', {
+      method: 'PUT',
+      body: JSON.stringify({ name: 'mine', content: 'Only mine.' }),
+    });
+
+    const other = '11111111-2222-4333-8444-555555555555';
+    expect(await memories.list(other)).toEqual([]);
   });
 });
 

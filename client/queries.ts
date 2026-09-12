@@ -14,6 +14,8 @@ import {
   deleteMessage,
   editMessage,
   fetchModels,
+  fetchMyMemories,
+  fetchMyPreferences,
   fetchSession,
   getConversation,
   listConversations,
@@ -24,6 +26,8 @@ import {
   startGeneration,
   type ConversationDetail,
   type ConversationSummary,
+  type MemoryDto,
+  type MePreferences,
   type ModelCatalogue,
   type SearchResult,
 } from './api.ts';
@@ -53,6 +57,8 @@ export const keys = {
   conversations: () => ['conversations'] as const,
   conversation: (id: string) => ['conversation', id] as const,
   search: (query: string) => ['search', query] as const,
+  preferences: () => ['me', 'preferences'] as const,
+  memories: () => ['me', 'memories'] as const,
 };
 
 /**
@@ -145,6 +151,23 @@ export function useSearch(query: string): UseQueryResult<SearchResult[]> {
     queryFn: ({ signal }) => searchConversations(query, signal),
     enabled: query !== '',
     staleTime: 30_000,
+  });
+}
+
+/** This reader's own settings: the model they start on, and what is remembered. */
+export function useMyPreferences(enabled = true): UseQueryResult<MePreferences> {
+  return useQuery({
+    queryKey: keys.preferences(),
+    queryFn: ({ signal }) => fetchMyPreferences(signal),
+    enabled,
+  });
+}
+
+export function useMyMemories(enabled = true): UseQueryResult<MemoryDto[]> {
+  return useQuery({
+    queryKey: keys.memories(),
+    queryFn: ({ signal }) => fetchMyMemories(signal),
+    enabled,
   });
 }
 

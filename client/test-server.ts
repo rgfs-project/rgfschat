@@ -155,6 +155,13 @@ export function conversationsBody(
   };
 }
 
+/** The reader's own settings, as the shell asks for them on every mount. */
+export function preferencesBody(
+  defaultModel: { providerId: string; modelId: string } | null = null
+): Record<string, unknown> {
+  return { defaultModel };
+}
+
 export function modelsBody(
   models: { id: string }[] = [{ id: 'model-a' }],
   status: 'ready' | 'unavailable' = 'ready'

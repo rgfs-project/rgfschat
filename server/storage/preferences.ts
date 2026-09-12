@@ -24,11 +24,32 @@ import type { Logger } from '../logger.ts';
 
 export const PREFERENCES_VERSION = 1;
 
+const modelSchema = z.strictObject({
+  providerId: z.string().min(1).max(200),
+  modelId: z.string().min(1).max(400),
+});
+
+export type DefaultModel = z.infer<typeof modelSchema>;
+
 const fileSchema = z.strictObject({
   version: z.literal(PREFERENCES_VERSION),
   /** Conversation ids, most recently pinned first. */
   pinned: z.array(z.string()),
+  /**
+   * Which model this reader starts a conversation on.
+   *
+   * Optional, and read back leniently: a model that has since been removed or
+   * hidden is not an error here. The client falls back the same way it does
+   * for a reader who has never chosen one, and the server checks the pair on
+   * every generation regardless (INV-18).
+   */
+  defaultModel: modelSchema.optional(),
 });
+
+export interface Preferences {
+  pinned: Set<string>;
+  defaultModel: DefaultModel | null;
+}
 
 export class PreferencesStore {
   readonly #paths: StoragePaths;
@@ -40,26 +61,51 @@ export class PreferencesStore {
     this.#logger = logger;
   }
 
-  /** The set of pinned conversation ids, ignoring anything unreadable. */
-  async pinned(userId: string): Promise<Set<string>> {
+  /** Everything stored for one reader, with absent and unreadable alike. */
+  async read(userId: string): Promise<Preferences> {
     const file = this.#paths.preferencesFile(userId);
 
     let raw: string;
     try {
       raw = await readFile(file, 'utf8');
     } catch {
-      return new Set();
+      return { pinned: new Set(), defaultModel: null };
     }
 
     try {
       const parsed = fileSchema.parse(JSON.parse(raw) as unknown);
-      // Filtered on the way out: a hand-edited file cannot put something that
-      // is not an id into a path later on.
-      return new Set(parsed.pinned.filter((id) => isCanonicalUuid(id)));
+      return {
+        // Filtered on the way out: a hand-edited file cannot put something
+        // that is not an id into a path later on.
+        pinned: new Set(parsed.pinned.filter((id) => isCanonicalUuid(id))),
+        defaultModel: parsed.defaultModel ?? null,
+      };
     } catch {
       this.#logger.warn('Preferences file is unreadable; ignoring it', { userId });
-      return new Set();
+      return { pinned: new Set(), defaultModel: null };
     }
+  }
+
+  /** The set of pinned conversation ids, ignoring anything unreadable. */
+  async pinned(userId: string): Promise<Set<string>> {
+    return (await this.read(userId)).pinned;
+  }
+
+  /**
+   * Sets or clears this reader's default model.
+   *
+   * Under the same lock as pinning, because both rewrite the one file: without
+   * it, pinning a conversation while a model choice is in flight drops
+   * whichever landed first.
+   */
+  async setDefaultModel(userId: string, model: DefaultModel | null): Promise<void> {
+    await this.#locks.run(`preferences:${userId}`, async () => {
+      const current = await this.read(userId);
+      await this.#write(userId, {
+        pinned: current.pinned,
+        defaultModel: model,
+      });
+    });
   }
 
   /**
@@ -70,18 +116,29 @@ export class PreferencesStore {
    */
   async setPinned(userId: string, conversationId: string, pinned: boolean): Promise<Set<string>> {
     return this.#locks.run(`preferences:${userId}`, async () => {
-      const current = await this.pinned(userId);
-      if (pinned) current.add(conversationId);
-      else current.delete(conversationId);
+      const current = await this.read(userId);
+      if (pinned) current.pinned.add(conversationId);
+      else current.pinned.delete(conversationId);
 
-      await ensureDir(this.#paths.userDir(userId));
-      await atomicWriteFile(
-        this.#paths.preferencesFile(userId),
-        `${JSON.stringify({ version: PREFERENCES_VERSION, pinned: [...current] }, null, 2)}\n`
-      );
-
-      return current;
+      await this.#write(userId, current);
+      return current.pinned;
     });
+  }
+
+  async #write(userId: string, next: Preferences): Promise<void> {
+    await ensureDir(this.#paths.userDir(userId));
+    await atomicWriteFile(
+      this.#paths.preferencesFile(userId),
+      `${JSON.stringify(
+        {
+          version: PREFERENCES_VERSION,
+          pinned: [...next.pinned],
+          ...(next.defaultModel === null ? {} : { defaultModel: next.defaultModel }),
+        },
+        null,
+        2
+      )}\n`
+    );
   }
 
   /** Drops a conversation from the pins, for when it is deleted. */

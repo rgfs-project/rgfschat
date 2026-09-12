@@ -7,6 +7,7 @@ import {
   conversationsBody,
   installTestServer,
   modelsBody,
+  preferencesBody,
   sessionBody,
   type TestServer,
 } from './test-server.ts';
@@ -38,6 +39,8 @@ async function mountSignedIn(): Promise<void> {
   server.respond('/api/conversations', conversationsBody([{ id: 'c1', title: 'First' }]));
   await server.waitFor('/api/models');
   server.respond('/api/models', modelsBody());
+  await server.waitFor('/api/me/preferences');
+  server.respond('/api/me/preferences', preferencesBody());
   await screen.findByLabelText('Message');
 }
 

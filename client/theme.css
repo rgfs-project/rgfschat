@@ -49,7 +49,7 @@
    * fights the reader, and a body that fades on every token is unreadable.
    */
   /* The admin rail's close control and section buttons share one height. */
-  --admin-control-height: 2.125rem;
+  --panel-control-height: 2.125rem;
 
   /* One size for every button, so a row of them lines up. */
   --button-font-size: 0.8125rem;
@@ -308,9 +308,9 @@ select:focus-visible,
 button.linkish:active:not(:disabled),
 .select:active:not(:disabled),
 .model-trigger:active:not(:disabled),
-.admin__rail-item:active,
-.admin__row-control button:not(.icon-button):not(.select):active,
-.admin__form-actions button:not(.button-primary):not(.linkish):active,
+.panel__rail-item:active,
+.panel__row-control button:not(.icon-button):not(.select):active,
+.panel__form-actions button:not(.button-primary):not(.linkish):active,
 .conversation:has(.conversation__open:active) {
   transform: scale(0.96);
 }

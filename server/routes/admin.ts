@@ -1,6 +1,7 @@
 import { Router, type Request } from 'express';
 import { z } from 'zod';
 import { AppError } from '../errors/AppError.ts';
+import { clearHistoryFor } from '../conversation/clearHistory.ts';
 import { validateBody } from '../http/validate.ts';
 import { toDto, type UserStore } from '../auth/users.ts';
 import type { SessionManager } from '../auth/sessions.ts';
@@ -600,35 +601,12 @@ export function adminRouter({
   router.post('/maintenance/clear-history', validateBody(clearHistorySchema), async (req, res) => {
     const { userId, withinHours } = req.body as z.infer<typeof clearHistorySchema>;
 
-    const targets = [userId ?? actor(req).id];
-    const cutoff = withinHours === undefined ? null : Date.now() - withinHours * 60 * 60 * 1000;
-
-    let deleted = 0;
-    let cancelled = 0;
-
-    for (const id of targets) {
-      /*
-       * Anything running belongs to a conversation inside the window by
-       * definition — it is being written to right now — so it is stopped
-       * before the files go, rather than left writing into a deleted
-       * conversation (INV-17).
-       */
-      cancelled += manager.cancelAllForOwner(id);
-
-      const entries = await index.list(id).catch(() => []);
-      for (const entry of entries) {
-        if (cutoff !== null) {
-          const touched = Date.parse(entry.updatedAt);
-          // An unparseable timestamp is left alone: a window is a claim about
-          // when something happened, and we cannot make that claim here.
-          if (!Number.isFinite(touched) || touched < cutoff) continue;
-        }
-
-        await store.delete(id, entry.id);
-        await index.remove(id, entry.id);
-        deleted += 1;
-      }
-    }
+    const { deleted, cancelled } = await clearHistoryFor(userId ?? actor(req).id, {
+      store,
+      index,
+      manager,
+      withinHours,
+    });
 
     await audit.record({
       ...actorEntry(req),

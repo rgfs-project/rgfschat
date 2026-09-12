@@ -285,6 +285,67 @@ export async function downloadConversation(id: string, title: string): Promise<v
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+/* --- the reader's own account --------------------------------------------- */
+
+export interface MePreferences {
+  defaultModel: { providerId: string; modelId: string } | null;
+}
+
+export async function fetchMyPreferences(signal?: AbortSignal): Promise<MePreferences> {
+  return request<MePreferences>('/api/me/preferences', signalInit(signal));
+}
+
+export function setMyDefaultModel(
+  defaultModel: MePreferences['defaultModel']
+): Promise<MePreferences> {
+  return request<MePreferences>('/api/me/preferences', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ defaultModel }),
+  });
+}
+
+export function clearMyHistory(withinHours?: number): Promise<{ deleted: number }> {
+  return request<{ deleted: number }>('/api/me/history/clear', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confirm: true, ...(withinHours === undefined ? {} : { withinHours }) }),
+  });
+}
+
+export interface MemoryDto {
+  name: string;
+  content: string;
+  updatedAt: string;
+  bytes: number;
+}
+
+export async function fetchMyMemories(signal?: AbortSignal): Promise<MemoryDto[]> {
+  const { memories } = await request<{ memories: MemoryDto[] }>(
+    '/api/me/memories',
+    signalInit(signal)
+  );
+  return memories;
+}
+
+export function saveMyMemory(name: string, content: string): Promise<{ memory: MemoryDto }> {
+  return request<{ memory: MemoryDto }>('/api/me/memories', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, content }),
+  });
+}
+
+export async function deleteMyMemory(name: string): Promise<void> {
+  const response = await fetch(`/api/me/memories/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json', ...csrfHeader() },
+  });
+  if (response.status === 204) return;
+  const body: unknown = await response.json().catch(() => null);
+  throw readErrorBody(body) ?? new ApiError('INTERNAL', 'Could not delete the memory.');
+}
+
 export interface SearchHit {
   messageId: string;
   type: 'user' | 'assistant';

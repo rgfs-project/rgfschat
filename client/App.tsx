@@ -5,7 +5,7 @@ import type { UserDto } from '@shared/auth.ts';
 import { ApiError, cancelGeneration, downloadConversation } from './api.ts';
 import { Composer } from './Composer.tsx';
 import { AdminPanel } from './AdminPanel.tsx';
-import { ChangePassword } from './ChangePassword.tsx';
+import { SettingsPanel } from './SettingsPanel.tsx';
 import { Dialog } from './Dialog.tsx';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
 import { Message, StreamingMessage } from './Message.tsx';
@@ -21,6 +21,7 @@ import {
   useDeleteMessage,
   useEditMessage,
   useModels,
+  useMyPreferences,
   useRegenerate,
   usePinConversation,
   useRenameConversation,
@@ -136,6 +137,7 @@ export function App({
   const conversations = useConversations(true);
   const models = useModels(true);
   const conversation = useConversation(currentId);
+  const preferences = useMyPreferences();
 
   const createConversation = useCreateConversation();
   const renameConversation = useRenameConversation();
@@ -149,7 +151,7 @@ export function App({
   const [generationId, setGenerationId] = useState<string | null>(() => readStored(ACTIVE_KEY));
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<PendingDialog | null>(null);
-  const [changingPassword, setChangingPassword] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   /** A message arrived at from search, to scroll to and mark once it renders. */
@@ -205,12 +207,19 @@ export function App({
   const scroll = useScrollPin();
 
   const groups = useMemo<ProviderGroups>(() => models.data?.providers ?? [], [models.data]);
-  const configuredDefault = models.data?.defaultModel ?? null;
+  /**
+   * The reader's own default wins over the instance's.
+   *
+   * Both are only a *starting* point: the last model used in a conversation
+   * still wins inside that conversation, and the server checks the pair on
+   * every generation regardless (INV-18).
+   */
+  const configuredDefault = preferences.data?.defaultModel ?? models.data?.defaultModel ?? null;
 
   useEffect(() => {
-    if (groups.length === 0) return;
+    if (groups.length === 0 || preferences.isPending) return;
     setFallbackSelection((current) => current ?? defaultSelection(groups, configuredDefault));
-  }, [groups, configuredDefault]);
+  }, [groups, configuredDefault, preferences.isPending]);
 
   const selection = useMemo(
     () =>
@@ -586,7 +595,7 @@ export function App({
             onDelete={(id) => setDialog({ kind: 'delete-conversation', id })}
             onPin={onPinConversation}
             onDownload={onDownloadConversation}
-            onChangePassword={() => setChangingPassword(true)}
+            onSettings={() => setSettingsOpen(true)}
             onOpenAdmin={() => setAdminOpen(true)}
             onSignOut={onSignOut}
           />
@@ -728,7 +737,7 @@ export function App({
         <SearchDialog recent={list} onOpen={onOpenResult} onClose={() => setSearchOpen(false)} />
       )}
 
-      {changingPassword && <ChangePassword onClose={() => setChangingPassword(false)} />}
+      {settingsOpen && <SettingsPanel user={user} onClose={() => setSettingsOpen(false)} />}
       {adminOpen && <AdminPanel user={user} onClose={() => setAdminOpen(false)} />}
 
       {dialog !== null && (

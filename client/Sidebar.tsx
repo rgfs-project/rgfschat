@@ -2,7 +2,6 @@ import { useMemo, useRef, useState } from 'react';
 import {
   ChevronUp,
   Download,
-  KeyRound,
   LogOut,
   Moon,
   MoreHorizontal,
@@ -12,6 +11,7 @@ import {
   PinOff,
   Plus,
   Search,
+  Settings as SettingsIcon,
   Shield,
   Sun,
   Trash2,
@@ -45,7 +45,7 @@ export interface SidebarProps {
   onDelete: (id: string) => void;
   onPin: (id: string, pinned: boolean) => void;
   onDownload: (id: string, title: string) => void;
-  onChangePassword: () => void;
+  onSettings: () => void;
   onOpenAdmin: () => void;
   onSignOut: () => void;
 }
@@ -87,7 +87,7 @@ export function Sidebar({
   onDelete,
   onPin,
   onDownload,
-  onChangePassword,
+  onSettings,
   onOpenAdmin,
   onSignOut,
 }: SidebarProps): React.JSX.Element {
@@ -197,7 +197,7 @@ export function Sidebar({
         user={user}
         theme={theme}
         onToggleTheme={onToggleTheme}
-        onChangePassword={onChangePassword}
+        onSettings={onSettings}
         onSignOut={onSignOut}
       />
     </aside>
@@ -299,13 +299,13 @@ function AccountMenu({
   user,
   theme,
   onToggleTheme,
-  onChangePassword,
+  onSettings,
   onSignOut,
 }: {
   user: UserDto;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
-  onChangePassword: () => void;
+  onSettings: () => void;
   onSignOut: () => void;
 }): React.JSX.Element {
   const [open, setOpen] = useState(false);
@@ -335,9 +335,9 @@ function AccountMenu({
           matchWidth
           items={[
             {
-              label: 'Change password',
-              icon: <KeyRound size={15} />,
-              onSelect: onChangePassword,
+              label: 'Settings',
+              icon: <SettingsIcon size={15} />,
+              onSelect: onSettings,
             },
             {
               label: theme === 'dark' ? 'Light mode' : 'Dark mode',

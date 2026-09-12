@@ -1323,7 +1323,7 @@ button.linkish:hover {
 
 /* --- administration ------------------------------------------------------- */
 
-.admin {
+.panel {
   position: fixed;
   inset: 0;
   z-index: 300;
@@ -1335,7 +1335,7 @@ button.linkish:hover {
   animation: fade-in var(--motion-fast) var(--ease-out);
 }
 
-.admin__card {
+.panel__card {
   display: grid;
   grid-template-columns: 12rem 1fr;
   width: min(52rem, 100%);
@@ -1350,7 +1350,7 @@ button.linkish:hover {
 
 /* The rail scrolls independently of the pane, so a long section list never
    pushes the content out of reach. */
-.admin__rail {
+.panel__rail {
   display: flex;
   flex-direction: column;
   gap: 0.625rem;
@@ -1372,20 +1372,20 @@ button.linkish:hover {
  * The horizontal padding is shared too, so the close glyph sits on the same
  * left edge as the section icons rather than a few pixels inside them.
  */
-.admin__close,
-.admin__rail-item {
-  height: var(--admin-control-height);
+.panel__close,
+.panel__rail-item {
+  height: var(--panel-control-height);
   padding: 0 0.75rem;
   border-radius: 0.625rem;
 }
 
-.admin__close {
+.panel__close {
   align-self: flex-start;
   width: auto;
   margin-bottom: 0.5rem;
 }
 
-.admin__rail-item {
+.panel__rail-item {
   display: flex;
   align-items: center;
   gap: 0.625rem;
@@ -1394,33 +1394,33 @@ button.linkish:hover {
   font-size: 0.8125rem;
 }
 
-.admin__rail-item {
+.panel__rail-item {
   transition:
     background-color var(--motion-fast) var(--ease-out),
     transform var(--motion-fast) var(--ease-out);
 }
 
-.admin__rail-item:hover {
+.panel__rail-item:hover {
   background: var(--surface-2);
 }
 
-.admin__rail-item.is-current {
+.panel__rail-item.is-current {
   background: var(--surface-3);
   font-weight: 500;
 }
 
-.admin__pane {
+.panel__pane {
   min-height: 0;
   overflow-y: auto;
   padding: 1.125rem 1.25rem 1.5rem;
   scrollbar-width: none;
 }
 
-.admin__pane::-webkit-scrollbar {
+.panel__pane::-webkit-scrollbar {
   display: none;
 }
 
-.admin__title {
+.panel__title {
   margin: 0 0 0.875rem;
   font-size: 1.0625rem;
   font-weight: 500;
@@ -1428,7 +1428,7 @@ button.linkish:hover {
 
 /* The row is the unit the whole pane is built from: label and optional
    description on the left, controls on the right, divided by a hairline. */
-.admin__row {
+.panel__row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1437,21 +1437,21 @@ button.linkish:hover {
   border-top: 1px solid var(--border);
 }
 
-.admin__row-text {
+.panel__row-text {
   min-width: 0;
 }
 
-.admin__row-label {
+.panel__row-label {
   font-size: 0.8125rem;
 }
 
-.admin__row-desc {
+.panel__row-desc {
   margin: 0.125rem 0 0;
   color: var(--muted);
   font-size: 0.6875rem;
 }
 
-.admin__row-control {
+.panel__row-control {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -1547,8 +1547,8 @@ button.linkish:hover {
 /* `.select` is excluded: it is a dropdown, not an action, and carries its own
    shape — without this the button rule outranks it on specificity and hands it
    a button's padding and minimum width. */
-.admin__row-control button:not(.icon-button):not(.select),
-.admin__form-actions button:not(.button-primary):not(.linkish) {
+.panel__row-control button:not(.icon-button):not(.select),
+.panel__form-actions button:not(.button-primary):not(.linkish) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1568,15 +1568,15 @@ button.linkish:hover {
  * ragged edge. A floor on the width lines them up, and the label stays centred
  * inside it.
  */
-.admin__row-control button:not(.icon-button):not(.select) {
+.panel__row-control button:not(.icon-button):not(.select) {
   min-width: 7rem;
 }
 
-.admin__actions {
+.panel__actions {
   margin-top: 1.25rem;
 }
 
-.admin__form {
+.panel__form {
   display: flex;
   flex-direction: column;
   gap: 0.875rem;
@@ -1587,7 +1587,7 @@ button.linkish:hover {
   background: var(--surface);
 }
 
-.admin__form-actions {
+.panel__form-actions {
   display: flex;
   gap: 0.5rem;
   align-items: center;
@@ -1595,7 +1595,7 @@ button.linkish:hover {
 }
 
 @media (max-width: 48rem) {
-  .admin__card {
+  .panel__card {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
   }
@@ -1607,7 +1607,7 @@ button.linkish:hover {
    * whole strip as the list grew, which moved everything below it. One row that
    * scrolls keeps the header a fixed height however many sections there are.
    */
-  .admin__rail {
+  .panel__rail {
     flex-direction: row;
     flex-wrap: nowrap;
     align-items: center;
@@ -1617,13 +1617,13 @@ button.linkish:hover {
     scrollbar-width: none;
   }
 
-  .admin__rail::-webkit-scrollbar {
+  .panel__rail::-webkit-scrollbar {
     display: none;
   }
 
   /* Never squeezed to fit: a shrunk label is worse than one you scroll to. */
-  .admin__rail-item,
-  .admin__close {
+  .panel__rail-item,
+  .panel__close {
     flex: none;
   }
 
@@ -1633,7 +1633,7 @@ button.linkish:hover {
    * strip — 21px underneath against 12px on top, which is the padding reading
    * as uneven.
    */
-  .admin__close {
+  .panel__close {
     align-self: center;
     margin-bottom: 0;
   }

@@ -8,6 +8,7 @@ import {
   conversationsBody,
   installTestServer,
   modelsBody,
+  preferencesBody,
   sessionBody,
   type TestServer,
 } from './test-server.ts';
@@ -49,6 +50,8 @@ async function mountSignedIn(
   server.respond('/api/conversations', conversationsBody(conversations));
   await server.waitFor('/api/models');
   server.respond('/api/models', modelsBody());
+  await server.waitFor('/api/me/preferences');
+  server.respond('/api/me/preferences', preferencesBody());
   await screen.findByLabelText('Message');
 }
 
@@ -225,6 +228,8 @@ describe('Strict Mode', () => {
     server.respond('/api/conversations', conversationsBody([]));
     await server.waitFor('/api/models');
     server.respond('/api/models', modelsBody());
+    await server.waitFor('/api/me/preferences');
+    server.respondAll('/api/me/preferences', preferencesBody());
 
     // Sending is what creates a conversation, so that is the mutation to watch.
     const user = userEvent.setup();

@@ -10,6 +10,8 @@ import { generationRouter } from './routes/generations.ts';
 import { healthRouter } from './routes/health.ts';
 import { conversationRouter } from './routes/conversations.ts';
 import type { PreferencesStore } from './storage/preferences.ts';
+import type { MemoryStore } from './storage/memories.ts';
+import { meRouter } from './routes/me.ts';
 import { authRouter } from './routes/auth.ts';
 import { adminRouter } from './routes/admin.ts';
 import { authenticate, requireAdmin, requireAuth, requireCsrf } from './auth/middleware.ts';
@@ -39,6 +41,7 @@ export interface AppOptions {
   index?: ChatIndex;
   /** Per-reader state that belongs in neither the file nor the index. */
   preferences?: PreferencesStore;
+  memories?: MemoryStore;
   service?: GenerationService;
   users?: UserStore;
   sessions?: SessionManager;
@@ -65,6 +68,7 @@ export function createApp({
   store,
   index,
   preferences,
+  memories,
   service,
   users,
   sessions,
@@ -124,6 +128,18 @@ export function createApp({
           : {}),
       })
     );
+  }
+
+  // Everything a reader can change about their own account. Mounted after the
+  // auth gate above, like every other authenticated router.
+  if (
+    store !== undefined &&
+    index !== undefined &&
+    manager !== undefined &&
+    preferences !== undefined &&
+    memories !== undefined
+  ) {
+    app.use('/api', meRouter({ store, index, manager, preferences, memories }));
   }
 
   if (hub !== undefined && manager !== undefined && service !== undefined) {

@@ -47,6 +47,14 @@ export interface GenerationServiceOptions {
    * a client that could send its own would be setting policy for itself.
    */
   settings?: { samplerFor: (providerId: string, modelId: string) => SamplerSettings };
+  /**
+   * What this reader has asked to be remembered, prepended to the system
+   * prompt of their own generations.
+   *
+   * Per user, so it is read here rather than passed in by the route: a caller
+   * that supplied its own memories would be writing another reader's context.
+   */
+  memories?: { prompt: (userId: string) => Promise<string | null> };
 }
 
 export interface StartResult {
@@ -65,6 +73,7 @@ export class GenerationService {
   readonly #defaultContextTokens: number;
   readonly #maxOutputTokens: number;
   readonly #settings: GenerationServiceOptions['settings'];
+  readonly #memories: GenerationServiceOptions['memories'];
 
   /** Conversations with a generation that has not yet reached a terminal state. */
   readonly #active = new Map<string, string>();
@@ -79,6 +88,25 @@ export class GenerationService {
     this.#defaultContextTokens = options.defaultContextTokens;
     this.#maxOutputTokens = options.maxOutputTokens;
     this.#settings = options.settings;
+    this.#memories = options.memories;
+  }
+
+  /**
+   * The system prompt for one generation: the administrator's for this model,
+   * with the reader's memories ahead of it.
+   *
+   * Memories lead because the model's instruction is about *how* to answer and
+   * the memories are about *who it is answering* — and because an
+   * administrator's instruction reads better as the last word.
+   */
+  async #systemPromptFor(userId: string, sampler: SamplerSettings): Promise<string | undefined> {
+    const remembered = (await this.#memories?.prompt(userId)) ?? null;
+    const configured = sampler.systemPrompt;
+
+    if (remembered === null) return configured;
+    return configured === undefined || configured.trim() === ''
+      ? remembered
+      : `${remembered}\n\n${configured}`;
   }
 
   /** The configured sampling for a model, or nothing. */
@@ -108,6 +136,9 @@ export class GenerationService {
     // valid here.
     const { entry, client } = await this.#hub.resolveModel(providerId, model);
     const sampler = this.#samplerFor(providerId, model);
+    // Read before the lock: it touches the filesystem, and the lock is held
+    // across the whole check-and-append.
+    const systemPrompt = await this.#systemPromptFor(userId, sampler);
 
     const prepared = await this.#store.locks.run(key, async () => {
       if (this.#active.has(key)) {
@@ -136,7 +167,7 @@ export class GenerationService {
         contextTokens:
           client.contextLength(model) ?? entry.contextTokens ?? this.#defaultContextTokens,
         maxOutputTokens: this.#maxOutputTokens,
-        ...(sampler.systemPrompt === undefined ? {} : { systemPrompt: sampler.systemPrompt }),
+        ...(systemPrompt === undefined ? {} : { systemPrompt }),
       });
 
       const written = await this.#store.writeUnderLock(userId, conversationId, next);
@@ -192,6 +223,9 @@ export class GenerationService {
     const key = conversationKey(userId, conversationId);
     const { entry, client } = await this.#hub.resolveModel(providerId, model);
     const sampler = this.#samplerFor(providerId, model);
+    // Read before the lock: it touches the filesystem, and the lock is held
+    // across the whole check-and-append.
+    const systemPrompt = await this.#systemPromptFor(userId, sampler);
 
     const prepared = await this.#store.locks.run(key, async () => {
       if (this.#active.has(key)) {
@@ -217,7 +251,7 @@ export class GenerationService {
         contextTokens:
           client.contextLength(model) ?? entry.contextTokens ?? this.#defaultContextTokens,
         maxOutputTokens: this.#maxOutputTokens,
-        ...(sampler.systemPrompt === undefined ? {} : { systemPrompt: sampler.systemPrompt }),
+        ...(systemPrompt === undefined ? {} : { systemPrompt }),
       });
 
       const written = await this.#store.writeUnderLock(userId, conversationId, next);

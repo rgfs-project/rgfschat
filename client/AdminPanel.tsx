@@ -73,16 +73,16 @@ export function AdminPanel({
 
   return createPortal(
     <div
-      className="admin"
+      className="panel"
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="admin__card" role="dialog" aria-modal="true" aria-label="Administration">
-        <nav className="admin__rail" aria-label="Admin sections">
+      <div className="panel__card" role="dialog" aria-modal="true" aria-label="Administration">
+        <nav className="panel__rail" aria-label="Admin sections">
           <button
             type="button"
-            className="icon-button admin__close"
+            className="icon-button panel__close"
             onClick={onClose}
             aria-label="Close administration"
           >
@@ -93,7 +93,7 @@ export function AdminPanel({
             <button
               key={id}
               type="button"
-              className={`admin__rail-item${section === id ? ' is-current' : ''}`}
+              className={`panel__rail-item${section === id ? ' is-current' : ''}`}
               onClick={() => setSection(id)}
               aria-current={section === id}
             >
@@ -103,8 +103,8 @@ export function AdminPanel({
           ))}
         </nav>
 
-        <div className="admin__pane">
-          <h2 className="admin__title">{SECTIONS.find((s) => s.id === section)?.label}</h2>
+        <div className="panel__pane">
+          <h2 className="panel__title">{SECTIONS.find((s) => s.id === section)?.label}</h2>
           {section === 'users' && <UsersSection currentUser={user} />}
           {section === 'providers' && <ProvidersSection />}
           {section === 'models' && <ModelsSection />}
@@ -129,12 +129,12 @@ function Row({
   children: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <div className="admin__row">
-      <div className="admin__row-text">
-        <span className="admin__row-label">{label}</span>
-        {description !== undefined && <p className="admin__row-desc">{description}</p>}
+    <div className="panel__row">
+      <div className="panel__row-text">
+        <span className="panel__row-label">{label}</span>
+        {description !== undefined && <p className="panel__row-desc">{description}</p>}
       </div>
-      <div className="admin__row-control">{children}</div>
+      <div className="panel__row-control">{children}</div>
     </div>
   );
 }
@@ -324,7 +324,7 @@ function UsersSection({ currentUser }: { currentUser: UserDto }): React.JSX.Elem
 
       {creating ? (
         <form
-          className="admin__form"
+          className="panel__form"
           onSubmit={(event) => {
             event.preventDefault();
             create.mutate();
@@ -344,7 +344,7 @@ function UsersSection({ currentUser }: { currentUser: UserDto }): React.JSX.Elem
               required
             />
           </label>
-          <div className="admin__form-actions">
+          <div className="panel__form-actions">
             <button type="button" className="linkish" onClick={() => setCreating(false)}>
               Cancel
             </button>
@@ -354,7 +354,7 @@ function UsersSection({ currentUser }: { currentUser: UserDto }): React.JSX.Elem
           </div>
         </form>
       ) : (
-        <div className="admin__actions">
+        <div className="panel__actions">
           <button type="button" className="button-primary" onClick={() => setCreating(true)}>
             Add a user
           </button>
@@ -454,7 +454,7 @@ function ProvidersSection(): React.JSX.Element {
       ))}
 
       {draft === null ? (
-        <div className="admin__actions">
+        <div className="panel__actions">
           <button
             type="button"
             className="button-primary"
@@ -469,7 +469,7 @@ function ProvidersSection(): React.JSX.Element {
         </div>
       ) : (
         <form
-          className="admin__form"
+          className="panel__form"
           onSubmit={(event) => {
             event.preventDefault();
             save.mutate(draft);
@@ -515,7 +515,7 @@ function ProvidersSection(): React.JSX.Element {
 
           {testResult !== null && <p className="muted small">{testResult}</p>}
 
-          <div className="admin__form-actions">
+          <div className="panel__form-actions">
             <button type="button" className="linkish" onClick={() => setDraft(null)}>
               Cancel
             </button>
