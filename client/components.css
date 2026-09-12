@@ -1220,7 +1220,19 @@ button.linkish:hover {
   .admin__rail {
     flex-direction: row;
     flex-wrap: wrap;
+    align-items: center;
     border-right: none;
     border-bottom: 1px solid var(--border);
+  }
+
+  /*
+   * Both of these belong to the vertical rail, where the close control sits
+   * above the sections. Laid out in a row they only add space below the whole
+   * strip — 21px underneath against 12px on top, which is the padding reading
+   * as uneven.
+   */
+  .admin__close {
+    align-self: center;
+    margin-bottom: 0;
   }
 }
