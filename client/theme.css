@@ -259,7 +259,8 @@ select:focus-visible,
 .icon-button {
   transition:
     background-color var(--motion-fast) var(--ease-out),
-    color var(--motion-fast) var(--ease-out);
+    color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
 }
 
 .icon-button:hover:not(:disabled) {
@@ -267,10 +268,33 @@ select:focus-visible,
   color: var(--text);
 }
 
-/* A small, immediate acknowledgement of the press itself. */
+/*
+ * A small, immediate acknowledgement of the press itself.
+ *
+ * Every control that acts like a button gets it rather than a chosen few:
+ * pressing one and watching it give, then pressing its neighbour and watching
+ * nothing happen, reads as the second one being broken.
+ *
+ * Listed rather than matched on the `button` element. A bare element selector
+ * plus three pseudo-classes outranks a single class, so it would quietly take
+ * over the send control's own deeper press — and menu options are meant to be
+ * left out: the menu closes on the press, so the animation would play on
+ * something already leaving.
+ *
+ * A conversation scales as a whole row. Only its title is the press target,
+ * but it is one visible pill with the row controls inside it, and shrinking
+ * the title alone would slide it out from under them.
+ */
 .icon-button:active:not(:disabled),
 .nav-button:active,
-.button-primary:active:not(:disabled) {
+.button-primary:active:not(:disabled),
+button.linkish:active:not(:disabled),
+.select:active:not(:disabled),
+.model-trigger:active:not(:disabled),
+.admin__rail-item:active,
+.admin__row-control button:not(.icon-button):not(.select):active,
+.admin__form-actions button:not(.button-primary):not(.linkish):active,
+.conversation:has(.conversation__open:active) {
   transform: scale(0.96);
 }
 

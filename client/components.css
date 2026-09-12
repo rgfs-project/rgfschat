@@ -10,7 +10,20 @@
 .sidebar__group-label {
   color: var(--muted);
   font-weight: 400;
-  margin-top: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+/*
+ * Rows are separated rather than stacked flush.
+ *
+ * Every row is a hit target with its own hover and selected background, and
+ * touching backgrounds read as one block that happens to have text in it. A
+ * small gap is enough to say where one ends.
+ */
+.sidebar__group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
 }
 
 .sidebar__username {
@@ -45,7 +58,9 @@
 }
 
 .conversation {
-  transition: background-color var(--motion-fast) var(--ease-out);
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
 }
 
 .conversation:not(.is-current):hover {
@@ -528,7 +543,8 @@
 .model-trigger {
   transition:
     background-color var(--motion-fast) var(--ease-out),
-    color var(--motion-fast) var(--ease-out);
+    color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
 }
 
 .model-trigger:hover:not(:disabled) {
@@ -871,7 +887,9 @@ button.linkish {
   color: var(--muted);
   padding: var(--button-padding);
   font-size: var(--button-font-size);
-  transition: color var(--motion-fast) var(--ease-out);
+  transition:
+    color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
 }
 
 button.linkish:hover {
@@ -1014,7 +1032,7 @@ button.linkish:hover {
 .admin__rail {
   display: flex;
   flex-direction: column;
-  gap: 0.125rem;
+  gap: 0.625rem;
   min-height: 0;
   overflow-y: auto;
   padding: 0.75rem;
@@ -1056,7 +1074,9 @@ button.linkish:hover {
 }
 
 .admin__rail-item {
-  transition: background-color var(--motion-fast) var(--ease-out);
+  transition:
+    background-color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
 }
 
 .admin__rail-item:hover {
@@ -1139,7 +1159,9 @@ button.linkish:hover {
   border-radius: 0.5rem;
   font-size: var(--button-font-size);
   text-align: left;
-  transition: border-color var(--motion-fast) var(--ease-out);
+  transition:
+    border-color var(--motion-fast) var(--ease-out),
+    transform var(--motion-fast) var(--ease-out);
 }
 
 .select:hover:not(:disabled) {
@@ -1214,6 +1236,7 @@ button.linkish:hover {
   border: 1px solid var(--border-strong);
   border-radius: 0.5rem;
   font-size: var(--button-font-size);
+  transition: transform var(--motion-fast) var(--ease-out);
 }
 
 /*
