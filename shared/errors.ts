@@ -31,6 +31,10 @@ export const ERROR_CODES = [
   'ENDPOINT_NOT_ALLOWED',
   // Phase 9
   'LAST_ADMIN',
+  // Phase 11
+  'UNSUPPORTED_MEDIA_TYPE',
+  'QUOTA_EXCEEDED',
+  'MODEL_CAPABILITY_UNSUPPORTED',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -59,6 +63,15 @@ export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
   // A conflict with the state of the system, not a malformed request: the
   // instance must keep at least one way in.
   LAST_ADMIN: 409,
+  // The bytes are not something this application will store. 415 rather than
+  // 400: the request was well-formed, its payload was the problem.
+  UNSUPPORTED_MEDIA_TYPE: 415,
+  // Refused for size, like PAYLOAD_TOO_LARGE, but about the total already
+  // stored rather than about this one request.
+  QUOTA_EXCEEDED: 413,
+  // The request is valid and the model cannot do it — an unprocessable
+  // entity rather than a bad one.
+  MODEL_CAPABILITY_UNSUPPORTED: 422,
 };
 
 /**

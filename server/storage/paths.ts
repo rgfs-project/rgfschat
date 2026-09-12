@@ -123,6 +123,33 @@ export class StoragePaths {
     return this.#contain(resolve(this.userDir(userId), 'attachments'));
   }
 
+  /**
+   * `data/<user>/attachments/<attachment>/` — one directory per attachment.
+   *
+   * A directory rather than two files side by side, so the bytes and their
+   * metadata are removed together by a single `rm`, and so a half-written
+   * upload is a directory with no `meta.json` rather than a stray blob
+   * indistinguishable from a real one.
+   *
+   * The id is a server-minted UUID and is the *only* thing that reaches this
+   * path. The uploaded filename never does (INV-28): it is display metadata,
+   * stored inside `meta.json` where it cannot be interpreted as a location.
+   */
+  attachmentDir(userId: string, attachmentId: string): string {
+    const id = this.#segment(attachmentId, 'attachment id');
+    return this.#contain(resolve(this.attachmentsDir(userId), id));
+  }
+
+  /** The bytes, exactly as uploaded and never rewritten. */
+  attachmentBlob(userId: string, attachmentId: string): string {
+    return this.#contain(resolve(this.attachmentDir(userId, attachmentId), 'blob'));
+  }
+
+  /** Canonical metadata, written last so its presence means "complete". */
+  attachmentMetaFile(userId: string, attachmentId: string): string {
+    return this.#contain(resolve(this.attachmentDir(userId, attachmentId), 'meta.json'));
+  }
+
   /** Administrative audit logs, one file per month. */
   auditDir(): string {
     return this.#contain(resolve(this.systemDir(), 'audit'));
