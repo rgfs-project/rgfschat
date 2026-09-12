@@ -240,6 +240,17 @@ test.describe('phone (390x844)', () => {
           // Nothing that is not on screen: a control inside the closed account
           // menu is not a target until the menu is open.
           if (box.width === 0 || box.height === 0) return false;
+
+          /*
+           * Nor anything deliberately taken out of reach. The composer's file
+           * input is one: it is hidden from assistive technology and removed
+           * from the tab order, and the button beside it is what a finger
+           * actually aims at. Sizing it to 44px would put a 44px invisible
+           * control in the layout.
+           */
+          if (element.getAttribute('aria-hidden') === 'true') return false;
+          if (element.tabIndex < 0) return false;
+
           return box.width < 44 || box.height < 44;
         })
         .map((element) => ({

@@ -96,7 +96,16 @@ async function startMockProvider(): Promise<MockProviderHandle> {
         res.end(
           JSON.stringify({
             object: 'list',
-            data: [{ id: 'e2e-model', architecture: { input_modalities: ['text'] } }],
+            /*
+             * Two models on purpose. `e2e-model` is first and so is what the
+             * client defaults to, which keeps every existing test unchanged;
+             * `e2e-vision` exists so the attachment tests can exercise both
+             * sides of the capability check against a real catalogue.
+             */
+            data: [
+              { id: 'e2e-model', architecture: { input_modalities: ['text'] } },
+              { id: 'e2e-vision', architecture: { input_modalities: ['text', 'image'] } },
+            ],
           })
         );
         return;

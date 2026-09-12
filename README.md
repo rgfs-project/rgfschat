@@ -4,12 +4,13 @@ A self-hosted chat workspace. Conversations are plain Markdown files on disk, ge
 owned by the server, and the model provider is replaceable.
 
 This repository is built in phases against a project contract kept outside the repository.
-**Phase 10** is complete: the foundation and HTTP conventions, canonical Markdown persistence
+**Phase 11** is complete: the foundation and HTTP conventions, canonical Markdown persistence
 with a rebuildable index, accounts with sessions and CSRF protection, multiple model providers
 with SSRF-protected discovery, reconnectable streaming that survives a reload, a dropped
 connection, or a restart, the chat interface and its conversation navigation, a resilient
-client data layer, an admin surface with server-enforced authorization, per-user settings, and
-a layout that is responsive by design from a 390px phone to a wide desktop.
+client data layer, an admin surface with server-enforced authorization, per-user settings, a
+layout that is responsive by design from a 390px phone to a wide desktop, and image and text
+attachments with sniffed types, quotas, and per-model capability checks.
 
 ## Prerequisites
 
@@ -143,6 +144,33 @@ clear of a display cutout and the home indicator.
 
 `e2e/mobile.spec.ts` covers 390×844, 402×714 (an iPhone 17 in Safari), 820×1180, 1440×900,
 and the breakpoint at ±1px.
+
+## Attachments
+
+Images (PNG, JPEG, WebP, GIF) and text files (plain text, Markdown, CSV, JSON) can be attached
+to a message by clicking the paperclip, dragging onto the composer, or pasting an image.
+
+The type is decided by reading the file's **bytes**, not its name or the `Content-Type` the
+browser sends — so a script named `photo.png` is stored and served as text, never as an image.
+SVG is rejected: it is an image to everyone who talks about it and a scriptable document to a
+browser.
+
+| Limit                      | Variable                              | Default            |
+| -------------------------- | ------------------------------------- | ------------------ |
+| Per file                   | `ATTACHMENT_MAX_BYTES`                | 10 MB              |
+| Per account, in total      | `ATTACHMENT_MAX_TOTAL_BYTES_PER_USER` | 512 MB             |
+| Unsent uploads kept for    | `ATTACHMENT_PENDING_TTL_MS`           | 24 hours           |
+| Text inlined into a prompt | `ATTACHMENT_MAX_INLINE_CHARS`         | 100 000 characters |
+| Per message                | fixed by the conversation format      | 10                 |
+
+Images are only sent to models that report image input; the composer says so before you send,
+and the server refuses otherwise. Which models can see is discovered from the provider, not
+configured.
+
+**Attachments are part of `data/` and therefore part of your backups.** They live under
+`data/<user-uuid>/attachments/`, and a backup that excludes them will restore conversations
+whose images and files are gone. There is no virus scanning — if you host this for other
+people, put scanning in front of `data/` yourself.
 
 ## First run
 
