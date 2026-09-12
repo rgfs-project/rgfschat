@@ -61,10 +61,8 @@
   --motion-theme: 260ms;
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
 
-  /* 272px. Measured off the reference, and the width the conversation titles
-     were already being truncated to — the extra 80px held no more of them, it
-     just took the space from the transcript. */
-  --sidebar-width: 17rem;
+  /* 268px, read straight off the reference's own `w-[268px]`. */
+  --sidebar-width: 16.75rem;
   /* 56px, the reference's. The bar holds one line of type on each side of the
      seam; the extra 12px it had were empty on both. */
   --header-height: 3.5rem;
@@ -413,8 +411,10 @@ button.linkish:active:not(:disabled),
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2rem;
-  height: 2rem;
+  /* With the footer's 12px padding and the row's 4px, this is what puts the
+     account bar at the reference's 65px. */
+  width: 1.875rem;
+  height: 1.875rem;
   border-radius: 999px;
   background: var(--accent);
   color: var(--on-accent);

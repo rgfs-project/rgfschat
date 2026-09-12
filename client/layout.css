@@ -159,13 +159,14 @@ body {
   /* The same side padding as the actions above it, so a conversation row and
      the Admin row are one width and sit on one edge. Nothing on top: the rule
      above is the list's edge, and a row scrolling up should meet it. */
-  padding: 0 0.625rem 0.625rem;
+  padding: 0 0.5rem 0.625rem;
 }
 
+/* 65px tall, from the reference. */
 .sidebar__footer {
   display: flex;
   align-items: center;
-  padding: 0.625rem 0.75rem;
+  padding: 0.75rem;
   border-top: 1px solid var(--border);
 }
 
