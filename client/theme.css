@@ -66,8 +66,12 @@
   /* 56px, the reference's. The bar holds one line of type on each side of the
      seam; the extra 12px it had were empty on both. */
   --header-height: 3.5rem;
-  /* The single horizontal inset shared by both header rows. */
-  --gutter: 1.25rem;
+  /* The main header's inset, and the gap between its control and its title.
+     It matches the inset the sidebar gives its own rows, so the space before
+     the title is the same space that sits after the collapse control on the
+     other side of the seam — and the same space either of them leaves when it
+     is the one at the window's edge. */
+  --gutter: 0.5rem;
   --radius: 0.75rem;
 
   --font-sans:
