@@ -4,8 +4,6 @@ import { ArrowDown, PanelLeft } from 'lucide-react';
 import type { UserDto } from '@shared/auth.ts';
 import { ApiError, cancelGeneration, downloadConversation } from './api.ts';
 import { Composer } from './Composer.tsx';
-import { AdminPanel } from './AdminPanel.tsx';
-import { SettingsPanel } from './SettingsPanel.tsx';
 import { Dialog } from './Dialog.tsx';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
 import { Message, StreamingMessage } from './Message.tsx';
@@ -116,11 +114,24 @@ type ProviderGroups = NonNullable<ReturnType<typeof useModels>['data']>['provide
 
 export interface AppProps {
   user: UserDto;
-  /** Owned by the shell so it survives a session expiry and re-login. */
+  /**
+   * The open conversation, or `null` for a draft that has no id yet.
+   *
+   * Read from the URL by `ChatRoute` rather than held as state here: the route
+   * is what a reader can bookmark, reload, and press Back through, and two
+   * copies of "which conversation" would eventually disagree about which one
+   * is showing.
+   */
   currentId: string | null;
+  /** `null` opens the new-chat draft. Navigates; it does not set state. */
   onSelectConversation: (id: string | null) => void;
+  /** Owned by the shell so it survives a session expiry and re-login. */
   draft: string;
   onDraftChange: (value: string) => void;
+  /** A conversation has just been created by sending its first message. */
+  onConversationCreated: (id: string) => void;
+  onOpenSettings: () => void;
+  onOpenAdmin: () => void;
   onSignOut: () => void;
 }
 
@@ -130,6 +141,9 @@ export function App({
   onSelectConversation,
   draft,
   onDraftChange,
+  onConversationCreated,
+  onOpenSettings,
+  onOpenAdmin,
   onSignOut,
 }: AppProps): React.JSX.Element {
   const client = useQueryClient();
@@ -151,8 +165,6 @@ export function App({
   const [generationId, setGenerationId] = useState<string | null>(() => readStored(ACTIVE_KEY));
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<PendingDialog | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [adminOpen, setAdminOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   /** A message arrived at from search, to scroll to and mark once it renders. */
   const [focusMessageId, setFocusMessageId] = useState<string | null>(null);
@@ -422,7 +434,13 @@ export function App({
       try {
         const created = await createConversation.mutateAsync();
         conversationId = created.id;
-        onSelectConversation(created.id);
+        /*
+         * The draft now has an id, so the URL takes it — replacing rather than
+         * pushing. The reader did not navigate; they sent a message, and
+         * pressing Back should return to wherever they were before the draft,
+         * not to an empty composer whose message has already been sent.
+         */
+        onConversationCreated(created.id);
       } catch {
         setError('Could not create a conversation.');
         onDraftChange(text);
@@ -453,7 +471,7 @@ export function App({
     createConversation,
     sendMessage,
     onDraftChange,
-    onSelectConversation,
+    onConversationCreated,
   ]);
 
   const onRegenerate = useCallback(async () => {
@@ -615,8 +633,8 @@ export function App({
             onDelete={(id) => setDialog({ kind: 'delete-conversation', id })}
             onPin={onPinConversation}
             onDownload={onDownloadConversation}
-            onSettings={() => setSettingsOpen(true)}
-            onOpenAdmin={() => setAdminOpen(true)}
+            onSettings={onOpenSettings}
+            onOpenAdmin={onOpenAdmin}
             onSignOut={onSignOut}
             modal={narrow && sidebarOpen}
           />
@@ -767,8 +785,8 @@ export function App({
         <SearchDialog recent={list} onOpen={onOpenResult} onClose={() => setSearchOpen(false)} />
       )}
 
-      {settingsOpen && <SettingsPanel user={user} onClose={() => setSettingsOpen(false)} />}
-      {adminOpen && <AdminPanel user={user} onClose={() => setAdminOpen(false)} />}
+      {/* Settings and Admin are routes now, rendered over this screen by
+          `AppRoutes` so each has a URL that Back closes. */}
 
       {dialog !== null && (
         <Dialog

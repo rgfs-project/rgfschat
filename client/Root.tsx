@@ -1,32 +1,55 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { BrowserRouter } from 'react-router';
 import type { AuthState, UserDto } from '@shared/auth.ts';
-import { App } from './App.tsx';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
-import { SignIn } from './SignIn.tsx';
 import { logout, onAuthExpired, setCsrfToken } from './api.ts';
 import { createQueryClient, keys, useConversations, useModels, useSession } from './queries.ts';
+import { AppRoutes } from './routes/AppRoutes.tsx';
+import { SessionContext, type SessionValue } from './routes/session.ts';
 
 /**
  * The application shell.
  *
- * Two things live here rather than inside `App`, and both are deliberate:
+ * Three things live here rather than inside a route, and all three are
+ * deliberate:
  *
  *  1. **The cold start is concurrent.** Session, conversation list and models
  *     are all started on the first render instead of the latter two waiting to
- *     be mounted by an authenticated `App`. Previously the shell rendered
+ *     be mounted by an authenticated route. Previously the shell rendered
  *     nothing until the session resolved, which made first paint three round
  *     trips deep for no reason — none of the three depends on another's
  *     *result*, only on the user turning out to be signed in, and that can be
  *     settled after the fact by discarding what was fetched.
  *
- *  2. **The shell never unmounts.** The composer draft and the open
- *     conversation are held here, so a session expiring mid-sentence and the
- *     user signing back in returns them to the same conversation with their
- *     unsent text intact. Held inside `App` they would be destroyed by the very
- *     transition they need to survive.
+ *  2. **The shell never unmounts.** It sits above the router, so nothing a
+ *     route does can destroy it.
+ *
+ *  3. **The draft outlives the route.** A session expiring mid-sentence sends
+ *     the reader to `/login`, which unmounts the chat screen; holding the
+ *     composer's text here is what returns it to them afterwards. The
+ *     conversation they were in needs no such help any more — it is in the URL,
+ *     and `RequireAuth` hands that URL back after they sign in.
  */
 export function Root(): React.JSX.Element {
+  return (
+    <BrowserRouter>
+      <AppRoot />
+    </BrowserRouter>
+  );
+}
+
+/**
+ * Everything below the router.
+ *
+ * Separate from `Root` so a test can supply its own router. `BrowserRouter`
+ * reads the real `window.history`, which in jsdom is one object shared by every
+ * test in a file — so a test that navigated to a conversation left the next one
+ * starting there, and assertions about a fresh application quietly ran against
+ * the previous test's screen. A `MemoryRouter` per test has no such thread
+ * between them.
+ */
+export function AppRoot(): React.JSX.Element {
   // One client for the lifetime of the app; a new one per render would discard
   // the cache on every state change.
   const [client] = useState(createQueryClient);
@@ -45,7 +68,6 @@ function Shell(): React.JSX.Element {
   const [expired, setExpired] = useState(false);
 
   /** Survives the sign-in round trip; see the note on this component. */
-  const [currentId, setCurrentId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
 
   /*
@@ -100,52 +122,34 @@ function Shell(): React.JSX.Element {
     [session]
   );
 
-  const onSignOut = useCallback(async () => {
-    await logout();
-    setCsrfToken(null);
-    setCurrentId(null);
-    setDraft('');
-    setExpired(true);
+  const onSignOut = useCallback(() => {
+    void (async () => {
+      await logout();
+      setCsrfToken(null);
+      setDraft('');
+      setExpired(true);
+    })();
   }, []);
 
-  if (authState === 'unknown') {
-    return (
-      <main className="booting">
-        <p className="muted">Loading…</p>
-      </main>
-    );
-  }
-
-  if (authState === 'unauthenticated') {
-    return (
-      <SignIn
-        registrationOpen={session.data?.registrationOpen ?? false}
-        onSignedIn={onSignedIn}
-        // A session that ended mid-use is worth saying out loud; otherwise the
-        // login form appears with no explanation for why.
-        notice={
-          expired && (session.data?.user ?? null) !== null
-            ? 'Your session ended. Please sign in again.'
-            : null
-        }
-      />
-    );
-  }
-
-  const user = session.data?.user ?? null;
-  if (user === null) {
-    // Unreachable given authState, but narrows the type without a cast.
-    return <main className="booting" />;
-  }
+  /*
+   * Memoised because it is a context value: a fresh object each render would
+   * re-render every screen reading it, on every keystroke in the composer.
+   */
+  const value = useMemo<SessionValue>(
+    () => ({
+      authState,
+      user: session.data?.user ?? null,
+      registrationOpen: session.data?.registrationOpen ?? false,
+      expired,
+      onSignedIn,
+      onSignOut,
+    }),
+    [authState, session.data, expired, onSignedIn, onSignOut]
+  );
 
   return (
-    <App
-      user={user}
-      currentId={currentId}
-      onSelectConversation={setCurrentId}
-      draft={draft}
-      onDraftChange={setDraft}
-      onSignOut={() => void onSignOut()}
-    />
+    <SessionContext value={value}>
+      <AppRoutes draft={draft} onDraftChange={setDraft} />
+    </SessionContext>
   );
 }

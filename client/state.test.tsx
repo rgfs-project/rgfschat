@@ -2,7 +2,8 @@ import { StrictMode } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Root } from './Root.tsx';
+import { AppRoot } from './Root.tsx';
+import { MemoryRouter } from 'react-router';
 import {
   conversationBody,
   conversationsBody,
@@ -35,7 +36,16 @@ afterEach(() => {
 
 /** Mounts the real shell, exactly as `main.tsx` does. */
 function mount(strict = false): void {
-  const tree = <Root />;
+  /*
+   * A `MemoryRouter` per mount, not the application's `BrowserRouter`: that one
+   * reads jsdom's single shared history, so whichever test ran last decided
+   * which screen the next one started on.
+   */
+  const tree = (
+    <MemoryRouter initialEntries={['/chat/new']}>
+      <AppRoot />
+    </MemoryRouter>
+  );
   render(strict ? <StrictMode>{tree}</StrictMode> : tree);
 }
 

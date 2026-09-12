@@ -80,6 +80,13 @@ function renderApp(): { setCurrentId: ReturnType<typeof vi.fn> } {
         }}
         draft=""
         onDraftChange={vi.fn()}
+        onConversationCreated={(next) => {
+          currentId = next;
+          setCurrentId(next);
+          setId(next);
+        }}
+        onOpenSettings={vi.fn()}
+        onOpenAdmin={vi.fn()}
         onSignOut={vi.fn()}
       />
     );

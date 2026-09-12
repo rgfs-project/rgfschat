@@ -1,7 +1,8 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { Root } from './Root.tsx';
+import { AppRoot } from './Root.tsx';
+import { MemoryRouter } from 'react-router';
 import {
   conversationBody,
   conversationsBody,
@@ -32,7 +33,11 @@ afterEach(() => {
 });
 
 async function mountSignedIn(): Promise<void> {
-  render(<Root />);
+  render(
+    <MemoryRouter initialEntries={['/chat/new']}>
+      <AppRoot />
+    </MemoryRouter>
+  );
   await server.waitFor('/api/auth/session');
   server.respond('/api/auth/session', sessionBody());
   await server.waitFor('/api/conversations');

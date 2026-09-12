@@ -501,6 +501,52 @@ so its content is not hidden underneath; on a narrow one it does not, because th
 sidebar is a drawer over the page and insetting would push the transcript off the right edge
 to make room for something already covering it.
 
+### Routing
+
+React Router, with the URL as the source of truth for which conversation is open.
+`client/routes/paths.ts` holds every literal and is the only place a conversation URL is
+built — the client-side echo of the rule the server keeps for filesystem paths.
+
+| Path                    | Screen                                                    |
+| ----------------------- | --------------------------------------------------------- |
+| `/`                     | redirect to `/chat/new`                                   |
+| `/chat/new`             | the draft: a composer with no conversation behind it      |
+| `/chat/:conversationId` | one conversation                                          |
+| `/chats`                | the conversation index, mostly a narrow-window affordance |
+| `/settings`, `/admin`   | panels, as overlays with a URL                            |
+| `/login`                | the only route outside `RequireAuth`                      |
+| `*`                     | not found                                                 |
+
+**`/chat/new` creates nothing.** Visiting it writes no file; the conversation is created by
+the server when the first message is sent, and the URL is then _replaced_ with the real id so
+Back does not return to a draft whose message has already gone. Creating on navigation would
+leave an empty conversation behind every time someone opened New chat and changed their mind,
+which is the behaviour this application deliberately removed.
+
+**Overlays keep a background location.** Settings and Admin are still panels over the chat,
+but each is an address, so it can be linked to and dismissed with Back. `AppRoutes` renders
+two route tables: the first draws the screen at `location.state.background` when a panel was
+opened from inside the application — so the conversation being read stays behind it — and at
+the real location otherwise, which is what makes a pasted `/settings` link work. The second
+draws the panel. The alternative, nesting them as `/chat/:conversationId/settings`, needs none
+of this and costs the short addresses.
+
+**`RequireAuth` is a layout route**, so a route added later is protected by where it is
+declared rather than by remembering to wrap it. `unknown` is not `unauthenticated`: while the
+session request is in flight it renders the boot placeholder, because redirecting then would
+bounce signed-in readers through the login screen on every cold load. The attempted location
+travels in history state and is restored after signing in.
+
+The **draft lives above the router** in `Root`, which is why a session expiring mid-sentence
+and signing back in returns the reader's unsent text. The open conversation no longer needs
+that treatment — it is in the URL.
+
+`Root` mounts `BrowserRouter`; `AppRoot` is everything below it, exported so tests can supply
+a `MemoryRouter`. `BrowserRouter` reads jsdom's single shared history, so without that split
+whichever test ran last decided which screen the next one started on.
+
+Deep links need the server's SPA history fallback, which `server/app.ts` already had.
+
 ### Responsive model (Phase 10)
 
 One breakpoint, **56rem (896px)**, declared as `--breakpoint-narrow` in `theme.css`. It is

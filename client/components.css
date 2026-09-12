@@ -227,21 +227,18 @@
 }
 
 /*
- * Smaller than a standalone icon button, because these have to fit in the gap
- * between two turns.
+ * Smaller than a standalone icon button, and wider than tall.
  *
- * At the full 2rem the row stood 42px tall against a 28px gap, so the bottom
- * of every control hung over the next message — unreachable, since the strip
- * that overlapped could not trigger the hover that makes them live.
- */
-/*
- * Wider than tall.
+ * These have to fit in the gap between two turns. At the full 2rem the row
+ * stood 42px tall against a 28px gap, so the bottom of every control hung over
+ * the next message — unreachable, since the strip that overlapped could not
+ * trigger the hover that makes them live.
  *
- * A square button puts as much empty space above and below the glyph as beside
- * it, which on a row that hangs under a message reads as a gap the message has
- * grown rather than as controls belonging to it. Trimming only the height keeps
- * the glyphs the same size and the targets comfortably apart sideways, and
- * takes 8px out of the vertical space each turn spends on its own controls.
+ * The height is trimmed further than the width because a square button puts as
+ * much empty space above and below the glyph as beside it, which on a row
+ * hanging under a message reads as a gap the message has grown rather than as
+ * its own controls. Trimming one axis keeps the glyphs the same size and the
+ * targets comfortably apart sideways.
  *
  * The coarse-pointer block near the end of this file overrides both axes back
  * to 44px, so this is a desktop-only tightening.
@@ -2010,5 +2007,96 @@ button.linkish:hover {
     max-height: none;
     border-radius: 0;
     padding-bottom: var(--safe-bottom);
+  }
+}
+
+/* ==========================================================================
+   Standalone pages
+   ==========================================================================
+
+   The conversation index and the not-found screen. Neither is the chat shell:
+   they replace it rather than appearing over it, so they bring their own
+   scrolling and their own measure instead of borrowing the transcript's.
+   ========================================================================== */
+
+.page {
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 2rem max(1.25rem, var(--safe-right)) max(2rem, var(--safe-bottom))
+    max(1.25rem, var(--safe-left));
+  padding-top: calc(2rem + var(--safe-top));
+}
+
+/* Centred, for a page that is one short statement rather than a list. */
+.page--centred {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.75rem;
+}
+
+.page__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  max-width: 48rem;
+  margin: 0 auto 1.5rem;
+}
+
+.page__title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 500;
+}
+
+.page__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.page__list {
+  list-style: none;
+  margin: 0 auto;
+  padding: 0;
+  max-width: 48rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.page__list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  /* A row, not a link in a paragraph: the underline belongs to prose. */
+  text-decoration: none;
+  color: var(--text);
+  font-size: 0.8125rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: 0.5rem;
+  transition: background-color var(--motion-fast) var(--ease-out);
+}
+
+.page__list-item:hover {
+  background: var(--surface-2);
+}
+
+.page__list-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (pointer: coarse) {
+  .page__list-item {
+    min-height: 2.75rem;
   }
 }
