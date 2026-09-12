@@ -147,17 +147,22 @@ export function createApp({
     sessions !== undefined
   ) {
     app.use('/api', meRouter({ store, index, manager, preferences, memories, users, sessions }));
+  }
 
-    /*
-     * After the JSON parser, and unaffected by it: the upload route reads the
-     * raw request stream itself, and `express.json` ignores a multipart body.
-     * Its own size limit is enforced while streaming rather than by a body
-     * parser, so `JSON_BODY_LIMIT` does not apply here (the phase asks for a
-     * separate limit, and this is it).
-     */
-    if (attachments !== undefined) {
-      app.use('/api', createAttachmentsRouter(attachments));
-    }
+  /*
+   * Attachments depend on nothing but their own store, so they are mounted on
+   * their own rather than inside the block above — a router that needs one
+   * collaborator should not be switched off because a different router's
+   * collaborators are missing.
+   *
+   * After the JSON parser and unaffected by it: the upload route reads the raw
+   * request stream itself, and `express.json` ignores a multipart body. Its
+   * size limit is enforced while streaming rather than by a body parser, so
+   * `JSON_BODY_LIMIT` does not apply — the phase asks for a separate limit,
+   * and this is how it is separate.
+   */
+  if (attachments !== undefined) {
+    app.use('/api', createAttachmentsRouter(attachments));
   }
 
   if (hub !== undefined && manager !== undefined && service !== undefined) {
