@@ -67,14 +67,15 @@
      seam; the extra 12px it had were empty on both. */
   --header-height: 3.5rem;
   /*
-   * The main header's inset: 15px, which is where the collapse control's glyph
-   * sits on the other side of the border — the row inset of 8 plus the 7 the
-   * icon button holds around its own glyph. Measuring to the control's box
-   * instead would put the title 8 from the border against the glyph's 15, and
-   * it is the glyphs either side of the seam that a reader lines up, not the
-   * invisible boxes around them.
+   * What a header holds its *boxes* off the edge by. Every glyph then lands 15
+   * from that edge: an icon button carries 7 of its own around what it draws,
+   * and the title is given the same 7 so it starts on the same column.
+   *
+   * Stated this way because the control moves between the two headers. Insetting
+   * the box by 15 instead put the title right when the sidebar was open and the
+   * control 7px adrift the moment it closed.
    */
-  --gutter: 0.9375rem;
+  --gutter: 0.5rem;
   --radius: 0.75rem;
 
   --font-sans:
