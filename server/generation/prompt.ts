@@ -1,4 +1,5 @@
 import { textOf, type ChatMessage, type ContentPart } from '@shared/generation.ts';
+import { REQUIRED_MODALITY, type AttachmentKind } from '@shared/attachment.ts';
 import type { Conversation } from '@shared/conversation.ts';
 import { AppError } from '../errors/AppError.ts';
 
@@ -22,9 +23,14 @@ import { AppError } from '../errors/AppError.ts';
 export interface ResolvedAttachment {
   id: string;
   filename: string;
-  kind: 'image' | 'text';
+  kind: AttachmentKind;
   mediaType: string;
-  /** Text content, already truncated; or a `data:` URL for an image. */
+  /**
+   * Text content already truncated; a `data:` URL for an image; bare base64
+   * for audio. Three shapes because the three content parts want three
+   * different things, and converting between them at the point of use would
+   * mean every caller knowing which is which.
+   */
   content: string;
   /** Whether the text was cut short, so the marker can say so. */
   truncated: boolean;
@@ -40,15 +46,16 @@ export interface BudgetOptions {
   /** Resolved attachments by id. Absent ones are skipped, not fatal. */
   attachments?: ReadonlyMap<string, ResolvedAttachment>;
   /**
-   * Whether the chosen model can see.
+   * What the chosen model can actually take in.
    *
-   * Only consulted for images already in the conversation's history. A *new*
-   * message with an image is refused before anything is persisted, by the
-   * caller — reaching this point means the images belong to older turns, and
-   * dropping them silently is better than refusing to continue a conversation
-   * because of a picture three questions ago.
+   * Only consulted for attachments already in the conversation's history. A
+   * *new* message carrying one the model cannot read is refused before
+   * anything is persisted, by the caller — reaching this point means the
+   * attachment belongs to an older turn, and dropping it silently is better
+   * than refusing to continue a conversation because of a picture three
+   * questions ago.
    */
-  vision?: boolean;
+  modalities?: readonly string[];
 }
 
 /**
@@ -79,6 +86,23 @@ const MESSAGE_OVERHEAD_TOKENS = 4;
  */
 const IMAGE_TOKENS_ESTIMATE = 1_200;
 
+/**
+ * What a clip of audio costs, as an estimate for the same reason.
+ *
+ * Audio encoders work in frames of a fixed duration, so cost scales with
+ * length rather than with bytes — but length is not known without decoding,
+ * which is the provider's job. This is a flat reservation on the same
+ * err-high principle: refusing a request is cheaper than having one refused.
+ */
+const AUDIO_TOKENS_ESTIMATE = 2_000;
+
+/** The `format` an audio part carries. Upstream ignores it; clients read it. */
+function formatOf(mediaType: string): string {
+  if (mediaType === 'audio/mpeg') return 'mp3';
+  if (mediaType === 'audio/flac') return 'flac';
+  return 'wav';
+}
+
 function costOf(message: ChatMessage): number {
   if (typeof message.content === 'string') {
     return estimateTokens(message.content) + MESSAGE_OVERHEAD_TOKENS;
@@ -86,7 +110,9 @@ function costOf(message: ChatMessage): number {
 
   let total = MESSAGE_OVERHEAD_TOKENS;
   for (const part of message.content) {
-    total += part.type === 'text' ? estimateTokens(part.text) : IMAGE_TOKENS_ESTIMATE;
+    if (part.type === 'text') total += estimateTokens(part.text);
+    else if (part.type === 'image_url') total += IMAGE_TOKENS_ESTIMATE;
+    else total += AUDIO_TOKENS_ESTIMATE;
   }
   return total;
 }
@@ -115,7 +141,7 @@ export interface AssembledPrompt {
  */
 export function assemblePrompt(
   conversation: Conversation,
-  { contextTokens, maxOutputTokens, systemPrompt, attachments, vision = false }: BudgetOptions
+  { contextTokens, maxOutputTokens, systemPrompt, attachments, modalities = [] }: BudgetOptions
 ): AssembledPrompt {
   const system: ChatMessage[] = [];
   const turns: ChatMessage[] = [];
@@ -139,7 +165,7 @@ export function assemblePrompt(
       continue;
     }
     if (message.type === 'user') {
-      turns.push(userMessage(message.body, message.attachments ?? [], { attachments, vision }));
+      turns.push(userMessage(message.body, message.attachments ?? [], { attachments, modalities }));
       continue;
     }
     // Assistant: body only. `reasoning` is intentionally not read here.
@@ -203,7 +229,10 @@ export function assemblePrompt(
 function userMessage(
   body: string,
   ids: readonly string[],
-  options: { attachments: ReadonlyMap<string, ResolvedAttachment> | undefined; vision: boolean }
+  options: {
+    attachments: ReadonlyMap<string, ResolvedAttachment> | undefined;
+    modalities: readonly string[];
+  }
 ): ChatMessage {
   const resolved = ids
     .map((id) => options.attachments?.get(id))
@@ -212,7 +241,11 @@ function userMessage(
   if (resolved.length === 0) return { role: 'user', content: body };
 
   const texts = resolved.filter((attachment) => attachment.kind === 'text');
-  const images = options.vision ? resolved.filter((a) => a.kind === 'image') : [];
+  const media = resolved.filter(
+    (attachment) =>
+      attachment.kind !== 'text' &&
+      options.modalities.includes(REQUIRED_MODALITY[attachment.kind] ?? '')
+  );
 
   const inlined = texts.map((attachment) => {
     const marker = attachment.truncated ? '\n\n[truncated]' : '';
@@ -221,14 +254,18 @@ function userMessage(
 
   const text = [body, ...inlined].filter((part) => part !== '').join('\n\n');
 
-  if (images.length === 0) return { role: 'user', content: text };
+  if (media.length === 0) return { role: 'user', content: text };
 
   const parts: ContentPart[] = [
     { type: 'text', text },
-    ...images.map((image): ContentPart => ({
-      type: 'image_url',
-      image_url: { url: image.content },
-    })),
+    ...media.map((attachment): ContentPart =>
+      attachment.kind === 'image'
+        ? { type: 'image_url', image_url: { url: attachment.content } }
+        : {
+            type: 'input_audio',
+            input_audio: { data: attachment.content, format: formatOf(attachment.mediaType) },
+          }
+    ),
   ];
   return { role: 'user', content: parts };
 }

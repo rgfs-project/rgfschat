@@ -1,3 +1,4 @@
+import { REQUIRED_MODALITY } from '@shared/attachment.ts';
 import type { Conversation } from '@shared/conversation.ts';
 import type { ResolvedAttachment } from '../generation/prompt.ts';
 import type { AttachmentStore } from './store.ts';
@@ -16,8 +17,13 @@ import type { AttachmentStore } from './store.ts';
 export interface ResolveOptions {
   /** Characters of a text attachment to inline before cutting it short. */
   maxInlineChars: number;
-  /** Skip reading image bytes entirely when the model cannot see them. */
-  includeImages: boolean;
+  /**
+   * What the model can take in, from discovery.
+   *
+   * Used to skip reading bytes the model could not be sent anyway — a 10 MB
+   * image base64-encoded for a model that cannot see is pure cost.
+   */
+  modalities: readonly string[];
 }
 
 /** Every attachment id mentioned by any user message, in order, deduplicated. */
@@ -34,7 +40,7 @@ export async function resolveAttachments(
   store: AttachmentStore,
   userId: string,
   conversation: Conversation,
-  { maxInlineChars, includeImages }: ResolveOptions
+  { maxInlineChars, modalities }: ResolveOptions
 ): Promise<Map<string, ResolvedAttachment>> {
   const resolved = new Map<string, ResolvedAttachment>();
 
@@ -48,7 +54,8 @@ export async function resolveAttachments(
       continue;
     }
 
-    if (meta.kind === 'image' && !includeImages) continue;
+    const needed = REQUIRED_MODALITY[meta.kind];
+    if (needed !== null && !modalities.includes(needed)) continue;
 
     try {
       const bytes = await store.bytes(userId, id);
@@ -76,12 +83,18 @@ export async function resolveAttachments(
       resolved.set(id, {
         id,
         filename: meta.filename,
-        kind: 'image',
+        kind: meta.kind,
         mediaType: meta.mediaType,
-        // A data: URL, never a remote one. A remote URL would make the
-        // provider fetch on our behalf, and the client would be choosing the
-        // destination (docs/provider-notes.md §9).
-        content: `data:${meta.mediaType};base64,${bytes.toString('base64')}`,
+        /*
+         * An image goes as a `data:` URL and audio as bare base64, because
+         * that is what each content part takes. Never a remote URL: that would
+         * make the provider fetch a destination the client chose
+         * (docs/provider-notes.md §9).
+         */
+        content:
+          meta.kind === 'image'
+            ? `data:${meta.mediaType};base64,${bytes.toString('base64')}`
+            : bytes.toString('base64'),
         truncated: false,
       });
     } catch {

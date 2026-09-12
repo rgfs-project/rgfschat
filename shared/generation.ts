@@ -36,12 +36,20 @@ export type MessageRole = 'system' | 'user' | 'assistant';
  * would be choosing, so it is never sent.
  */
 export type ContentPart =
-  { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+  /**
+   * Bare base64, not a `data:` URL — that is what the OpenAI audio part takes.
+   * `format` is sent for clients that read it; llama.cpp documents that it
+   * ignores the field and detects the container from the bytes, which is the
+   * same thing this application does when deciding what to store.
+   */
+  | { type: 'input_audio'; input_audio: { data: string; format: string } };
 
 export interface ChatMessage {
   role: MessageRole;
   /**
-   * A plain string for text, or parts when the message carries images.
+   * A plain string for text, or parts when the message carries media.
    *
    * Both forms are accepted upstream, and the string form is kept for the
    * overwhelmingly common case: sending `[{type:'text',…}]` for every message

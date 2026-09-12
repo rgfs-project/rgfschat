@@ -14,6 +14,10 @@ import { ACCEPTED_MEDIA_TYPES, type AcceptedMediaType } from '@shared/attachment
  * at (INV-27).
  */
 
+const ascii = (bytes: Uint8Array, at: number, text: string): boolean =>
+  bytes.length >= at + text.length &&
+  [...text].every((char, index) => bytes[at + index] === char.charCodeAt(0));
+
 /** Every signature that identifies an accepted image, longest-first. */
 const IMAGE_SIGNATURES: { type: AcceptedMediaType; test: (bytes: Uint8Array) => boolean }[] = [
   {
@@ -64,6 +68,69 @@ const IMAGE_SIGNATURES: { type: AcceptedMediaType; test: (bytes: Uint8Array) => 
       (b[4] === 0x37 || b[4] === 0x39) &&
       b[5] === 0x61,
   },
+];
+
+/**
+ * The audio containers llama.cpp can decode.
+ *
+ * Its decoder is miniaudio, which reads WAV, MP3 and FLAC and detects the
+ * container from its magic bytes — the `format` field on an `input_audio`
+ * content part is documented as ignored. So the bytes decide here too, for the
+ * same reason they decide for images.
+ */
+const AUDIO_SIGNATURES: { type: AcceptedMediaType; test: (bytes: Uint8Array) => boolean }[] = [
+  {
+    type: 'audio/wav',
+    // RIFF container whose form type is WAVE — the same shape as WebP, which
+    // is why both check bytes 8-11 rather than only the `RIFF` at the front.
+    test: (b) => ascii(b, 0, 'RIFF') && ascii(b, 8, 'WAVE'),
+  },
+  {
+    type: 'audio/flac',
+    test: (b) => ascii(b, 0, 'fLaC'),
+  },
+  {
+    type: 'audio/mpeg',
+    /*
+     * Either an ID3 tag or a bare frame header. MP3 has no container, so a
+     * file with tags stripped begins directly with a frame: 11 set bits of
+     * sync, then a version and layer that are not the reserved values. The
+     * reserved checks matter — without them every 0xFF 0xE_ byte pair in an
+     * arbitrary file would look like MP3.
+     */
+    test: (b) => {
+      if (ascii(b, 0, 'ID3')) return true;
+      if (b.length < 2) return false;
+      const [first, second] = [b[0]!, b[1]!];
+      if (first !== 0xff || (second & 0xe0) !== 0xe0) return false;
+      const version = (second >> 3) & 0b11;
+      const layer = (second >> 1) & 0b11;
+      return version !== 0b01 && layer !== 0b00;
+    },
+  },
+];
+
+/**
+ * Containers this application recognises and deliberately will not store.
+ *
+ * Refused *by name* rather than falling through to "unsupported", because the
+ * reason matters to the person who tried: a video is not a file we failed to
+ * recognise, it is one no model here can read. Storing it would mean keeping
+ * bytes that could never be sent anywhere — a download service, not an
+ * attachment.
+ */
+const REFUSED_CONTAINERS: { label: string; test: (bytes: Uint8Array) => boolean }[] = [
+  // ISO base media: MP4, M4A, MOV, 3GP — `ftyp` at offset 4.
+  { label: 'Video', test: (b) => ascii(b, 4, 'ftyp') },
+  // Matroska and WebM.
+  {
+    label: 'Video',
+    test: (b) => b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3,
+  },
+  { label: 'Video', test: (b) => ascii(b, 0, 'RIFF') && ascii(b, 8, 'AVI ') },
+  // Archives and documents, which have their own import path or none at all.
+  { label: 'PDF', test: (b) => ascii(b, 0, '%PDF-') },
+  { label: 'Archive', test: (b) => ascii(b, 0, 'PK') && (b[2] === 0x03 || b[2] === 0x05) },
 ];
 
 /**
@@ -141,6 +208,25 @@ export type SniffResult =
 export function sniff(bytes: Uint8Array, filename: string): SniffResult {
   for (const signature of IMAGE_SIGNATURES) {
     if (signature.test(bytes)) return { ok: true, mediaType: signature.type };
+  }
+
+  /*
+   * Audio before the refusals, because one container appears in both lists:
+   * an `.m4a` is ISO base media like an MP4 and would be caught as video. It
+   * is refused on purpose — the decoder upstream reads WAV, MP3 and FLAC, and
+   * accepting a container it cannot open would store audio that never plays.
+   */
+  for (const signature of AUDIO_SIGNATURES) {
+    if (signature.test(bytes)) return { ok: true, mediaType: signature.type };
+  }
+
+  for (const container of REFUSED_CONTAINERS) {
+    if (container.test(bytes)) {
+      return {
+        ok: false,
+        reason: `${container.label} files cannot be attached. Images, audio and text files can.`,
+      };
+    }
   }
 
   if (!isValidUtf8(bytes)) {

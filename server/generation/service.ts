@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { deriveTitle, DEFAULT_TITLE, type AssistantMessage } from '@shared/conversation.ts';
 import type { GenerationState, SamplerSettings, TerminalState } from '@shared/generation.ts';
 import { AppError } from '../errors/AppError.ts';
-import { MAX_ATTACHMENTS_PER_MESSAGE } from '@shared/attachment.ts';
+import { MAX_ATTACHMENTS_PER_MESSAGE, type AttachmentKind } from '@shared/attachment.ts';
 import { resolveAttachments } from '../attachments/resolve.ts';
 import type { AttachmentStore } from '../attachments/store.ts';
 import type { ModelDto } from '@shared/generation.ts';
@@ -194,13 +194,13 @@ export class GenerationService {
       // Assemble against the conversation *including* the new message, and do
       // it before writing anything, so an over-budget request fails without
       // leaving a persisted message that was never answered.
-      const vision = modelDto.inputModalities.includes('image');
+      const modalities = modelDto.inputModalities;
       const resolved =
         this.#attachments === undefined
           ? new Map()
           : await resolveAttachments(this.#attachments, userId, next, {
               maxInlineChars: this.#maxInlineChars,
-              includeImages: vision,
+              modalities,
             });
 
       const prompt = assemblePrompt(next, {
@@ -209,7 +209,7 @@ export class GenerationService {
         maxOutputTokens: this.#maxOutputTokens,
         ...(systemPrompt === undefined ? {} : { systemPrompt }),
         attachments: resolved,
-        vision,
+        modalities,
       });
 
       const written = await this.#store.writeUnderLock(userId, conversationId, next);
@@ -285,7 +285,7 @@ export class GenerationService {
     userId: string,
     attachmentIds: readonly string[],
     model: ModelDto
-  ): Promise<{ id: string; kind: 'image' | 'text' }[]> {
+  ): Promise<{ id: string; kind: AttachmentKind }[]> {
     if (attachmentIds.length === 0) return [];
 
     if (this.#attachments === undefined) {
@@ -300,7 +300,7 @@ export class GenerationService {
       throw AppError.validation('The same attachment was listed twice.');
     }
 
-    const prepared: { id: string; kind: 'image' | 'text' }[] = [];
+    const prepared: { id: string; kind: AttachmentKind }[] = [];
     for (const id of attachmentIds) {
       // Cross-user ids are `NOT_FOUND` from the store, which is what the
       // caller sees: ownership is never revealed (contracts §5).
@@ -311,11 +311,22 @@ export class GenerationService {
       prepared.push({ id: meta.id, kind: meta.kind });
     }
 
-    const wantsVision = prepared.some((attachment) => attachment.kind === 'image');
-    if (wantsVision && !model.inputModalities.includes('image')) {
+    /*
+     * Every attachment must be something this model can take in. Checked per
+     * kind rather than as one "multimodal" flag: a model that reads images and
+     * not audio is the common case, not an edge one — on the reference server
+     * every Gemma and Qwen model accepts images and only some Gemma variants
+     * accept audio.
+     */
+    for (const kind of ['image', 'audio'] as const) {
+      if (!prepared.some((attachment) => attachment.kind === kind)) continue;
+      if (model.inputModalities.includes(kind)) continue;
+
       throw new AppError(
         'MODEL_CAPABILITY_UNSUPPORTED',
-        'This model cannot read images. Choose a model that can, or remove the image.'
+        kind === 'image'
+          ? 'This model cannot read images. Choose a model that can, or remove the image.'
+          : 'This model cannot listen to audio. Choose a model that can, or remove the audio.'
       );
     }
 

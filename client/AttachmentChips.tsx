@@ -1,4 +1,4 @@
-import { FileText, Image as ImageIcon, X } from 'lucide-react';
+import { FileText, Image as ImageIcon, Music, X } from 'lucide-react';
 import { formatSize } from '@shared/attachment.ts';
 import { attachmentContentUrl } from './api.ts';
 import type { PendingAttachment } from './useAttachments.ts';
@@ -38,8 +38,12 @@ export function AttachmentChips({
           }
         >
           <span className="chip__icon" aria-hidden="true">
-            {item.status === 'ready' && item.attachment.kind === 'image' ? (
+            {item.status !== 'ready' ? (
+              <FileText size={13} />
+            ) : item.attachment.kind === 'image' ? (
               <ImageIcon size={13} />
+            ) : item.attachment.kind === 'audio' ? (
+              <Music size={13} />
             ) : (
               <FileText size={13} />
             )}

@@ -147,8 +147,17 @@ and the breakpoint at ±1px.
 
 ## Attachments
 
-Images (PNG, JPEG, WebP, GIF) and text files (plain text, Markdown, CSV, JSON) can be attached
-to a message by clicking the paperclip, dragging onto the composer, or pasting an image.
+Images (PNG, JPEG, WebP, GIF), audio (WAV, MP3, FLAC) and text files (plain text, Markdown,
+CSV, JSON) can be attached to a message by clicking the paperclip, dragging onto the composer,
+or pasting an image.
+
+**Video, PDFs and archives are refused.** No model here can read them, so storing them would
+just be keeping files nothing could use.
+
+Images and audio are only sent to a model that reports the matching input modality, and the
+two are separate: on a typical llama.cpp server every Gemma and Qwen model accepts images,
+while only some Gemma variants accept audio. The composer says so before you send, and the
+server refuses otherwise.
 
 The type is decided by reading the file's **bytes**, not its name or the `Content-Type` the
 browser sends — so a script named `photo.png` is stored and served as text, never as an image.
@@ -163,9 +172,7 @@ browser.
 | Text inlined into a prompt | `ATTACHMENT_MAX_INLINE_CHARS`         | 100 000 characters |
 | Per message                | fixed by the conversation format      | 10                 |
 
-Images are only sent to models that report image input; the composer says so before you send,
-and the server refuses otherwise. Which models can see is discovered from the provider, not
-configured.
+Which models can see or listen is discovered from the provider, not configured.
 
 **Attachments are part of `data/` and therefore part of your backups.** They live under
 `data/<user-uuid>/attachments/`, and a backup that excludes them will restore conversations

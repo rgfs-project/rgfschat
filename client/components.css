@@ -2266,3 +2266,23 @@ button.linkish:hover {
     min-height: 2.75rem;
   }
 }
+
+/* An audio attachment plays where it sits; a clip you must download first is
+   a clip nobody listens to. */
+.attachment--audio {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+}
+
+.attachment--audio audio {
+  max-width: 20rem;
+  height: 2.25rem;
+}
+
+.attachment__name {
+  max-width: 20rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

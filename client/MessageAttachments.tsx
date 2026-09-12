@@ -60,6 +60,18 @@ function AttachmentItem({ id }: { id: string }): React.JSX.Element {
   const { filename, kind, size } = attachment.data;
   const href = attachmentContentUrl(id);
 
+  if (kind === 'audio') {
+    return (
+      <li className="attachment attachment--audio">
+        {/* The browser's own player. The bytes are served with the sniffed
+            type, `nosniff`, and a sandbox CSP, so playing them in place is
+            safe — and a clip you must download first is a clip nobody hears. */}
+        <audio controls preload="metadata" src={href} aria-label={filename} />
+        <span className="attachment__name muted">{filename}</span>
+      </li>
+    );
+  }
+
   if (kind === 'image') {
     return (
       <li className="attachment attachment--image">

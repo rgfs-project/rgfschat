@@ -142,7 +142,7 @@ describe('resolving for a prompt', () => {
 
     const resolved = await resolveAttachments(attachments, USER, conversation, {
       maxInlineChars: 100,
-      includeImages: true,
+      modalities: ['text', 'image', 'audio'],
     });
 
     expect(resolved.get(meta.id)).toMatchObject({ kind: 'text', truncated: true });
@@ -158,7 +158,7 @@ describe('resolving for a prompt', () => {
 
     const resolved = await resolveAttachments(attachments, USER, conversation, {
       maxInlineChars: 100,
-      includeImages: true,
+      modalities: ['text', 'image', 'audio'],
     });
 
     expect(resolved.get(meta.id)?.content).toMatch(/^data:image\/png;base64,/);
@@ -171,7 +171,7 @@ describe('resolving for a prompt', () => {
 
     const resolved = await resolveAttachments(attachments, USER, conversation, {
       maxInlineChars: 100,
-      includeImages: false,
+      modalities: ['text'],
     });
 
     // Not merely excluded from the prompt — never read from disk at all.
@@ -186,7 +186,7 @@ describe('resolving for a prompt', () => {
     const conversation = await store.load(USER, id);
     const resolved = await resolveAttachments(attachments, USER, conversation, {
       maxInlineChars: 100,
-      includeImages: true,
+      modalities: ['text', 'image', 'audio'],
     });
 
     // A conversation that can never be continued again because a file was

@@ -841,15 +841,28 @@ Decided from the bytes. The uploader's `Content-Type` and the filename's extensi
 both are attacker-controlled in the case that matters, which is an HTML document named
 `photo.png` and sent as `image/png`.
 
-| Accepted                        | Decided by                                                                |
-| ------------------------------- | ------------------------------------------------------------------------- |
-| PNG, JPEG, WebP, GIF            | magic-byte signature                                                      |
-| plain text, Markdown, CSV, JSON | valid UTF-8, no NUL byte; the extension chooses _between_ text types only |
+| Accepted                        | Decided by                                                                | Needs                        |
+| ------------------------------- | ------------------------------------------------------------------------- | ---------------------------- |
+| PNG, JPEG, WebP, GIF            | magic-byte signature                                                      | the model's `image` modality |
+| WAV, MP3, FLAC                  | magic-byte signature                                                      | the model's `audio` modality |
+| plain text, Markdown, CSV, JSON | valid UTF-8, no NUL byte; the extension chooses _between_ text types only | nothing                      |
 
-SVG and HTML are refused by name: SVG is an image to everyone who discusses it and a
-scriptable document to a browser. **Valid UTF-8 is not the same as text** — a WAV file decodes
-cleanly because its length bytes are zero, and a text attachment is inlined into a prompt, so
-accepting one means pasting binary into a model's input. A NUL byte is the tell.
+The two media lists are what the models actually take, not what the format zoo offers. Every
+Gemma and Qwen model on the reference server accepts images; only some Gemma variants accept
+audio, and Qwen accepts none — so capability is checked **per modality** rather than as one
+multimodal flag. The audio list is miniaudio's, which is what llama.cpp decodes with.
+
+**Video, PDFs and archives are refused by name**, not left to fall through as "unsupported".
+Nothing here can read them, so storing one would mean keeping bytes that could never be sent
+anywhere — a file service rather than an attachment — and a reader who tried deserves to be
+told which it was. An `.m4a` is refused alongside the video containers it shares a header
+with: it is audio, but in a container the decoder cannot open.
+
+SVG and HTML are refused for a different reason: SVG is an image to everyone who discusses it
+and a scriptable document to a browser. **Valid UTF-8 is not the same as text** — arbitrary
+binary can decode cleanly, since NUL is a legal code point, and a text attachment is inlined
+into a prompt, so accepting one means pasting binary into a model's input. A NUL byte is the
+tell.
 
 ### Serving (INV-27)
 

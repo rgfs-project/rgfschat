@@ -11,11 +11,13 @@
  * The two things an attachment can be, which is a statement about what the
  * prompt assembler can do with it rather than about the file.
  *
- * `text` is inlined into the prompt as a fenced block. `image` is sent as a
- * content part, and only to a model that can see. There is no third kind,
- * because there is no third thing to do with the bytes.
+ * `text` is inlined into the prompt as a fenced block. `image` and `audio` are
+ * sent as content parts, and only to a model that reports the matching input
+ * modality. There is no fourth kind because there is no fourth thing to do
+ * with the bytes — video in particular is refused rather than stored, since
+ * nothing downstream can read it.
  */
-export type AttachmentKind = 'image' | 'text';
+export type AttachmentKind = 'image' | 'audio' | 'text';
 
 /**
  * Every media type that may be stored, and the kind each one becomes.
@@ -26,10 +28,21 @@ export type AttachmentKind = 'image' | 'text';
  * "image" is exactly the word that makes people treat it as inert.
  */
 export const ACCEPTED_MEDIA_TYPES = {
+  // The four raster formats Gemma and Qwen both accept, and the same four the
+  // Claude API takes. Verified against a live server for PNG.
   'image/png': 'image',
   'image/jpeg': 'image',
   'image/webp': 'image',
   'image/gif': 'image',
+
+  // What llama.cpp's audio decoder (miniaudio) reads. The container is
+  // detected from magic bytes upstream too — `input_audio.format` is
+  // documented as ignored — so this list is about what we are willing to
+  // store, and the bytes decide which one it is.
+  'audio/wav': 'audio',
+  'audio/mpeg': 'audio',
+  'audio/flac': 'audio',
+
   'text/plain': 'text',
   'text/markdown': 'text',
   'text/csv': 'text',
@@ -46,13 +59,36 @@ export function kindOf(mediaType: AcceptedMediaType): AttachmentKind {
   return ACCEPTED_MEDIA_TYPES[mediaType];
 }
 
-/** The four types a browser may be told to render in place (see INV-27). */
+/**
+ * What a browser may be told to render in place (see INV-27).
+ *
+ * Images and audio, because both are decoded by a media pipeline rather than
+ * interpreted as a document: neither can carry script, and a reader expects to
+ * see a picture and to press play without downloading a file first. Everything
+ * else is served as a download.
+ */
 export const INLINE_RENDERABLE: readonly string[] = [
   'image/png',
   'image/jpeg',
   'image/webp',
   'image/gif',
+  'audio/wav',
+  'audio/mpeg',
+  'audio/flac',
 ];
+
+/**
+ * The input modality a kind needs from the model, or `null` when it needs none.
+ *
+ * Text is inlined into the prompt as characters, so every model can read it.
+ * The other two are only sent to a model that reports the matching modality —
+ * sending either to one that does not is a 500 from the provider.
+ */
+export const REQUIRED_MODALITY: Record<AttachmentKind, 'image' | 'audio' | null> = {
+  image: 'image',
+  audio: 'audio',
+  text: null,
+};
 
 /**
  * At most ten per message, which is the format's limit rather than a policy.

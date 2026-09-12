@@ -255,6 +255,51 @@ is persisted). And because it arrives as a 500, the existing classifier would ca
 `PROVIDER_ERROR`; it is special-cased to `MODEL_CAPABILITY_UNSUPPORTED` so a mis-set capability
 flag still produces an error that names the actual problem.
 
+### Audio: real, validated, and narrower than images
+
+Probed 2026-09-12 with a generated 440 Hz WAV.
+
+| Model                          | `input_audio`  |
+| ------------------------------ | -------------- |
+| `gemma-4-12b-qat`, `Gemi Mini` | accepted (200) |
+| `qwen-3.6`                     | **500**        |
+| `gpt-oss`                      | **500**        |
+
+```json
+{
+  "code": 500,
+  "type": "server_error",
+  "message": "audio input is not supported - hint: if this is unexpected, you may need to provide the mmproj"
+}
+```
+
+So audio is validated exactly as images are, and it is **not** a property of being
+multimodal: across the two families on this server, every Gemma and Qwen model accepts images
+and only some Gemma variants accept audio. The capability check is therefore per _modality_,
+not a single multimodal flag.
+
+The content part is the OpenAI one, with **bare base64 rather than a `data:` URL**:
+
+```json
+{ "type": "input_audio", "input_audio": { "data": "UklGRi…", "format": "wav" } }
+```
+
+`format` is sent but llama.cpp documents that it **ignores** the field and detects the
+container from magic bytes — which is what this application does when deciding what to store,
+so the two agree by construction. Decoding is miniaudio: **WAV, MP3 and FLAC**. Anything else,
+including the `.m4a` an ISO container would carry, cannot be opened and is refused at upload.
+
+> ⚠ A 200 does not mean the model heard anything. Asked "is there a tone or is it silent", a
+> vision-and-audio Gemma answered from the _text_ — its reasoning read "Input: Audio (implied,
+> as the user asks about 'this audio')". The hard 500 from a model without the projector is
+> the reliable signal that the part is being parsed; the reply is not.
+
+### Video is not supported
+
+No model on this server reports a `video` input modality, and nothing accepts one. Video is
+refused at upload rather than stored: bytes that can never be sent anywhere are a file service,
+not an attachment.
+
 ### Reasoning dominates the reply
 
 A vision model answering a one-word question returned an empty `content` at `max_tokens: 64`,
@@ -271,6 +316,8 @@ treat an empty `content` as a failed generation.
 5. Keep `reasoning_content` separate everywhere; expect it to dominate token count.
 6. Expect single-flight generation and ~12 s cold starts; set timeouts accordingly.
 7. Normalize every upstream error; never leak `message` bodies or `n_ctx` internals upstream.
-8. Read `architecture.input_modalities` for vision; send images only as `data:` URLs in an
-   `image_url` content part; check capability before sending, and map the 500 "image input is
-   not supported" to `MODEL_CAPABILITY_UNSUPPORTED`.
+8. Read `architecture.input_modalities` per modality — image and audio are separate, and a
+   model with one does not have the other. Send images as `data:` URLs in an `image_url` part
+   and audio as bare base64 in an `input_audio` part; check the capability before sending, and
+   map the 500 "… input is not supported" to `MODEL_CAPABILITY_UNSUPPORTED`.
+9. Audio decoding is miniaudio: WAV, MP3, FLAC only. Video is not supported at all.
