@@ -36,6 +36,7 @@ import {
 } from './api.ts';
 import { Dialog } from './Dialog.tsx';
 import { SamplerPanel } from './SamplerPanel.tsx';
+import { ModelSelect } from './ModelSelect.tsx';
 import { Select } from './Select.tsx';
 import { keys, useModels } from './queries.ts';
 
@@ -714,7 +715,6 @@ function SettingsSection(): React.JSX.Element {
 
   const mode = settings.data?.resolved.registrationMode ?? 'closed';
   const current = settings.data?.resolved.defaultModel ?? null;
-  const currentKey = current === null ? '' : `${current.providerId}\u0000${current.modelId}`;
 
   return (
     <>
@@ -738,28 +738,12 @@ function SettingsSection(): React.JSX.Element {
         label="Default model"
         description="What a new conversation starts on, before anyone picks something else."
       >
-        <Select
+        <ModelSelect
           label="Default model"
-          value={currentKey}
-          options={[
-            { value: '', label: 'No default' },
-            ...(models.data?.providers ?? []).flatMap((group) =>
-              group.models.map((model) => ({
-                value: `${group.providerId}\u0000${model.id}`,
-                label: model.id,
-              }))
-            ),
-          ]}
-          onChange={(raw) => {
-            if (raw === '') {
-              save.mutate({ defaultModel: null });
-              return;
-            }
-            const [providerId, modelId] = raw.split('\u0000');
-            if (providerId !== undefined && modelId !== undefined) {
-              save.mutate({ defaultModel: { providerId, modelId } });
-            }
-          }}
+          noneLabel="No default"
+          groups={models.data?.providers ?? []}
+          value={current}
+          onChange={(choice) => save.mutate({ defaultModel: choice })}
         />
       </Row>
     </>
