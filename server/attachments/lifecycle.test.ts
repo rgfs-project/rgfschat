@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -192,5 +192,51 @@ describe('resolving for a prompt', () => {
     // A conversation that can never be continued again because a file was
     // removed would be worse than one that continues without it (contracts §7).
     expect(resolved.size).toBe(0);
+  });
+});
+
+describe('a conversation owns the attachments it names', () => {
+  it('deleting it releases them, and only its own', async () => {
+    const mine = await attachments.create(USER, 'mine.png', once(PNG));
+    const other = await attachments.create(USER, 'other.png', once(PNG));
+
+    const { id, messageId } = await conversationWith([mine.meta.id]);
+    await attachments.link(USER, [mine.meta.id], id, messageId);
+
+    // What the route does, in the order it does it: read the references,
+    // delete the Markdown, then release the files.
+    const owned = referencedIds(await store.load(USER, id));
+    await store.delete(USER, id);
+    await attachments.deleteMany(USER, owned);
+
+    await expect(attachments.read(USER, mine.meta.id)).rejects.toThrow();
+    // An attachment belonging to no conversation is untouched by this.
+    expect((await attachments.read(USER, other.meta.id)).id).toBe(other.meta.id);
+  });
+
+  it('a malformed conversation is still deletable, leaving orphans behind', async () => {
+    const { meta } = await attachments.create(USER, 'orphan.png', once(PNG));
+    const { id, messageId } = await conversationWith([meta.id]);
+    await attachments.link(USER, [meta.id], id, messageId);
+
+    // Corrupted by hand, exactly as INV-10 contemplates.
+    await writeFile(paths.conversationFile(USER, id), 'not a conversation at all', 'utf8');
+
+    /*
+     * The references cannot be read, so nothing is released — and that is the
+     * intended outcome. An orphan is collectable; refusing to delete a
+     * conversation because its file is unreadable is not.
+     */
+    const owned = await (async () => {
+      try {
+        return referencedIds(await store.load(USER, id));
+      } catch {
+        return [];
+      }
+    })();
+    expect(owned).toEqual([]);
+
+    await expect(store.delete(USER, id)).resolves.toBeUndefined();
+    expect((await attachments.read(USER, meta.id)).id).toBe(meta.id);
   });
 });

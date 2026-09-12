@@ -11,7 +11,14 @@ import {
 } from '@shared/attachment.ts';
 import { isCanonicalUuid } from '@shared/conversation.ts';
 import { AppError } from '../errors/AppError.ts';
-import { DIR_MODE, FILE_MODE, atomicWriteFile, ensureDir } from '../storage/atomic.ts';
+import {
+  DIR_MODE,
+  FILE_MODE,
+  atomicWriteFile,
+  commitTempFile,
+  ensureDir,
+  tempPathFor,
+} from '../storage/atomic.ts';
 import { KeyedLock } from '../storage/locks.ts';
 import type { StoragePaths } from '../storage/paths.ts';
 import { sniff } from './sniff.ts';
@@ -67,6 +74,16 @@ export interface AttachmentLimits {
   pendingTtlMs: number;
 }
 
+/**
+ * Where the limits come from, asked fresh on every upload.
+ *
+ * A function rather than a value because an administrator can change them
+ * while the server is running, and a copy taken at construction would keep
+ * enforcing the old numbers until a restart — which is exactly the kind of
+ * setting that looks saved and is not.
+ */
+export type LimitSource = AttachmentLimits | (() => AttachmentLimits);
+
 export function toAttachmentDto(meta: AttachmentMeta): AttachmentDto {
   return {
     id: meta.id,
@@ -83,12 +100,16 @@ export type ByteSource = AsyncIterable<Uint8Array>;
 
 export class AttachmentStore {
   readonly #paths: StoragePaths;
-  readonly #limits: AttachmentLimits;
+  readonly #limitSource: LimitSource;
   readonly #locks = new KeyedLock();
 
-  constructor(paths: StoragePaths, limits: AttachmentLimits) {
+  constructor(paths: StoragePaths, limits: LimitSource) {
     this.#paths = paths;
-    this.#limits = limits;
+    this.#limitSource = limits;
+  }
+
+  get #limits(): AttachmentLimits {
+    return typeof this.#limitSource === 'function' ? this.#limitSource() : this.#limitSource;
   }
 
   /** `<user>/<attachment>`, matching the conversation lock's shape. */
@@ -115,6 +136,14 @@ export class AttachmentStore {
     const id = randomUUID();
     const directory = this.#paths.attachmentDir(userId, id);
     const blob = this.#paths.attachmentBlob(userId, id);
+    /*
+     * Written to a temp name in the same directory and renamed at the end
+     * (contracts §2). The rename is what makes `blob` appear whole or not at
+     * all, so nothing can ever read a partial upload under its final name —
+     * and a temp file left by a crash is recognisable as one, rather than
+     * being indistinguishable from a finished blob that lost its metadata.
+     */
+    const temp = tempPathFor(blob);
 
     const shown = displayFilename(filename);
     const used = await this.totalBytes(userId);
@@ -126,7 +155,7 @@ export class AttachmentStore {
     let head = Buffer.alloc(0);
     let mediaType: AcceptedMediaType | null = null;
 
-    const handle = await open(blob, 'wx', FILE_MODE);
+    const handle = await open(temp, 'wx', FILE_MODE);
     try {
       for await (const chunk of source) {
         const bytes = Buffer.from(chunk);
@@ -160,12 +189,18 @@ export class AttachmentStore {
       await handle.sync();
     } catch (error) {
       await handle.close();
+      await rm(temp, { force: true });
       // Nothing half-written survives a refusal, so no oversized temp file is
       // left behind for a later sweep to find.
       await rm(directory, { recursive: true, force: true });
       throw error;
     }
     await handle.close();
+
+    // The bytes become `blob` in one step, before any metadata claims they are
+    // there. Order matters: meta.json is still the completion marker, and this
+    // guarantees that whenever it exists, a whole blob exists beside it.
+    await commitTempFile(temp, blob);
 
     const meta: AttachmentMeta = {
       id,

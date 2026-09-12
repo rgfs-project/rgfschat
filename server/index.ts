@@ -56,7 +56,6 @@ async function main(): Promise<void> {
   const index = new ChatIndex({ store, logger });
   const preferences = new PreferencesStore(paths0, logger);
   const memories = new MemoryStore(paths0, logger);
-  const attachments = new AttachmentStore(paths0, config.attachments);
 
   /*
    * Loaded before the generation service is built, because the service asks it
@@ -67,8 +66,22 @@ async function main(): Promise<void> {
     paths: paths0,
     logger,
     fallbackRegistrationMode: config.auth.registrationMode,
+    fallbackAttachments: config.attachments,
   });
   await settings.load();
+
+  /*
+   * Limits read through a function, so an administrator changing them takes
+   * effect on the next upload rather than on the next restart — which is
+   * exactly the kind of setting that otherwise looks saved and is not.
+   *
+   * The TTL stays environment-only: it is an operational choice about disk,
+   * not a policy an instance should be able to talk itself out of.
+   */
+  const attachments = new AttachmentStore(paths0, () => ({
+    ...settings.attachmentLimits,
+    pendingTtlMs: config.attachments.pendingTtlMs,
+  }));
 
   const service = new GenerationService({
     store,

@@ -825,8 +825,10 @@ One directory per attachment, under `data/<user>/attachments/<attachment-uuid>/`
 └── meta.json   # canonical metadata, written LAST
 ```
 
-The write order is the design. `meta.json` is written last and atomically, so a directory
-without it is an upload that did not finish — nothing has to remember whether a blob is real,
+The write order is the design. Bytes stream to a temp file in the same directory and are
+renamed over `blob` at the end (contracts §2), so a partial upload is never visible under its
+final name; `meta.json` is then written last and atomically, so a directory without it is an
+upload that did not finish — nothing has to remember whether a blob is real,
 because every read goes through the metadata. Those directories are swept at startup once they
 are older than the pending TTL; sweeping a young one would delete a request still in flight.
 
@@ -872,6 +874,25 @@ nosniff`, `Content-Security-Policy: sandbox; default-src 'none'`, `Cache-Control
 filename goes out in the RFC 5987 form alongside a stripped ASCII one, so a quote in a name
 cannot close the header early and add a parameter of its own.
 
+### Limits
+
+Each is an administrator setting with an environment default, resolved **per key** so that
+setting one does not reset the others. They are read through a function on every upload rather
+than copied at construction — a limit that looks saved and only takes effect after a restart is
+worse than one that cannot be changed at all.
+
+| Limit                   | Setting                            | Environment default                           |
+| ----------------------- | ---------------------------------- | --------------------------------------------- |
+| Per file                | `attachments.maxBytes`             | `ATTACHMENT_MAX_BYTES`, 10 MB                 |
+| Per account             | `attachments.maxTotalBytesPerUser` | `ATTACHMENT_MAX_TOTAL_BYTES_PER_USER`, 512 MB |
+| Inlined into a prompt   | `attachments.maxInlineChars`       | `ATTACHMENT_MAX_INLINE_CHARS`, 100 000        |
+| Unsent uploads kept for | —                                  | `ATTACHMENT_PENDING_TTL_MS`, 24 h             |
+| Per message             | —                                  | fixed at 10 by the conversation format        |
+
+The TTL stays environment-only: it is an operational choice about disk rather than a policy an
+instance should be able to talk itself out of. The per-message limit is the format's, frozen in
+`formatVersion: 1`, so a setting could only ever lower it.
+
 ### Lifecycle
 
 An attachment is **pending** until a message references it, and **linked** afterwards.
@@ -899,8 +920,8 @@ upload → pending ──(message written)──► linked
 
 ### Prompt assembly
 
-Text is inlined as a fenced block labelled with its filename, truncated at
-`ATTACHMENT_MAX_INLINE_CHARS` with a visible marker — in the prompt only; what is stored is
+Text is inlined as a fenced block labelled with its filename, truncated at the configured
+inline limit with a visible marker — in the prompt only; what is stored is
 never altered. Images become OpenAI `image_url` content parts carrying `data:` URLs, verified
 against the live server (docs/provider-notes.md §9). A remote URL is never sent: that would
 make the provider fetch a destination the client chose.

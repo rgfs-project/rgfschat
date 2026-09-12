@@ -198,3 +198,36 @@ test('a model that cannot see refuses the image, and says why', async ({ app, pa
    */
   await expect(page.locator('.msg')).toHaveCount(0);
 });
+
+test.describe('on a phone', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test('attaching works at the narrow breakpoint, and nothing overflows', async ({ app, page }) => {
+    await signIn(page, app.baseUrl);
+
+    await attach(page, [
+      { name: 'red.png', mimeType: 'image/png', buffer: RED_PNG },
+      { name: 'notes.md', mimeType: 'text/markdown', buffer: Buffer.from('# Hi\n', 'utf8') },
+    ]);
+    await expect(page.locator('.chip--ready')).toHaveCount(2);
+
+    // The chip strip wraps rather than pushing the composer sideways.
+    const overflows = await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth
+    );
+    expect(overflows).toBe(false);
+
+    // The attach control and each chip's remove button are still targets a
+    // finger can hit, which is the Phase 10 rule applied to Phase 11's UI.
+    const undersized = await page.evaluate(
+      () =>
+        [...document.querySelectorAll<HTMLElement>('.chip__remove, [aria-label="Attach files"]')]
+          .map((element) => element.getBoundingClientRect())
+          .filter((box) => box.width < 44 || box.height < 44).length
+    );
+    expect(undersized).toBe(0);
+
+    // And the composer is still reachable above where a keyboard would be.
+    await expect(composerField(page)).toBeInViewport();
+  });
+});

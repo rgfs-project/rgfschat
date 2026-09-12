@@ -164,6 +164,9 @@ browser sends — so a script named `photo.png` is stored and served as text, ne
 SVG is rejected: it is an image to everyone who talks about it and a scriptable document to a
 browser.
 
+The first three are also administrator settings, which override these defaults without a
+restart.
+
 | Limit                      | Variable                              | Default            |
 | -------------------------- | ------------------------------------- | ------------------ |
 | Per file                   | `ATTACHMENT_MAX_BYTES`                | 10 MB              |

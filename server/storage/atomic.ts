@@ -28,10 +28,39 @@ export const FILE_MODE = 0o600;
 /** `.<name>.<random>.tmp` — matched exactly by the startup sweeper. */
 const TEMP_SUFFIX = '.tmp';
 
-function tempPathFor(target: string): string {
+export function tempPathFor(target: string): string {
   const name = basename(target);
   const random = randomBytes(6).toString('hex');
   return join(dirname(target), `.${name}.${random}${TEMP_SUFFIX}`);
+}
+
+/**
+ * Renames a temp file over its target, durably.
+ *
+ * The tail of `atomicWriteFile`, exported because a streamed upload cannot use
+ * that function — it never has the bytes in hand — but must land the same way:
+ * rename over the target, then fsync the directory so the entry itself
+ * survives a power loss.
+ */
+export async function commitTempFile(temp: string, target: string): Promise<void> {
+  try {
+    await rename(temp, target);
+  } catch (err) {
+    await unlink(temp).catch(() => undefined);
+    throw err;
+  }
+
+  // Barrier for the directory entry itself. Unavailable on Windows.
+  try {
+    const dir = await open(dirname(target), constants.O_RDONLY);
+    try {
+      await dir.sync();
+    } finally {
+      await dir.close();
+    }
+  } catch {
+    // Platform does not support directory fsync; documented in contracts §2.
+  }
 }
 
 /** Only files this module could have written are ever swept. */
