@@ -38,7 +38,9 @@ function renderMessage(message: MessageModel, props: Partial<Parameters<typeof M
     onDelete: vi.fn(),
     onRegenerate: vi.fn(),
   };
-  const view = render(<Message message={message} isLast busy={false} {...handlers} {...props} />);
+  const view = render(
+    <Message message={message} isLast busy={false} canResend={false} {...handlers} {...props} />
+  );
   return { ...handlers, view };
 }
 
@@ -113,9 +115,36 @@ describe('Message', () => {
       const editor = screen.getByRole('textbox');
       await userEvt.clear(editor);
       await userEvt.type(editor, 'A better question.');
-      await userEvt.click(screen.getByRole('button', { name: 'Save edit' }));
+      await userEvt.click(screen.getByRole('button', { name: 'Save' }));
 
-      expect(onEdit).toHaveBeenCalledWith('u1', 'A better question.');
+      expect(onEdit).toHaveBeenCalledWith('u1', 'A better question.', false);
+    });
+
+    /**
+     * The point of the feature: a rewritten question is asked again rather
+     * than filed above an answer to the question it replaced.
+     */
+    it('sends the edit when it is the last question asked', async () => {
+      const userEvt = userEvent.setup();
+      const { onEdit } = renderMessage(userMessage(), { canResend: true });
+
+      await userEvt.click(screen.getByRole('button', { name: 'Edit message' }));
+      const editor = screen.getByRole('textbox');
+      await userEvt.clear(editor);
+      await userEvt.type(editor, 'A better question.');
+      await userEvt.click(screen.getByRole('button', { name: 'Send' }));
+
+      expect(onEdit).toHaveBeenCalledWith('u1', 'A better question.', true);
+    });
+
+    it('offers only to save an edit to an earlier question', async () => {
+      const userEvt = userEvent.setup();
+      renderMessage(userMessage(), { canResend: false });
+
+      await userEvt.click(screen.getByRole('button', { name: 'Edit message' }));
+
+      expect(screen.getByRole('button', { name: 'Save' })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
     });
 
     it('discards an edit on cancel', async () => {
@@ -124,7 +153,7 @@ describe('Message', () => {
 
       await userEvt.click(screen.getByRole('button', { name: 'Edit message' }));
       await userEvt.type(screen.getByRole('textbox'), ' extra');
-      await userEvt.click(screen.getByRole('button', { name: 'Cancel edit' }));
+      await userEvt.click(screen.getByRole('button', { name: 'Cancel' }));
 
       expect(onEdit).not.toHaveBeenCalled();
       expect(screen.getByText('The question.')).toBeTruthy();
@@ -136,7 +165,7 @@ describe('Message', () => {
 
       await userEvt.click(screen.getByRole('button', { name: 'Edit message' }));
       await userEvt.clear(screen.getByRole('textbox'));
-      await userEvt.click(screen.getByRole('button', { name: 'Save edit' }));
+      await userEvt.click(screen.getByRole('button', { name: 'Save' }));
 
       expect(onEdit).not.toHaveBeenCalled();
     });
@@ -151,6 +180,7 @@ function cleanupAndRender(message: MessageModel, isLast: boolean): void {
       message={message}
       isLast={isLast}
       busy={false}
+      canResend={false}
       onEdit={vi.fn()}
       onDelete={vi.fn()}
       onRegenerate={vi.fn()}

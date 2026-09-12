@@ -215,6 +215,16 @@ export function App({
 
   const messages = useMemo(() => conversation.data?.messages ?? [], [conversation.data]);
 
+  /**
+   * The last question asked, which is the only one that can be asked again:
+   * regeneration replaces the reply that follows it, and for an earlier turn
+   * every exchange after it would have to be discarded too.
+   */
+  const lastUserIndex = useMemo(
+    () => messages.findLastIndex((message) => message.type === 'user'),
+    [messages]
+  );
+
   useEffect(() => {
     document.documentElement.dataset['theme'] = theme;
     // Kept in step with the attribute so the browser repaints its own canvas,
@@ -411,14 +421,21 @@ export function App({
   }, [currentId, selection, busy, regenerate]);
 
   const onEditMessage = useCallback(
-    (messageId: string, body: string) => {
+    (messageId: string, body: string, resend: boolean) => {
       if (currentId === null) return;
       editMessage.mutate(
         { conversationId: currentId, messageId, body },
-        { onError: () => setError('Could not edit the message.') }
+        {
+          // Only once the new wording is stored: regenerating first would
+          // answer the question that was just replaced.
+          onSuccess: () => {
+            if (resend) void onRegenerate();
+          },
+          onError: () => setError('Could not edit the message.'),
+        }
       );
     },
-    [currentId, editMessage]
+    [currentId, editMessage, onRegenerate]
   );
 
   const onDeleteMessage = useCallback(
@@ -570,6 +587,7 @@ export function App({
                     message={message}
                     isLast={index === messages.length - 1}
                     busy={busy}
+                    canResend={index === lastUserIndex}
                     onEdit={onEditMessage}
                     onDelete={(id) => setDialog({ kind: 'delete-message', id })}
                     onRegenerate={() => void onRegenerate()}

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, ChevronRight, Copy, Pencil, RefreshCw, Trash2, X } from 'lucide-react';
+import { Check, ChevronRight, Copy, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import type { Message as MessageModel, MessageStatus } from '@shared/conversation.ts';
 import { Markdown } from './Markdown.tsx';
 
@@ -23,7 +23,15 @@ export interface MessageProps {
   message: MessageModel;
   isLast: boolean;
   busy: boolean;
-  onEdit: (messageId: string, body: string) => void;
+  /**
+   * Whether editing this message can re-ask it.
+   *
+   * Only the last question can: asking it again means replacing the answer
+   * below it, and for an earlier turn everything after would have to go with
+   * it. So an earlier message is saved and left alone.
+   */
+  canResend: boolean;
+  onEdit: (messageId: string, body: string, resend: boolean) => void;
   onDelete: (messageId: string) => void;
   onRegenerate: () => void;
 }
@@ -32,6 +40,7 @@ export function Message({
   message,
   isLast,
   busy,
+  canResend,
   onEdit,
   onDelete,
   onRegenerate,
@@ -58,7 +67,7 @@ export function Message({
   const save = (): void => {
     const next = draft.trim();
     if (next === '') return;
-    onEdit(message.id, next);
+    onEdit(message.id, next, canResend);
     setEditing(false);
   };
 
@@ -76,17 +85,18 @@ export function Message({
           rows={4}
           autoFocus
         />
+        {/* Named rather than iconned: these two decide what happens to the
+            message, and a tick and a cross beside a half-written edit do not
+            say which. Cancel leads, as it does in the dialogs. */}
         <div className="msg__edit-actions">
-          <button type="button" className="icon-button" onClick={save} aria-label="Save edit">
-            <Check size={16} />
+          <button type="button" className="linkish" onClick={() => setEditing(false)}>
+            Cancel
           </button>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={() => setEditing(false)}
-            aria-label="Cancel edit"
-          >
-            <X size={16} />
+          {/* Changing a question and leaving the old answer under it is rarely
+              what was meant, so on the last turn the edit is sent rather than
+              filed. */}
+          <button type="button" className="button-primary" onClick={save}>
+            {canResend ? 'Send' : 'Save'}
           </button>
         </div>
       </article>
