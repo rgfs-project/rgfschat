@@ -196,7 +196,73 @@ rejects with `AbortError`. Verified after the first chunk at 139 ms.
 completion and discards. Contracts treat cancellation as client-side regardless — the
 generation reaches a terminal `cancelled` state locally (INV-05) whatever upstream does.
 
-## 9. Summary of constraints on the implementation
+## 9. Multimodal input (Phase 11)
+
+Probed 2026-09-12 against the same server.
+
+### Capability is discoverable — do not ask the operator
+
+Every `/v1/models` entry carries `architecture.input_modalities`, so vision is a **fact the
+server reports** rather than something the administrator has to configure:
+
+```json
+{
+  "id": "gemma-4-12b-qat",
+  "architecture": { "input_modalities": ["text", "image", "audio"], "output_modalities": ["text"] }
+}
+```
+
+Across the 20 models on this server: 16 report `["text","image"]`, one also reports `audio`,
+and three (`gpt-oss`, `north-mini`, `GPT`) report `["text"]` alone. So `capabilities.vision`
+is set from discovery (`capabilitySource: "discovery"`) and only falls back to configuration
+when the field is absent — which it never was here, but single-model mode is **UNVERIFIED**.
+
+Audio is reported but out of scope; the attachment sniffer accepts no audio type.
+
+### The accepted image format
+
+The OpenAI content-part shape, with a `data:` URL. Verified understood, not merely accepted:
+the same model answered "Red" and "Blue" for two solid PNGs, so the bytes reach the model
+rather than being parsed and discarded.
+
+```json
+{
+  "role": "user",
+  "content": [
+    { "type": "text", "text": "What colour is this image? Answer with one word." },
+    { "type": "image_url", "image_url": { "url": "data:image/png;base64,iVBORw0KGgo…" } }
+  ]
+}
+```
+
+Only `data:` URLs are ever sent. A remote URL would make the provider fetch on our behalf,
+which is an SSRF the client would control — the same reason §7 of the contract keeps bytes
+server-side. Remote-URL support is therefore **UNVERIFIED** and must stay that way.
+
+### ⚠ A model without a projector fails with **500**, not 400
+
+```json
+{
+  "code": 500,
+  "type": "server_error",
+  "message": "image input is not supported - hint: if this is unexpected, you may need to provide the mmproj"
+}
+```
+
+Two consequences. The capability check must happen **before** the request is sent, so this is
+never reached in normal use (the phase requires `MODEL_CAPABILITY_UNSUPPORTED` before anything
+is persisted). And because it arrives as a 500, the existing classifier would call it
+`PROVIDER_ERROR`; it is special-cased to `MODEL_CAPABILITY_UNSUPPORTED` so a mis-set capability
+flag still produces an error that names the actual problem.
+
+### Reasoning dominates the reply
+
+A vision model answering a one-word question returned an empty `content` at `max_tokens: 64`,
+with the whole answer still forming in `reasoning_content`; at 300 it answered. This is §5
+again rather than anything new, but it bites harder with images — budget accordingly and never
+treat an empty `content` as a failed generation.
+
+## 10. Summary of constraints on the implementation
 
 1. URL-encode model ids; treat them as opaque strings that may contain spaces.
 2. Never forward `/v1/models` entries raw — `status.args` leaks the API-key path (INV-04).
@@ -205,3 +271,6 @@ generation reaches a terminal `cancelled` state locally (INV-05) whatever upstre
 5. Keep `reasoning_content` separate everywhere; expect it to dominate token count.
 6. Expect single-flight generation and ~12 s cold starts; set timeouts accordingly.
 7. Normalize every upstream error; never leak `message` bodies or `n_ctx` internals upstream.
+8. Read `architecture.input_modalities` for vision; send images only as `data:` URLs in an
+   `image_url` content part; check capability before sending, and map the 500 "image input is
+   not supported" to `MODEL_CAPABILITY_UNSUPPORTED`.
