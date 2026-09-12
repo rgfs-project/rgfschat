@@ -21,6 +21,12 @@ if (typeof Element.prototype.scrollTo !== 'function') {
   Element.prototype.scrollTo = () => undefined;
 }
 
+/* `scrollIntoView` is absent for the same reason, and search uses it to bring
+   both a keyboard-selected result and an opened message into view. */
+if (typeof Element.prototype.scrollIntoView !== 'function') {
+  Element.prototype.scrollIntoView = () => undefined;
+}
+
 afterEach(() => {
   cleanup();
 });

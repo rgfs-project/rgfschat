@@ -10,6 +10,7 @@ import { Dialog } from './Dialog.tsx';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
 import { Message, StreamingMessage } from './Message.tsx';
 import type { ModelSelection } from './ModelPicker.tsx';
+import { SearchDialog } from './SearchDialog.tsx';
 import { Sidebar } from './Sidebar.tsx';
 import {
   keys,
@@ -37,6 +38,9 @@ const LAST_MODEL_KEY = 'workspace.lastModel';
 
 /** Must outlast `--motion-theme` so the class is not pulled mid-fade. */
 const THEME_FADE_MS = 320;
+
+/** Long enough to find the marked message, short enough not to sit there. */
+const MESSAGE_HIGHLIGHT_MS = 2000;
 
 /**
  * A dialog waiting on the user.
@@ -145,6 +149,9 @@ export function App({
   const [dialog, setDialog] = useState<PendingDialog | null>(null);
   const [changingPassword, setChangingPassword] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  /** A message arrived at from search, to scroll to and mark once it renders. */
+  const [focusMessageId, setFocusMessageId] = useState<string | null>(null);
 
   const [collapsed, setCollapsed] = useState(() => readStored(SIDEBAR_KEY) === 'true');
 
@@ -438,6 +445,59 @@ export function App({
     [currentId, editMessage, onRegenerate]
   );
 
+  /**
+   * Opening a search result.
+   *
+   * The scroll cannot happen here: the conversation is very likely not loaded
+   * yet, let alone rendered. The message is recorded instead, and the effect
+   * below acts the first time it is actually on the page.
+   */
+  const onOpenResult = useCallback(
+    (conversationId: string, messageId?: string) => {
+      onSelectConversation(conversationId);
+      setFocusMessageId(messageId ?? null);
+    },
+    [onSelectConversation]
+  );
+
+  useEffect(() => {
+    if (focusMessageId === null) return;
+
+    const target = document.querySelector(`[data-message-id="${focusMessageId}"]`);
+    // Not rendered yet — this runs again when the conversation arrives.
+    if (target === null) return;
+
+    /*
+     * Centred when the message fits, aligned to its top when it does not.
+     *
+     * Centring is what lets a short message be read with the turns around it.
+     * But a long reply can be several screens tall, and centring *that* lands
+     * halfway down a wall of text with no indication of what was found —
+     * measured at 2500px past its own beginning on a real answer. Its first
+     * line is the honest place to arrive.
+     *
+     * Scrolling here counts as intent, so the transcript unpins and a later
+     * reply does not pull the view back down.
+     */
+    const tall = target.getBoundingClientRect().height > window.innerHeight;
+    target.scrollIntoView({ block: tall ? 'start' : 'center' });
+
+    const timer = window.setTimeout(() => setFocusMessageId(null), MESSAGE_HIGHLIGHT_MS);
+    return () => window.clearTimeout(timer);
+  }, [focusMessageId, messages]);
+
+  // The palette answers to the shortcut every other application uses for it.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key.toLowerCase() !== 'k' || !(event.metaKey || event.ctrlKey)) return;
+      event.preventDefault();
+      setSearchOpen(true);
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   const onDeleteMessage = useCallback(
     (messageId: string) => {
       if (currentId === null) return;
@@ -498,6 +558,7 @@ export function App({
             onCollapse={closeSidebar}
             onCreate={onCreate}
             onOpen={onSelectConversation}
+            onSearch={() => setSearchOpen(true)}
             onRename={(id, currentTitle) => setDialog({ kind: 'rename', id, title: currentTitle })}
             onDelete={(id) => setDialog({ kind: 'delete-conversation', id })}
             onChangePassword={() => setChangingPassword(true)}
@@ -588,6 +649,7 @@ export function App({
                     isLast={index === messages.length - 1}
                     busy={busy}
                     canResend={index === lastUserIndex}
+                    highlighted={message.id === focusMessageId}
                     onEdit={onEditMessage}
                     onDelete={(id) => setDialog({ kind: 'delete-message', id })}
                     onRegenerate={() => void onRegenerate()}
@@ -636,6 +698,10 @@ export function App({
           </div>
         </div>
       </main>
+
+      {searchOpen && (
+        <SearchDialog recent={list} onOpen={onOpenResult} onClose={() => setSearchOpen(false)} />
+      )}
 
       {changingPassword && <ChangePassword onClose={() => setChangingPassword(false)} />}
       {adminOpen && <AdminPanel user={user} onClose={() => setAdminOpen(false)} />}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import {
   KeyRound,
   LogOut,
@@ -33,6 +33,8 @@ export interface SidebarProps {
   onCollapse: () => void;
   onCreate: () => void;
   onOpen: (id: string) => void;
+  /** Opens the search palette; the sidebar itself no longer filters. */
+  onSearch: () => void;
   onRename: (id: string, currentTitle: string) => void;
   onDelete: (id: string) => void;
   onChangePassword: () => void;
@@ -64,24 +66,17 @@ export function Sidebar({
   onCollapse,
   onCreate,
   onOpen,
+  onSearch,
   onRename,
   onDelete,
   onChangePassword,
   onOpenAdmin,
   onSignOut,
 }: SidebarProps): React.JSX.Element {
-  const [query, setQuery] = useState('');
-
   const grouped = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    const matching =
-      needle === ''
-        ? conversations
-        : conversations.filter((c) => c.title.toLowerCase().includes(needle));
-
     const now = Date.now();
     const buckets = new Map<string, ConversationSummary[]>();
-    for (const conversation of matching) {
+    for (const conversation of conversations) {
       const bucket = bucketOf(conversation.updatedAt, now);
       buckets.set(bucket, [...(buckets.get(bucket) ?? []), conversation]);
     }
@@ -90,7 +85,7 @@ export function Sidebar({
       name,
       items: buckets.get(name) ?? [],
     }));
-  }, [conversations, query]);
+  }, [conversations]);
 
   return (
     <aside className="sidebar">
@@ -126,17 +121,13 @@ export function Sidebar({
           </button>
         )}
 
-        <label className="search">
-          {/* 18, like the nav icons above it, so the two labels start on the
-              same column. */}
+        {/* A button, not a field. What it opens searches message bodies on the
+            server, which a box sitting in the sidebar cannot do; keeping the
+            shape of a field here would promise the wrong thing. */}
+        <button type="button" className="nav-button nav-button--quiet" onClick={onSearch}>
           <Search size={18} />
-          <span className="sr-only">Search chats</span>
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search chats"
-          />
-        </label>
+          Search chats
+        </button>
       </div>
 
       <nav className="sidebar__list" aria-label="Conversations">
@@ -144,10 +135,6 @@ export function Sidebar({
         {!loading && conversations.length === 0 && (
           <p className="sidebar__empty muted">No conversations yet.</p>
         )}
-        {conversations.length > 0 && grouped.length === 0 && (
-          <p className="sidebar__empty muted">No matches.</p>
-        )}
-
         {grouped.map((group) => (
           <div key={group.name} className="sidebar__group">
             <h2 className="sidebar__group-label">{group.name}</h2>

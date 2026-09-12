@@ -31,6 +31,8 @@ export interface MessageProps {
    * it. So an earlier message is saved and left alone.
    */
   canResend: boolean;
+  /** Arrived at from search: marked briefly so the eye can find it. */
+  highlighted?: boolean;
   onEdit: (messageId: string, body: string, resend: boolean) => void;
   onDelete: (messageId: string) => void;
   onRegenerate: () => void;
@@ -41,6 +43,7 @@ export function Message({
   isLast,
   busy,
   canResend,
+  highlighted = false,
   onEdit,
   onDelete,
   onRegenerate,
@@ -73,7 +76,7 @@ export function Message({
 
   if (editing) {
     return (
-      <article className={`msg msg--${message.type} msg--editing`}>
+      <article className={`msg msg--${message.type} msg--editing`} data-message-id={message.id}>
         <textarea
           className="msg__editor"
           value={draft}
@@ -104,7 +107,11 @@ export function Message({
   }
 
   return (
-    <article className={`msg msg--${message.type}`} data-status={status}>
+    <article
+      className={`msg msg--${message.type}${highlighted ? ' is-found' : ''}`}
+      data-message-id={message.id}
+      data-status={status}
+    >
       {reasoning !== undefined && reasoning !== '' && (
         // Collapsed by default: it is working-out, not the answer.
         <details className="reasoning">

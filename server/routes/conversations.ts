@@ -27,6 +27,44 @@ const createSchema = z.strictObject({ title: titleSchema.optional() });
 const patchSchema = z.strictObject({ title: titleSchema });
 const editMessageSchema = z.strictObject({ body: z.string().min(1).max(200_000) });
 
+/** Long enough for a sentence someone half-remembers, short enough to bound. */
+const SEARCH_QUERY_MAX_LENGTH = 200;
+const SEARCH_RESULT_LIMIT = 30;
+const HITS_PER_CONVERSATION = 3;
+/** Characters of context each side of a match. */
+const SNIPPET_RADIUS = 60;
+
+export interface SearchHit {
+  messageId: string;
+  type: 'user' | 'assistant';
+  snippet: string;
+}
+
+export interface SearchResult {
+  id: string;
+  title: string;
+  updatedAt: string;
+  /** The title matched too, so the conversation is worth offering on its own. */
+  titleMatch: boolean;
+  hits: SearchHit[];
+}
+
+/**
+ * A line of context around a match.
+ *
+ * Whitespace is collapsed because a message is Markdown: without it a match
+ * inside a list or a fenced block arrives as a snippet of mostly newlines. The
+ * ellipses say the text continues, so a reader does not take a fragment for the
+ * whole message.
+ */
+function snippetAt(body: string, at: number, length: number): string {
+  const from = Math.max(0, at - SNIPPET_RADIUS);
+  const to = Math.min(body.length, at + length + SNIPPET_RADIUS);
+  const core = body.slice(from, to).replace(/\s+/g, ' ').trim();
+
+  return `${from > 0 ? '…' : ''}${core}${to < body.length ? '…' : ''}`;
+}
+
 export interface ConversationRoutesOptions {
   store: ConversationStore;
   index: ChatIndex;
@@ -78,6 +116,76 @@ export function conversationRouter({
 
   router.get('/conversations', async (req, res) => {
     res.json({ conversations: await index.list(ownerOf(req)) });
+  });
+
+  /**
+   * Full-text search across the caller's own conversations.
+   *
+   * Registered before `/conversations/:id`, because Express matches in order
+   * and `search` would otherwise be read as an id.
+   *
+   * The scan is done here rather than in the browser: the list the client holds
+   * carries titles only, and shipping every message of every conversation to
+   * search them would be both slower and a great deal more to hold in memory
+   * than the handful of lines a query actually matches.
+   *
+   * `inspect` rather than `load`, so one unreadable file cannot fail a search
+   * across all the others; a malformed conversation can still match on title,
+   * which is all that is known about it.
+   */
+  router.get('/conversations/search', async (req, res) => {
+    const user = ownerOf(req);
+    const raw = typeof req.query['q'] === 'string' ? req.query['q'].trim() : '';
+
+    // Nothing typed is not an error; it is the state the field starts in.
+    if (raw === '') {
+      res.json({ results: [] });
+      return;
+    }
+    if (raw.length > SEARCH_QUERY_MAX_LENGTH) {
+      throw AppError.validation('Search query is too long.');
+    }
+
+    const needle = raw.toLowerCase();
+    const results: SearchResult[] = [];
+
+    for (const entry of await index.list(user)) {
+      const titleMatch = entry.title.toLowerCase().includes(needle);
+      const hits: SearchHit[] = [];
+
+      if (!entry.malformed) {
+        const found = await store.inspect(user, entry.id);
+        if (found.ok) {
+          for (const message of found.conversation.messages) {
+            // A system message is not rendered, so there is nothing to open it
+            // at — offering it as a result would scroll to nowhere.
+            if (message.type !== 'user' && message.type !== 'assistant') continue;
+
+            const at = message.body.toLowerCase().indexOf(needle);
+            if (at === -1) continue;
+
+            hits.push({
+              messageId: message.id,
+              type: message.type,
+              snippet: snippetAt(message.body, at, needle.length),
+            });
+            if (hits.length === HITS_PER_CONVERSATION) break;
+          }
+        }
+      }
+
+      if (!titleMatch && hits.length === 0) continue;
+      results.push({
+        id: entry.id,
+        title: entry.title,
+        updatedAt: entry.updatedAt,
+        titleMatch,
+        hits,
+      });
+      if (results.length === SEARCH_RESULT_LIMIT) break;
+    }
+
+    res.json({ results });
   });
 
   router.post('/conversations', validateBody(createSchema), async (req, res) => {

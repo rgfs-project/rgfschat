@@ -249,6 +249,31 @@ export async function listConversations(signal?: AbortSignal): Promise<Conversat
   return conversations;
 }
 
+export interface SearchHit {
+  messageId: string;
+  type: 'user' | 'assistant';
+  snippet: string;
+}
+
+export interface SearchResult {
+  id: string;
+  title: string;
+  updatedAt: string;
+  titleMatch: boolean;
+  hits: SearchHit[];
+}
+
+export async function searchConversations(
+  query: string,
+  signal?: AbortSignal
+): Promise<SearchResult[]> {
+  const { results } = await request<{ results: SearchResult[] }>(
+    `/api/conversations/search?q=${encodeURIComponent(query)}`,
+    signalInit(signal)
+  );
+  return results;
+}
+
 export function createConversation(): Promise<ConversationDetail> {
   return request<ConversationDetail>('/api/conversations', {
     method: 'POST',

@@ -192,6 +192,13 @@ const api = {
     });
     return { status: res.status, body: (await res.json()) as Record<string, string> };
   },
+  async search(query: string) {
+    const res = await afetch(`${base}/api/conversations/search?q=${encodeURIComponent(query)}`);
+    return {
+      status: res.status,
+      results: ((await res.json()) as { results?: unknown[] }).results ?? [],
+    };
+  },
   async send(conversationId: string, content: string, model = 'GPT', providerId = 'local') {
     const res = await afetch(`${base}/api/generations`, {
       method: 'POST',
@@ -268,6 +275,93 @@ describe('conversations API', () => {
     // The healthy one still works, and the bad one can be removed.
     expect((await api.get(good)).status).toBe(200);
     expect(await api.remove(bad)).toBe(204);
+  });
+});
+
+/**
+ * Search is the only read that opens every conversation the caller owns, so
+ * what it may return — and for whom — is worth stating in tests rather than
+ * leaving to the shape of a loop.
+ */
+describe('conversation search', () => {
+  beforeEach(boot);
+
+  it('finds the message that matched, not just the conversation', async () => {
+    const { body } = await api.create('Cooking');
+    const id = body.id as string;
+    await api.send(id, 'How long do I proof sourdough for?');
+    await service.settled(USER, id);
+
+    const { results } = await api.search('sourdough');
+    expect(results).toHaveLength(1);
+
+    const [result] = results as { id: string; hits: { messageId: string; snippet: string }[] }[];
+    expect(result?.id).toBe(id);
+    expect(result?.hits[0]?.snippet).toContain('sourdough');
+    // The id is what lets the client scroll to the line rather than the top.
+    expect(result?.hits[0]?.messageId).toBeTruthy();
+  });
+
+  it('matches a title even when no message contains the query', async () => {
+    const { body } = await api.create('Sourdough');
+    const id = body.id as string;
+    await api.send(id, 'Something else entirely.');
+    await service.settled(USER, id);
+
+    const { results } = await api.search('sourdough');
+    expect(results).toMatchObject([{ id, titleMatch: true, hits: [] }]);
+  });
+
+  it('is case-insensitive and returns nothing for a query that matches nothing', async () => {
+    const { body } = await api.create('Cooking');
+    const id = body.id as string;
+    await api.send(id, 'Sourdough, mostly.');
+    await service.settled(USER, id);
+
+    expect((await api.search('SOURDOUGH')).results).toHaveLength(1);
+    expect((await api.search('risotto')).results).toEqual([]);
+  });
+
+  it("reads only the caller's own conversations", async () => {
+    const { body } = await api.create('Mine');
+    const id = body.id as string;
+    await api.send(id, 'A private note about sourdough.');
+    await service.settled(USER, id);
+
+    // A second user's conversation, written directly to their own directory.
+    const other = '11111111-2222-4333-8444-555555555555';
+    await store.init(other);
+    const theirs = await store.create(other, 'Theirs');
+    await store.appendMessages(other, theirs.id, [
+      { type: 'user', id: randomUUID(), body: 'Their own sourdough note.' },
+    ]);
+    await index.rebuild(other);
+
+    const { results } = await api.search('sourdough');
+    expect(results).toHaveLength(1);
+    expect((results as { id: string }[])[0]?.id).toBe(id);
+  });
+
+  it('survives an unreadable conversation instead of failing the whole search', async () => {
+    const { body } = await api.create('Healthy');
+    const id = body.id as string;
+    await api.send(id, 'A note about sourdough.');
+    await service.settled(USER, id);
+
+    await writeFile(paths.conversationFile(USER, randomUUID()), '---\nformatVersion: 9\n---\n');
+    await index.rebuild(USER);
+
+    const { status, results } = await api.search('sourdough');
+    expect(status).toBe(200);
+    expect(results).toHaveLength(1);
+  });
+
+  it('answers an empty query with nothing rather than with everything', async () => {
+    const { body } = await api.create('Cooking');
+    await service.settled(USER, body.id as string);
+
+    expect(await api.search('')).toMatchObject({ status: 200, results: [] });
+    expect((await api.search('x'.repeat(201))).status).toBe(400);
   });
 });
 

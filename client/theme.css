@@ -348,6 +348,18 @@ button.linkish:active:not(:disabled),
   background: var(--surface-2);
 }
 
+/* Reads as the field it replaced rather than as a third action: the search row
+   is a way in to something, not a thing to do. */
+.nav-button--quiet {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.nav-button--quiet:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
 /* A filled pill, not a bordered field — the design gives search the same
    weight as the nav rows above it rather than making it look editable. */
 .search {

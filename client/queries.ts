@@ -19,10 +19,12 @@ import {
   listConversations,
   regenerate,
   renameConversation,
+  searchConversations,
   startGeneration,
   type ConversationDetail,
   type ConversationSummary,
   type ModelCatalogue,
+  type SearchResult,
 } from './api.ts';
 
 /**
@@ -49,6 +51,7 @@ export const keys = {
   models: () => ['models'] as const,
   conversations: () => ['conversations'] as const,
   conversation: (id: string) => ['conversation', id] as const,
+  search: (query: string) => ['search', query] as const,
 };
 
 /**
@@ -123,6 +126,24 @@ export function useConversation(id: string | null): UseQueryResult<ConversationD
     // A conversation changes only through this client's own mutations, each of
     // which invalidates it explicitly.
     staleTime: Infinity,
+  });
+}
+
+/**
+ * Conversation search.
+ *
+ * Keyed by the query, so every keystroke's results are their own entry and a
+ * slow answer for "pine" cannot overwrite the answer for "pineapple" that the
+ * user is already reading (INV-23). Cached briefly: searching, refining and
+ * backing up a character is one motion, and the previous query's results are
+ * usually still on screen when it happens.
+ */
+export function useSearch(query: string): UseQueryResult<SearchResult[]> {
+  return useQuery({
+    queryKey: keys.search(query),
+    queryFn: ({ signal }) => searchConversations(query, signal),
+    enabled: query !== '',
+    staleTime: 30_000,
   });
 }
 
