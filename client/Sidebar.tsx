@@ -127,7 +127,9 @@ export function Sidebar({
         )}
 
         <label className="search">
-          <Search size={16} />
+          {/* 18, like the nav icons above it, so the two labels start on the
+              same column. */}
+          <Search size={18} />
           <span className="sr-only">Search chats</span>
           <input
             value={query}

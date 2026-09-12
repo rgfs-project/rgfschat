@@ -140,7 +140,9 @@ body {
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 0.25rem 0.5rem 0.75rem;
+  /* The same side padding as the actions above it, so a conversation row and
+     the Admin row are one width and sit on one edge. */
+  padding: 0.25rem 0.75rem 0.75rem;
 }
 
 .sidebar__footer {
