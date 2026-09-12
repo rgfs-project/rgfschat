@@ -225,7 +225,7 @@ body {
 }
 
 .main__title {
-  font-size: 1rem;
+  font-size: 0.8125rem;
   font-weight: 400;
   line-height: 1.5rem;
   margin: 0;
@@ -249,14 +249,14 @@ body {
  * One measure for the transcript and the composer, so the composer sits
  * directly under the column of text rather than drifting wider than it.
  *
- * 63rem is measured off the design: the column occupies ~62% of the area beside
- * the sidebar, wider than a typical prose measure, because the assistant's
- * answers are meant to read as full-width documents rather than a narrow
- * centred column.
+ * 48rem is measured off the reference, where the composer is 768px against our
+ * 1005. Wider than a typical prose measure still, because the assistant's
+ * answers are meant to read as documents rather than as a narrow centred
+ * column — but no longer most of a wide window.
  */
 .transcript__inner,
 .composer-region__inner {
-  max-width: 63rem;
+  max-width: 48rem;
   margin: 0 auto;
 }
 

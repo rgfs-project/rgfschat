@@ -65,7 +65,9 @@
      were already being truncated to — the extra 80px held no more of them, it
      just took the space from the transcript. */
   --sidebar-width: 17rem;
-  --header-height: 4.25rem;
+  /* 56px, the reference's. The bar holds one line of type on each side of the
+     seam; the extra 12px it had were empty on both. */
+  --header-height: 3.5rem;
   /* The single horizontal inset shared by both header rows. */
   --gutter: 1.25rem;
   --radius: 0.75rem;
@@ -90,9 +92,15 @@
 
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --bg: #0d0d0d;
+  /*
+   * The canvas is the ground and the sidebar sits just above it — the reverse
+   * of the light theme, where the sidebar is recessed. On a black canvas a
+   * sidebar *darker* than the page has nowhere to go, so the relationship is
+   * inverted rather than compressed.
+   */
+  --bg: #000000;
   --raised: #171717;
-  --surface: #0a0a0a;
+  --surface: #0d0d0d;
   --surface-2: #1f1f1f;
   --surface-3: #2b2b2b;
   --border: #242424;
