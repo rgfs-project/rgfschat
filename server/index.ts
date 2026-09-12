@@ -13,6 +13,7 @@ import { ChatIndex } from './storage/index.ts';
 import { PreferencesStore } from './storage/preferences.ts';
 import { MemoryStore } from './storage/memories.ts';
 import { AttachmentStore } from './attachments/store.ts';
+import { reconcileAttachments } from './attachments/reconcile.ts';
 import { StoragePaths } from './storage/paths.ts';
 import { GenerationService } from './generation/service.ts';
 import { CheckpointStore } from './generation/checkpoints.ts';
@@ -80,6 +81,8 @@ async function main(): Promise<void> {
     maxOutputTokens: config.provider.maxOutputTokens,
     settings,
     memories,
+    attachments,
+    maxInlineChars: config.attachments.maxInlineChars,
   });
 
   const paths = store.paths;
@@ -166,6 +169,32 @@ async function main(): Promise<void> {
       logger.error('Generation recovery failed', { error: err });
       process.exit(1);
     });
+
+  /*
+   * Attachment housekeeping, per account, before the listener starts.
+   *
+   * Reconciliation first, then the sweep, and the order matters: the sweep
+   * collects pending attachments past their TTL, and an attachment a message
+   * refers to is only *pending* because a crash interrupted the linking. Swept
+   * first, a conversation would lose the file it was about.
+   *
+   * Failure here is logged and survived rather than fatal. Neither job is
+   * required for correctness of anything a request does — the worst outcome is
+   * some bytes not collected until the next boot.
+   */
+  await Promise.all(
+    (await users.list()).map(async (account) => {
+      try {
+        await reconcileAttachments({ attachments, store, index, userId: account.id, logger });
+        const swept = await attachments.sweep(account.id);
+        if (swept.incomplete + swept.expired > 0) {
+          logger.info('Collected unreferenced attachments', { ...swept });
+        }
+      } catch (err: unknown) {
+        logger.warn('Attachment housekeeping failed for an account', { error: err });
+      }
+    })
+  );
 
   const server = app.listen(config.port, () => {
     const address = server.address();

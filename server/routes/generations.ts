@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { GenerationAcceptedDto, GenerationEvent } from '@shared/generation.ts';
 import { isCanonicalUuid } from '@shared/conversation.ts';
 import { AppError } from '../errors/AppError.ts';
+import { MAX_ATTACHMENTS_PER_MESSAGE } from '@shared/attachment.ts';
 import type { GenerationManager } from '../generation/manager.ts';
 import type { GenerationService } from '../generation/service.ts';
 import { validateBody } from '../http/validate.ts';
@@ -18,6 +19,14 @@ const SSE_HEARTBEAT_MS = 10_000;
 // never parsed, and the pair is validated server-side (INV-18).
 const createGenerationSchema = z.strictObject({
   conversationId: z.string().min(1).max(200),
+  /**
+   * Ids of attachments already uploaded and not yet part of any message.
+   *
+   * The format allows at most ten (contracts §3.4) and is frozen, so this is
+   * the ceiling rather than a policy — a message with eleven could not be
+   * written down.
+   */
+  attachmentIds: z.array(z.string().min(1).max(200)).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(),
   providerId: z.string().min(1).max(64),
   model: z.string().min(1).max(200),
   content: z.string().min(1).max(200_000),
@@ -100,7 +109,7 @@ export function generationRouter({
   });
 
   router.post('/generations', validateBody(createGenerationSchema), async (req, res) => {
-    const { conversationId, providerId, model, content } = req.body as z.infer<
+    const { conversationId, providerId, model, content, attachmentIds } = req.body as z.infer<
       typeof createGenerationSchema
     >;
 
@@ -115,7 +124,14 @@ export function generationRouter({
     // The pair is validated inside the service, against the server-side
     // catalog, before anything is minted or persisted.
     // Returns only once the user message is durable (INV-08).
-    const result = await service.start(ownerOf(req), conversationId, providerId, model, content);
+    const result = await service.start(
+      ownerOf(req),
+      conversationId,
+      providerId,
+      model,
+      content,
+      attachmentIds ?? []
+    );
 
     const dto: GenerationAcceptedDto = result;
     res.status(202).json(dto);

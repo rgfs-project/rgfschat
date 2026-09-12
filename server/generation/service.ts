@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { deriveTitle, DEFAULT_TITLE, type AssistantMessage } from '@shared/conversation.ts';
 import type { GenerationState, SamplerSettings, TerminalState } from '@shared/generation.ts';
 import { AppError } from '../errors/AppError.ts';
+import { MAX_ATTACHMENTS_PER_MESSAGE } from '@shared/attachment.ts';
+import { resolveAttachments } from '../attachments/resolve.ts';
+import type { AttachmentStore } from '../attachments/store.ts';
+import type { ModelDto } from '@shared/generation.ts';
 import type { Logger } from '../logger.ts';
 import type { ProviderHub } from '../provider/hub.ts';
 import type { ConversationStore } from '../storage/conversations.ts';
@@ -33,6 +37,10 @@ const STATUS_FOR_STATE: Record<TerminalState, AssistantMessage['status']> = {
 };
 
 export interface GenerationServiceOptions {
+  /** Phase 11. Absent in tests that do not exercise attachments. */
+  attachments?: AttachmentStore;
+  /** Characters of a text attachment inlined into a prompt. */
+  maxInlineChars?: number;
   store: ConversationStore;
   index: ChatIndex;
   manager: GenerationManager;
@@ -72,6 +80,8 @@ export class GenerationService {
   readonly #logger: Logger;
   readonly #defaultContextTokens: number;
   readonly #maxOutputTokens: number;
+  readonly #attachments: GenerationServiceOptions['attachments'];
+  readonly #maxInlineChars: number;
   readonly #settings: GenerationServiceOptions['settings'];
   readonly #memories: GenerationServiceOptions['memories'];
 
@@ -83,6 +93,8 @@ export class GenerationService {
     this.#index = options.index;
     this.#manager = options.manager;
     this.#hub = options.hub;
+    this.#attachments = options.attachments;
+    this.#maxInlineChars = options.maxInlineChars ?? 100_000;
     this.#checkpoints = options.checkpoints;
     this.#logger = options.logger;
     this.#defaultContextTokens = options.defaultContextTokens;
@@ -127,14 +139,28 @@ export class GenerationService {
     conversationId: string,
     providerId: string,
     model: string,
-    content: string
+    content: string,
+    attachmentIds: readonly string[] = []
   ): Promise<StartResult> {
     const key = conversationKey(userId, conversationId);
 
     // The pair is validated against the server-side catalog before anything is
     // minted or persisted (INV-18). A model valid on another provider is not
     // valid here.
-    const { entry, client } = await this.#hub.resolveModel(providerId, model);
+    const { entry, client, model: modelDto } = await this.#hub.resolveModel(providerId, model);
+
+    /*
+     * Everything that could refuse this request happens before the lock and
+     * before anything is written: the attachments must exist, belong to the
+     * caller, be unattached, and be something this model can actually read.
+     *
+     * The capability check in particular has to be here rather than at send
+     * time. A model without a projector answers an image with a 500
+     * (docs/provider-notes.md §9), and by then the user's message would
+     * already be on disk — so the conversation would carry a question that was
+     * never answerable.
+     */
+    const attached = await this.#prepareAttachments(userId, attachmentIds, modelDto);
     const sampler = this.#samplerFor(providerId, model);
     // Read before the lock: it touches the filesystem, and the lock is held
     // across the whole check-and-append.
@@ -156,22 +182,56 @@ export class GenerationService {
         ...current,
         messages: [
           ...current.messages,
-          { type: 'user' as const, id: userMessageId, body: content },
+          {
+            type: 'user' as const,
+            id: userMessageId,
+            body: content,
+            ...(attached.length === 0 ? {} : { attachments: attached.map((a) => a.id) }),
+          },
         ],
       };
 
       // Assemble against the conversation *including* the new message, and do
       // it before writing anything, so an over-budget request fails without
       // leaving a persisted message that was never answered.
+      const vision = modelDto.inputModalities.includes('image');
+      const resolved =
+        this.#attachments === undefined
+          ? new Map()
+          : await resolveAttachments(this.#attachments, userId, next, {
+              maxInlineChars: this.#maxInlineChars,
+              includeImages: vision,
+            });
+
       const prompt = assemblePrompt(next, {
         contextTokens:
           client.contextLength(model) ?? entry.contextTokens ?? this.#defaultContextTokens,
         maxOutputTokens: this.#maxOutputTokens,
         ...(systemPrompt === undefined ? {} : { systemPrompt }),
+        attachments: resolved,
+        vision,
       });
 
       const written = await this.#store.writeUnderLock(userId, conversationId, next);
       await this.#index.upsert(userId, entryFor(conversationId, written));
+
+      /*
+       * Linked after the Markdown is durable, and inside the lock.
+       *
+       * This order is the one that can be recovered from. A crash between the
+       * two leaves attachments pending that a message already references, and
+       * startup reconciliation links them by reading the Markdown back. The
+       * other order would leave an attachment claiming to belong to a message
+       * that was never written, which nothing can detect.
+       */
+      if (this.#attachments !== undefined && attached.length > 0) {
+        await this.#attachments.link(
+          userId,
+          attached.map((a) => a.id),
+          conversationId,
+          userMessageId
+        );
+      }
 
       return { userMessageId, prompt, title: written.title };
     });
@@ -214,6 +274,54 @@ export class GenerationService {
    * continue. Everything runs under the conversation lock, so it cannot
    * interleave with a send (INV-13).
    */
+  /**
+   * Checks the attachments a message wants to carry, before anything is written.
+   *
+   * Each must be the caller's own and still pending — linking one that already
+   * belongs to a message would give two messages a claim on the same bytes, and
+   * deleting either conversation would then break the other.
+   */
+  async #prepareAttachments(
+    userId: string,
+    attachmentIds: readonly string[],
+    model: ModelDto
+  ): Promise<{ id: string; kind: 'image' | 'text' }[]> {
+    if (attachmentIds.length === 0) return [];
+
+    if (this.#attachments === undefined) {
+      throw AppError.validation('Attachments are not enabled on this server.');
+    }
+    if (attachmentIds.length > MAX_ATTACHMENTS_PER_MESSAGE) {
+      throw AppError.validation(
+        `A message may carry at most ${MAX_ATTACHMENTS_PER_MESSAGE} attachments.`
+      );
+    }
+    if (new Set(attachmentIds).size !== attachmentIds.length) {
+      throw AppError.validation('The same attachment was listed twice.');
+    }
+
+    const prepared: { id: string; kind: 'image' | 'text' }[] = [];
+    for (const id of attachmentIds) {
+      // Cross-user ids are `NOT_FOUND` from the store, which is what the
+      // caller sees: ownership is never revealed (contracts §5).
+      const meta = await this.#attachments.read(userId, id);
+      if (meta.messageId !== null) {
+        throw AppError.validation('That attachment is already part of a message.');
+      }
+      prepared.push({ id: meta.id, kind: meta.kind });
+    }
+
+    const wantsVision = prepared.some((attachment) => attachment.kind === 'image');
+    if (wantsVision && !model.inputModalities.includes('image')) {
+      throw new AppError(
+        'MODEL_CAPABILITY_UNSUPPORTED',
+        'This model cannot read images. Choose a model that can, or remove the image.'
+      );
+    }
+
+    return prepared;
+  }
+
   async regenerate(
     userId: string,
     conversationId: string,

@@ -4,6 +4,8 @@ import { TITLE_MAX_LENGTH, type Conversation } from '@shared/conversation.ts';
 import type { ConversationStore } from '../storage/conversations.ts';
 import { entryFor, type ChatIndex, type ChatIndexEntry } from '../storage/index.ts';
 import type { PreferencesStore } from '../storage/preferences.ts';
+import { referencedIds } from '../attachments/resolve.ts';
+import type { AttachmentStore } from '../attachments/store.ts';
 import { validateBody } from '../http/validate.ts';
 import { isCanonicalUuid } from '@shared/conversation.ts';
 import { AppError } from '../errors/AppError.ts';
@@ -72,6 +74,8 @@ export interface ConversationRoutesOptions {
   index: ChatIndex;
   /** Absent in tests that do not exercise pinning. */
   preferences?: PreferencesStore;
+  /** Phase 11. Deleting a conversation releases the files it owns. */
+  attachments?: AttachmentStore;
   /** Lets a reloading client rediscover the run it was watching. */
   activeGenerationId?: (userId: string, conversationId: string) => string | null;
 }
@@ -115,6 +119,7 @@ export function conversationRouter({
   store,
   index,
   preferences,
+  attachments,
   activeGenerationId,
 }: ConversationRoutesOptions): Router {
   const router = Router();
@@ -337,9 +342,28 @@ export function conversationRouter({
     const id = requireId(req.params.id);
     const user = ownerOf(req);
 
+    /*
+     * Which attachments this conversation owns, read before it is deleted —
+     * afterwards there is nothing left to ask. A malformed conversation cannot
+     * be parsed for them, and that is fine: its attachments are left behind as
+     * orphans, which the sweep can collect, rather than the delete being
+     * refused over a file nobody can read (INV-10).
+     */
+    const owned = attachments === undefined ? [] : await attachmentIdsOf(store, user, id);
+
     // Markdown first, then the index entry. An orphaned index entry is
     // recoverable by a rebuild; a dangling reference to a live file is not.
     await store.delete(user, id);
+
+    /*
+     * Attachments after the Markdown, and for the same reason. An attachment
+     * whose conversation is already gone is an orphan — safe, and collectable.
+     * A message referencing bytes that have been removed is neither
+     * (contracts §7).
+     */
+    if (attachments !== undefined && owned.length > 0) {
+      await attachments.deleteMany(user, owned);
+    }
     await index.remove(user, id);
     // And the pin, which would otherwise outlive what it pointed at.
     await preferences?.forget(user, id);
@@ -348,4 +372,24 @@ export function conversationRouter({
   });
 
   return router;
+}
+
+/**
+ * The attachment ids a conversation refers to.
+ *
+ * Returns nothing when the file cannot be read, rather than throwing: this is
+ * only ever asked in order to clean up, and a conversation that is malformed
+ * still has to be deletable.
+ */
+async function attachmentIdsOf(
+  store: ConversationStore,
+  userId: string,
+  conversationId: string
+): Promise<string[]> {
+  try {
+    const conversation = await store.load(userId, conversationId);
+    return referencedIds(conversation);
+  } catch {
+    return [];
+  }
 }

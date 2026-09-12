@@ -125,6 +125,7 @@ export function createApp({
         store,
         index,
         ...(preferences === undefined ? {} : { preferences }),
+        ...(attachments === undefined ? {} : { attachments }),
         ...(service !== undefined
           ? {
               activeGenerationId: (userId: string, conversationId: string) =>

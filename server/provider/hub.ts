@@ -1,4 +1,4 @@
-import type { SamplerSettings } from '@shared/generation.ts';
+import type { ModelDto, SamplerSettings } from '@shared/generation.ts';
 import { AppError } from '../errors/AppError.ts';
 import type { Logger } from '../logger.ts';
 import { ModelCatalog, type ProviderModels } from './catalog.ts';
@@ -227,13 +227,21 @@ export class ProviderHub {
    * The browser's pair is untrusted: a model valid on provider A must not be
    * accepted against provider B just because the client said so.
    */
+  /**
+   * Validates a `(providerId, modelId)` pair and returns what is known about it.
+   *
+   * The model itself comes back as well as the provider, because callers need
+   * its capabilities — whether it can accept an image, specifically — and
+   * re-deriving that from a second catalogue lookup would be a second answer to
+   * a question that has one (INV-18).
+   */
   async resolveModel(
     providerId: string,
     modelId: string
-  ): Promise<{ entry: ProviderConfigEntry; client: Provider }> {
+  ): Promise<{ entry: ProviderConfigEntry; client: Provider; model: ModelDto }> {
     const { entry, client } = this.#require(providerId);
-    await this.#catalog.requireModel(entry, client, modelId);
-    return { entry, client };
+    const model = await this.#catalog.requireModel(entry, client, modelId);
+    return { entry, client, model };
   }
 
   /** Forces rediscovery for one provider, or all of them. */
