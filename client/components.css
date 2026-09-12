@@ -615,7 +615,7 @@
   padding: 0.375rem 0.5rem;
   border-radius: 0.5rem;
   color: var(--muted);
-  font-size: 0.9375rem;
+  font-size: 0.8125rem;
 }
 
 .model-trigger {
@@ -630,12 +630,16 @@
   color: var(--text);
 }
 
-/* --- model menu (portalled) ---------------------------------------------- */
+/* --- model menu (portalled) ----------------------------------------------
+
+   Sized with the composer it opens from rather than on its own terms: at 16px
+   rows in a 24rem box it was the largest type on a screen whose own message
+   field is 14, so the menu read as a different application's. */
 
 .model-menu {
   position: fixed;
   z-index: 100;
-  width: 24rem;
+  width: 20rem;
   max-width: calc(100vw - 2rem);
   background: var(--raised);
   border: 1px solid var(--border);
@@ -649,7 +653,7 @@
   display: flex;
   align-items: center;
   gap: 0.625rem;
-  padding: 0.75rem 0.875rem;
+  padding: 0.5rem 0.625rem;
   border-bottom: 1px solid var(--border);
   color: var(--muted);
 }
@@ -660,20 +664,20 @@
   border: none;
   background: none;
   outline: none;
-  font-size: 0.9375rem;
+  font-size: 0.8125rem;
 }
 
 .model-menu__list {
-  max-height: 22rem;
+  max-height: 18rem;
   overflow-y: auto;
   padding: 0.25rem;
 }
 
 .model-menu__empty {
-  padding: 1rem;
+  padding: 0.875rem;
   margin: 0;
   text-align: center;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
 }
 
 .model-option {
@@ -682,8 +686,8 @@
   gap: 0.5rem;
   width: 100%;
   text-align: left;
-  padding: 0.625rem 0.75rem;
-  font-size: 1rem;
+  padding: 0.5rem 0.625rem;
+  font-size: 0.8125rem;
   color: var(--text);
 }
 
@@ -706,7 +710,7 @@
 .model-option__tags,
 .model-option__provider {
   color: var(--muted);
-  font-size: 0.8125rem;
+  font-size: 0.6875rem;
   flex: none;
 }
 
@@ -745,7 +749,7 @@
 }
 
 .markdown h1 {
-  font-size: 1.375rem;
+  font-size: 1.0625rem;
 }
 .markdown h2 {
   font-size: 1.1875rem;
@@ -884,14 +888,14 @@
 .signin__card,
 .modal__card {
   width: 100%;
-  max-width: 22rem;
+  max-width: 18rem;
   display: flex;
   flex-direction: column;
-  gap: 0.875rem;
+  gap: 0.75rem;
   background: var(--raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 1.75rem;
+  padding: 1.25rem;
 }
 
 .signin__card h1 {
@@ -914,7 +918,7 @@
 }
 
 .field > span {
-  font-size: 0.8125rem;
+  font-size: 0.6875rem;
   color: var(--muted);
 }
 
@@ -929,8 +933,8 @@
   color: var(--text);
   border: 1px solid var(--border-strong);
   border-radius: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.9375rem;
+  padding: 0.4375rem 0.625rem;
+  font-size: 0.8125rem;
   outline: none;
 }
 
@@ -991,7 +995,7 @@ button.linkish:hover {
 
 .modal__card h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.875rem;
 }
 
 .modal__actions {
@@ -1136,7 +1140,7 @@ button.linkish:hover {
  */
 .palette {
   width: 100%;
-  max-width: 40rem;
+  max-width: 32rem;
   display: flex;
   flex-direction: column;
   background: var(--raised);
@@ -1149,8 +1153,8 @@ button.linkish:hover {
 .palette__field {
   display: flex;
   align-items: center;
-  gap: 0.875rem;
-  padding: 0.875rem 1rem;
+  gap: 0.75rem;
+  padding: 0.625rem 0.75rem;
   border-bottom: 1px solid var(--border);
   color: var(--muted);
 }
@@ -1162,7 +1166,7 @@ button.linkish:hover {
   background: none;
   outline: none;
   color: var(--text);
-  font-size: 1rem;
+  font-size: 0.8125rem;
 }
 
 .palette__field input::placeholder {
@@ -1173,29 +1177,29 @@ button.linkish:hover {
    results would slide up the screen as they arrived and leave the reader
    chasing the row they were about to click. */
 .palette__list {
-  min-height: 18rem;
-  max-height: min(60vh, 30rem);
+  min-height: 14rem;
+  max-height: min(60vh, 24rem);
   overflow-y: auto;
-  padding: 0.5rem;
+  padding: 0.375rem;
 }
 
 .palette__label {
   margin: 0.25rem 0.5rem 0.375rem;
-  font-size: 0.8125rem;
+  font-size: 0.6875rem;
   color: var(--muted);
 }
 
 .palette__empty {
   margin: 0.5rem;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
 }
 
 .palette__row {
   display: flex;
   align-items: flex-start;
-  gap: 0.75rem;
+  gap: 0.625rem;
   width: 100%;
-  padding: 0.625rem 0.75rem;
+  padding: 0.5rem 0.625rem;
   border-radius: 0.625rem;
   text-align: left;
   color: var(--text);
@@ -1231,7 +1235,7 @@ button.linkish:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.9375rem;
+  font-size: 0.8125rem;
 }
 
 /* Two lines, then it stops: a snippet is an identifier, not the message. */
@@ -1240,7 +1244,7 @@ button.linkish:hover {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  font-size: 0.8125rem;
+  font-size: 0.6875rem;
   line-height: 1.5;
   color: var(--muted);
 }
@@ -1322,9 +1326,9 @@ button.linkish:hover {
 
 .admin__card {
   display: grid;
-  grid-template-columns: 15rem 1fr;
-  width: min(64rem, 100%);
-  height: min(42rem, 100%);
+  grid-template-columns: 12rem 1fr;
+  width: min(52rem, 100%);
+  height: min(34rem, 100%);
   overflow: hidden;
   background: var(--raised);
   border: 1px solid var(--border);
@@ -1373,10 +1377,10 @@ button.linkish:hover {
 .admin__rail-item {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.625rem;
   text-align: left;
   color: var(--text);
-  font-size: 0.9375rem;
+  font-size: 0.8125rem;
 }
 
 .admin__rail-item {
@@ -1397,7 +1401,7 @@ button.linkish:hover {
 .admin__pane {
   min-height: 0;
   overflow-y: auto;
-  padding: 1.5rem 1.75rem 2rem;
+  padding: 1.125rem 1.25rem 1.5rem;
   scrollbar-width: none;
 }
 
@@ -1406,8 +1410,8 @@ button.linkish:hover {
 }
 
 .admin__title {
-  margin: 0 0 1rem;
-  font-size: 1.375rem;
+  margin: 0 0 0.875rem;
+  font-size: 1.0625rem;
   font-weight: 500;
 }
 
@@ -1417,8 +1421,8 @@ button.linkish:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1.5rem;
-  padding: 0.875rem 0;
+  gap: 1.25rem;
+  padding: 0.625rem 0;
   border-top: 1px solid var(--border);
 }
 
@@ -1427,13 +1431,13 @@ button.linkish:hover {
 }
 
 .admin__row-label {
-  font-size: 0.9375rem;
+  font-size: 0.8125rem;
 }
 
 .admin__row-desc {
   margin: 0.125rem 0 0;
   color: var(--muted);
-  font-size: 0.8125rem;
+  font-size: 0.6875rem;
 }
 
 .admin__row-control {
