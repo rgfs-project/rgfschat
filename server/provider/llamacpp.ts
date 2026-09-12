@@ -1,4 +1,4 @@
-import type { ChatMessage, ModelDto, Modality } from '@shared/generation.ts';
+import type { ChatMessage, ModelDto, Modality, SamplerSettings } from '@shared/generation.ts';
 import type { ProviderConfig } from '../config.ts';
 import { AppError } from '../errors/AppError.ts';
 import type { Logger } from '../logger.ts';
@@ -19,6 +19,74 @@ import type { ChatRequest, Provider, ProviderChunk } from './types.ts';
  *   - `/v1/models` entries embed the upstream command line, including the path
  *     to its API key file, and must never be forwarded (§2, INV-04)
  */
+/**
+ * The sampling a model's own llama-server process was launched with.
+ *
+ * Router mode reports each model's command line on `/v1/models`, which costs
+ * nothing — the alternative, `GET /props?model=<id>`, *loads the model and
+ * evicts the resident one* (provider notes §3), so it must never be used for
+ * something as incidental as showing a default.
+ *
+ * Only the sampling flags are read. The rest of the command line is dropped
+ * unparsed, and the raw array never leaves this function: it contains
+ * `--api-key-file` and the model's path on disk (INV-04).
+ */
+function parseLaunchSampler(args: unknown): SamplerSettings | undefined {
+  if (!Array.isArray(args)) return undefined;
+  // The provider can return anything; narrow before reading pairs out of it.
+  const parts: unknown[] = args;
+
+  const flags = new Map<string, string>();
+  for (let i = 0; i < parts.length - 1; i += 1) {
+    const flag = parts[i];
+    const value = parts[i + 1];
+    if (typeof flag === 'string' && flag.startsWith('--') && typeof value === 'string') {
+      flags.set(flag, value);
+    }
+  }
+
+  const num = (...names: string[]): number | undefined => {
+    for (const name of names) {
+      const raw = flags.get(name);
+      if (raw === undefined) continue;
+      const value = Number(raw);
+      if (Number.isFinite(value)) return value;
+    }
+    return undefined;
+  };
+
+  const sampler: SamplerSettings = {
+    temperature: num('--temperature', '--temp'),
+    topP: num('--top-p'),
+    topK: num('--top-k'),
+    minP: num('--min-p'),
+    repeatPenalty: num('--repeat-penalty'),
+  };
+
+  // Nothing recognised is better reported as absent than as an object of
+  // undefineds, so a caller can tell "no information" from "all defaults".
+  return Object.values(sampler).some((value) => value !== undefined) ? sampler : undefined;
+}
+
+/**
+ * Sampler settings in OpenAI-compatible spelling.
+ *
+ * Only fields that are actually set are emitted. Sending `temperature: null`
+ * or a default of our own choosing would override whatever the llama-server
+ * operator configured, which is the opposite of leaving a model alone.
+ */
+function samplerBody(sampler: SamplerSettings | undefined): Record<string, number> {
+  if (sampler === undefined) return {};
+
+  const body: Record<string, number> = {};
+  if (sampler.temperature !== undefined) body['temperature'] = sampler.temperature;
+  if (sampler.topP !== undefined) body['top_p'] = sampler.topP;
+  if (sampler.topK !== undefined) body['top_k'] = sampler.topK;
+  if (sampler.minP !== undefined) body['min_p'] = sampler.minP;
+  if (sampler.repeatPenalty !== undefined) body['repeat_penalty'] = sampler.repeatPenalty;
+  return body;
+}
+
 export class LlamaCppProvider implements Provider {
   readonly #config: ProviderConfig;
   readonly #logger: Logger;
@@ -162,12 +230,15 @@ export class LlamaCppProvider implements Provider {
         ? rawModalities.filter((m): m is Modality => m === 'text' || m === 'image' || m === 'audio')
         : ['text'];
 
-      const status = raw['status'] as { value?: unknown } | undefined;
+      const status = raw['status'] as { value?: unknown; args?: unknown } | undefined;
+      // Parsed here and discarded; `args` itself is never carried forward.
+      const defaults = parseLaunchSampler(status?.args);
 
       models.push({
         id,
         inputModalities: inputModalities.length > 0 ? inputModalities : ['text'],
         loaded: status?.value === 'loaded',
+        ...(defaults === undefined ? {} : { defaults }),
       });
     }
 
@@ -182,6 +253,7 @@ export class LlamaCppProvider implements Provider {
     model,
     messages,
     maxOutputTokens,
+    sampler,
     signal,
   }: ChatRequest): AsyncIterable<ProviderChunk> {
     const { response, release } = await this.#fetch('/v1/chat/completions', {
@@ -191,6 +263,7 @@ export class LlamaCppProvider implements Provider {
         model,
         messages: messages.map(({ role, content }: ChatMessage) => ({ role, content })),
         max_tokens: maxOutputTokens,
+        ...samplerBody(sampler),
         stream: true,
         stream_options: { include_usage: true },
       }),

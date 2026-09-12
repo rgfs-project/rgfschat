@@ -50,6 +50,95 @@ describe('LlamaCppProvider.listModels', () => {
     ]);
   });
 
+  it('reads the launch sampler from status.args', async () => {
+    const p = await provider({
+      modelsPayload: {
+        data: [
+          {
+            id: 'Gemi',
+            status: {
+              value: 'unloaded',
+              args: [
+                '/app/llama-server',
+                '--api-key-file',
+                '/run/api-key',
+                '--temperature',
+                '0.75',
+                '--top-k',
+                '64',
+                '--top-p',
+                '0.95',
+                '--min-p',
+                '0.05',
+                '--repeat-penalty',
+                '1.0',
+                '--model',
+                '/models/gemi/Gemi.gguf',
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    const [model] = await p.listModels();
+
+    // Router mode reports each model's command line for free; the alternative,
+    // `/props?model=`, loads the model and evicts the resident one.
+    expect(model?.defaults).toEqual({
+      temperature: 0.75,
+      topP: 0.95,
+      topK: 64,
+      minP: 0.05,
+      repeatPenalty: 1,
+    });
+  });
+
+  it('reports no defaults when the launch line carries no sampling', async () => {
+    const p = await provider({
+      modelsPayload: {
+        data: [{ id: 'Plain', status: { value: 'unloaded', args: ['/app/llama-server'] } }],
+      },
+    });
+
+    const [model] = await p.listModels();
+
+    // Absent, not an object of undefineds: "no information" and "every value
+    // happens to be unset" are different answers.
+    expect(model?.defaults).toBeUndefined();
+  });
+
+  it('INV-04: parsing the launch line does not carry the line itself out', async () => {
+    const p = await provider({
+      modelsPayload: {
+        data: [
+          {
+            id: 'Gemi',
+            status: {
+              value: 'loaded',
+              args: [
+                '--api-key-file',
+                '/run/api-key',
+                '--temperature',
+                '0.75',
+                '--model',
+                '/models/secret.gguf',
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    const serialized = JSON.stringify(await p.listModels());
+
+    expect(serialized).toContain('0.75');
+    expect(serialized).not.toContain('api-key-file');
+    expect(serialized).not.toContain('/run/api-key');
+    expect(serialized).not.toContain('secret.gguf');
+    expect(serialized).not.toContain('args');
+  });
+
   it('INV-04: drops status.args and status.preset, which leak the API key path', async () => {
     const p = await provider();
 
@@ -61,7 +150,11 @@ describe('LlamaCppProvider.listModels', () => {
     expect(serialized).not.toContain('llama-server');
     expect(serialized).not.toContain('.gguf');
     for (const model of models) {
-      expect(Object.keys(model).sort()).toEqual(['id', 'inputModalities', 'loaded']);
+      // `defaults` is permitted, and is numbers parsed out of the launch line —
+      // never the line itself.
+      expect(Object.keys(model).sort()).toEqual(
+        ['id', 'inputModalities', 'loaded', ...('defaults' in model ? ['defaults'] : [])].sort()
+      );
     }
   });
 
@@ -170,6 +263,72 @@ describe('LlamaCppProvider.listModels', () => {
     );
 
     await expect(p.listModels()).rejects.toMatchObject({ code: 'PROVIDER_UNAVAILABLE' });
+  });
+});
+
+/** The body of the chat completion the provider actually sent upstream. */
+function chatBody(): Record<string, unknown> {
+  const request = mock?.requests.find((r) => r.path.startsWith('/v1/chat/completions'));
+  if (request === undefined) throw new Error('no chat completion was sent');
+  return request.body as Record<string, unknown>;
+}
+
+describe('LlamaCppProvider.streamChat sampling', () => {
+  it('sends only the fields that are set', async () => {
+    const p = await provider();
+    const chunks = [];
+    for await (const chunk of p.streamChat({
+      model: 'm',
+      messages: [{ role: 'user', content: 'hi' }],
+      maxOutputTokens: 64,
+      sampler: { temperature: 0.7, topK: 40 },
+      signal: new AbortController().signal,
+    })) {
+      chunks.push(chunk);
+    }
+
+    const body = chatBody();
+    expect(body['temperature']).toBe(0.7);
+    expect(body['top_k']).toBe(40);
+    // Untouched knobs are absent entirely, so llama-server applies its own
+    // configured value rather than one of ours.
+    expect('top_p' in body).toBe(false);
+    expect('min_p' in body).toBe(false);
+    expect('repeat_penalty' in body).toBe(false);
+  });
+
+  it('sends no sampling at all when none is configured', async () => {
+    const p = await provider();
+    for await (const _ of p.streamChat({
+      model: 'm',
+      messages: [{ role: 'user', content: 'hi' }],
+      maxOutputTokens: 64,
+      signal: new AbortController().signal,
+    })) {
+      void _;
+    }
+
+    const body = chatBody();
+    for (const key of ['temperature', 'top_p', 'top_k', 'min_p', 'repeat_penalty']) {
+      expect(key in body, key).toBe(false);
+    }
+  });
+
+  it('sends an explicit zero rather than dropping it', async () => {
+    const p = await provider();
+    for await (const _ of p.streamChat({
+      model: 'm',
+      messages: [{ role: 'user', content: 'hi' }],
+      maxOutputTokens: 64,
+      sampler: { temperature: 0, minP: 0 },
+      signal: new AbortController().signal,
+    })) {
+      void _;
+    }
+
+    const body = chatBody();
+    expect(body['temperature']).toBe(0);
+    expect(body['min_p']).toBe(0);
   });
 });
 

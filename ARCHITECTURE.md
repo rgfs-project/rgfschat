@@ -653,6 +653,54 @@ refused with `MODEL_NOT_FOUND` — the same answer a model that does not exist
 gets, so hiding one cannot be used to discover it is there. Admins are exempt,
 so an instance cannot hide every model and leave itself unable to test one.
 
+### Per-model sampling
+
+An administrator sets temperature, top_p, top_k, min_p, repeat_penalty and a
+system prompt for a `(providerId, modelId)` pair. They are applied on the server
+when a generation starts — the browser has no field for them, because they are
+policy for everyone using that model rather than a preference of whoever is
+typing.
+
+**An unset field is not sent at all.** Writing our own defaults into every
+request would silently override whatever the operator configured on
+llama-server, whose defaults vary by build and by model. An explicit `0` is
+still sent: "no override" and "override with zero" are different instructions,
+and temperature 0 is an ordinary thing to want. Clearing a field on the admin
+route uses `null`, which removes it rather than storing zero.
+
+The system prompt is prepended to the `system` list _before_ the prompt is
+assembled, so it is charged against the context budget like every other system
+message. Appended afterwards it would be free, and a long one would quietly push
+the request past the window it was measured against.
+
+A model's own defaults are read from `GET /v1/models`, which router mode answers
+with each model's llama-server command line. This costs nothing — the
+alternative, `GET /props?model=<id>`, **loads that model and evicts the resident
+one** (provider notes §3), which is far too much to pay for displaying a number.
+Only the sampling flags are parsed out; the array itself never leaves
+`parseLaunchSampler`, because it contains `--api-key-file` and the model's path
+on disk (INV-04).
+
+The settled sampler is stored on the generation record when it starts, so
+changing the settings mid-flight cannot alter a run already under way.
+
+### Clearing chat history
+
+`withinHours` deletes conversations _touched inside_ that window — "clear the
+last hour" means the recent ones, which is what the person asking means. The
+window is one of four fixed values rather than a free number, so a typo cannot
+widen it; omitting it clears everything, and the route requires an explicit
+`confirm` so there is no accidental path to either.
+
+Anything running for an affected account is cancelled before the files go:
+a generation in flight belongs to a conversation inside the window by
+definition, since it is being written to right now, and would otherwise be
+writing into a conversation that no longer exists (INV-17).
+
+A conversation whose `updatedAt` cannot be parsed is left alone. A window is a
+claim about when something happened, and that claim cannot be made for a
+timestamp we cannot read — deleting on a guess is the wrong way to be wrong.
+
 ### Audit log
 
 One JSON object per line in `_system/audit/<yyyy-mm>.jsonl`. Line-delimited so

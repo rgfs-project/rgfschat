@@ -1,4 +1,4 @@
-import type { ChatMessage, ModelDto } from '@shared/generation.ts';
+import type { ChatMessage, ModelDto, SamplerSettings } from '@shared/generation.ts';
 
 /** A single piece of a streamed completion. Reasoning is deliberately distinct. */
 export type ProviderChunk =
@@ -10,6 +10,14 @@ export interface ChatRequest {
   model: string;
   messages: ChatMessage[];
   maxOutputTokens: number;
+  /**
+   * Administrator-configured sampling, or nothing.
+   *
+   * Only the fields that are set are sent upstream, so a model with no
+   * configuration behaves exactly as it did before this existed rather than
+   * being handed our guesses at sensible defaults.
+   */
+  sampler?: SamplerSettings;
   /** Aborting this signal must terminate the upstream request promptly. */
   signal: AbortSignal;
 }

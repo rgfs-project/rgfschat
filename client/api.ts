@@ -26,6 +26,7 @@ export interface ConversationDetail {
   activeGenerationId: string | null;
 }
 import { isErrorCode, type ErrorCode } from '@shared/errors.ts';
+import type { SamplerSettings } from '@shared/generation.ts';
 import type { SessionDto, UserDto } from '@shared/auth.ts';
 
 export class ApiError extends Error {
@@ -149,7 +150,13 @@ export interface ProviderModelGroup {
   status: 'ready' | 'unavailable';
   /** The list is from an earlier successful fetch; the latest attempt failed. */
   stale: boolean;
-  models: { id: string; inputModalities: string[]; loaded: boolean }[];
+  models: {
+    id: string;
+    inputModalities: string[];
+    loaded: boolean;
+    /** What the provider itself was launched with, where it reports it. */
+    defaults?: SamplerSettings;
+  }[];
 }
 
 export interface ModelCatalogue {
@@ -378,17 +385,30 @@ export interface AdminProviderDto {
   contextTokens?: number;
 }
 
+export interface StoredSampler {
+  providerId: string;
+  modelId: string;
+  temperature?: number;
+  topP?: number;
+  topK?: number;
+  minP?: number;
+  repeatPenalty?: number;
+  systemPrompt?: string;
+}
+
 export interface AdminSettingsDto {
   settings: {
     version: number;
     registrationMode?: 'open' | 'closed';
     defaultModel?: { providerId: string; modelId: string };
     hiddenModels?: { providerId: string; modelId: string }[];
+    samplers?: StoredSampler[];
   };
   resolved: {
     registrationMode: 'open' | 'closed';
     defaultModel: { providerId: string; modelId: string } | null;
     hiddenModels: { providerId: string; modelId: string }[];
+    samplers: StoredSampler[];
   };
 }
 
@@ -514,5 +534,37 @@ export function rebuildAdminIndex(userId?: string): Promise<{ users: number }> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(userId === undefined ? {} : { userId }),
+  });
+}
+
+export interface SamplerWrite {
+  providerId: string;
+  modelId: string;
+  /** `null` clears the field, so the provider's own default applies again. */
+  temperature?: number | null;
+  topP?: number | null;
+  topK?: number | null;
+  minP?: number | null;
+  repeatPenalty?: number | null;
+  systemPrompt?: string | null;
+}
+
+export function updateAdminSampler(body: SamplerWrite): Promise<unknown> {
+  return request('/api/admin/models/sampler', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+/** Clears stored conversations. Omitting `withinHours` clears everything. */
+export function clearAdminHistory(body: {
+  userId?: string;
+  withinHours?: 1 | 6 | 12 | 24;
+}): Promise<{ deleted: number; cancelled: number }> {
+  return request('/api/admin/maintenance/clear-history', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...body, confirm: true }),
   });
 }

@@ -50,6 +50,19 @@ async function main(): Promise<void> {
 
   const store = new ConversationStore({ paths: paths0, logger });
   const index = new ChatIndex({ store, logger });
+
+  /*
+   * Loaded before the generation service is built, because the service asks it
+   * for each model's sampler on every request. An absent or unreadable file
+   * falls back to the environment.
+   */
+  const settings = new SettingsStore({
+    paths: paths0,
+    logger,
+    fallbackRegistrationMode: config.auth.registrationMode,
+  });
+  await settings.load();
+
   const service = new GenerationService({
     store,
     index,
@@ -59,6 +72,7 @@ async function main(): Promise<void> {
     logger,
     defaultContextTokens: config.provider.defaultContextTokens,
     maxOutputTokens: config.provider.maxOutputTokens,
+    settings,
   });
 
   const paths = store.paths;
@@ -70,17 +84,6 @@ async function main(): Promise<void> {
     idleTtlMs: config.auth.idleTtlMs,
   });
 
-  /*
-   * Instance settings and the audit log. Settings load before the app is built
-   * so `registrationMode` is already resolved when the first request arrives;
-   * an absent or unreadable file falls back to the environment.
-   */
-  const settings = new SettingsStore({
-    paths,
-    logger,
-    fallbackRegistrationMode: config.auth.registrationMode,
-  });
-  await settings.load();
   const audit = new AuditLog({ paths, logger });
 
   const app = createApp({

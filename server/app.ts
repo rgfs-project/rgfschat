@@ -140,6 +140,7 @@ export function createApp({
     sessions !== undefined &&
     manager !== undefined &&
     index !== undefined &&
+    store !== undefined &&
     hub !== undefined &&
     registry !== undefined &&
     settings !== undefined &&
@@ -157,6 +158,7 @@ export function createApp({
       requireAdmin({ users }),
       adminRouter({
         users,
+        store,
         sessions,
         manager,
         index,

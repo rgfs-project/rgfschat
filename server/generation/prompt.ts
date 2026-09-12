@@ -11,6 +11,8 @@ import { AppError } from '../errors/AppError.ts';
  */
 
 export interface BudgetOptions {
+  /** Administrator-configured, prepended ahead of the conversation's own. */
+  systemPrompt?: string | undefined;
   /** The model's real context length when known, else `DEFAULT_CONTEXT_TOKENS`. */
   contextTokens: number;
   /** Reserved for the reply; subtracted from the context to get the input budget. */
@@ -61,10 +63,23 @@ export interface AssembledPrompt {
  */
 export function assemblePrompt(
   conversation: Conversation,
-  { contextTokens, maxOutputTokens }: BudgetOptions
+  { contextTokens, maxOutputTokens, systemPrompt }: BudgetOptions
 ): AssembledPrompt {
   const system: ChatMessage[] = [];
   const turns: ChatMessage[] = [];
+
+  /*
+   * The administrator's prompt for this model leads, ahead of anything in the
+   * conversation itself.
+   *
+   * It joins the `system` list rather than being bolted on afterwards so it is
+   * charged against the budget like every other system message. Appended after
+   * assembly it would be free, and a long enough one would silently push the
+   * request over the context window it was measured against.
+   */
+  if (systemPrompt !== undefined && systemPrompt.trim() !== '') {
+    system.push({ role: 'system', content: systemPrompt });
+  }
 
   for (const message of conversation.messages) {
     if (message.type === 'system') {

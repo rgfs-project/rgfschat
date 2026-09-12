@@ -1,7 +1,18 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Database, Eye, EyeOff, Plug, RefreshCw, Settings2, Trash2, Users, X } from 'lucide-react';
+import {
+  Database,
+  Eye,
+  EyeOff,
+  Plug,
+  RefreshCw,
+  Settings2,
+  SlidersHorizontal,
+  Trash2,
+  Users,
+  X,
+} from 'lucide-react';
 import type { UserDto } from '@shared/auth.ts';
 import {
   ApiError,
@@ -12,6 +23,7 @@ import {
   fetchAdminProviders,
   fetchAdminSettings,
   fetchAdminUsers,
+  clearAdminHistory,
   rebuildAdminIndex,
   refreshAdminModels,
   setAdminUserPassword,
@@ -23,6 +35,7 @@ import {
   type ProviderWrite,
 } from './api.ts';
 import { Dialog } from './Dialog.tsx';
+import { SamplerPanel } from './SamplerPanel.tsx';
 import { Select } from './Select.tsx';
 import { keys, useModels } from './queries.ts';
 
@@ -38,12 +51,13 @@ import { keys, useModels } from './queries.ts';
  * non-admin is a courtesy; `requireAdmin` is the actual boundary (INV-24).
  */
 
-type Section = 'users' | 'providers' | 'models' | 'settings' | 'maintenance';
+type Section = 'users' | 'providers' | 'models' | 'sampler' | 'settings' | 'maintenance';
 
 const SECTIONS: { id: Section; label: string; icon: typeof Users }[] = [
   { id: 'users', label: 'Users', icon: Users },
   { id: 'providers', label: 'Providers', icon: Plug },
   { id: 'models', label: 'Models', icon: Eye },
+  { id: 'sampler', label: 'Sampler', icon: SlidersHorizontal },
   { id: 'settings', label: 'Settings', icon: Settings2 },
   { id: 'maintenance', label: 'Maintenance', icon: Database },
 ];
@@ -94,8 +108,9 @@ export function AdminPanel({
           {section === 'users' && <UsersSection currentUser={user} />}
           {section === 'providers' && <ProvidersSection />}
           {section === 'models' && <ModelsSection />}
+          {section === 'sampler' && <SamplerSection />}
           {section === 'settings' && <SettingsSection />}
-          {section === 'maintenance' && <MaintenanceSection />}
+          {section === 'maintenance' && <MaintenanceSection currentUser={user} />}
         </div>
       </div>
     </div>,
@@ -606,6 +621,73 @@ function ModelsSection(): React.JSX.Element {
   );
 }
 
+/* --- sampler -------------------------------------------------------------- */
+
+/**
+ * Sampling, one model at a time.
+ *
+ * Its own section rather than a row that expands inside the model list: these
+ * are six controls and a prompt box, which is more than a list row can hold
+ * without the list stopping being a list.
+ */
+function SamplerSection(): React.JSX.Element {
+  const client = useQueryClient();
+  const [error, fail, clear] = useErrorMessage();
+  const [chosen, setChosen] = useState('');
+
+  const models = useModels(true);
+  const settings = useQuery({
+    queryKey: ['admin', 'settings'],
+    queryFn: ({ signal }) => fetchAdminSettings(signal),
+  });
+
+  const options = (models.data?.providers ?? []).flatMap((group) =>
+    group.models.map((model) => ({
+      value: `${group.providerId}\u0000${model.id}`,
+      label: model.id,
+    }))
+  );
+
+  // Land on the first model rather than an empty pane.
+  const selected = chosen === '' ? (options[0]?.value ?? '') : chosen;
+  const [providerId, modelId] = selected.split('\u0000');
+
+  const model = (models.data?.providers ?? [])
+    .find((group) => group.providerId === providerId)
+    ?.models.find((m) => m.id === modelId);
+
+  return (
+    <>
+      <Problem message={error} />
+
+      <Row label="Model" description="Whose sampling you are editing.">
+        <Select
+          label="Model to configure"
+          value={selected}
+          options={options.length > 0 ? options : [{ value: '', label: 'No models' }]}
+          onChange={setChosen}
+        />
+      </Row>
+
+      {providerId !== undefined && modelId !== undefined && modelId !== '' && (
+        <SamplerPanel
+          providerId={providerId}
+          modelId={modelId}
+          stored={(settings.data?.resolved.samplers ?? []).find(
+            (entry) => entry.providerId === providerId && entry.modelId === modelId
+          )}
+          defaults={model?.defaults}
+          onSaved={() => {
+            clear();
+            void client.invalidateQueries({ queryKey: ['admin', 'settings'] });
+          }}
+          onError={fail}
+        />
+      )}
+    </>
+  );
+}
+
 /* --- settings ------------------------------------------------------------- */
 
 function SettingsSection(): React.JSX.Element {
@@ -686,14 +768,46 @@ function SettingsSection(): React.JSX.Element {
 
 /* --- maintenance ---------------------------------------------------------- */
 
-function MaintenanceSection(): React.JSX.Element {
+const WINDOWS: { value: string; label: string }[] = [
+  { value: '1', label: 'Last hour' },
+  { value: '6', label: 'Last 6 hours' },
+  { value: '12', label: 'Last 12 hours' },
+  { value: '24', label: 'Last day' },
+  { value: '', label: 'Everything' },
+];
+
+function MaintenanceSection({ currentUser }: { currentUser: UserDto }): React.JSX.Element {
+  const client = useQueryClient();
   const [error, fail, clear] = useErrorMessage();
   const [result, setResult] = useState<string | null>(null);
   const [target, setTarget] = useState('');
+  const [window, setWindow] = useState('1');
+  const [confirming, setConfirming] = useState(false);
 
   const users = useQuery({
     queryKey: ['admin', 'users'],
     queryFn: ({ signal }) => fetchAdminUsers(signal),
+  });
+
+  const clearHistory = useMutation({
+    // Scoped to the signed-in account. Clearing somebody else's conversations
+    // is a different act with different consequences, and does not belong
+    // behind the same button as clearing your own.
+    mutationFn: () =>
+      clearAdminHistory({
+        userId: currentUser.id,
+        ...(window === '' ? {} : { withinHours: Number(window) as 1 | 6 | 12 | 24 }),
+      }),
+    onSuccess: (response) => {
+      clear();
+      setResult(
+        `Deleted ${response.deleted} conversation${response.deleted === 1 ? '' : 's'}` +
+          (response.cancelled > 0 ? `, stopping ${response.cancelled} in progress.` : '.')
+      );
+      // The reader may be looking at a conversation that has just gone.
+      void client.invalidateQueries({ queryKey: keys.conversations() });
+    },
+    onError: fail,
   });
 
   const rebuild = useMutation({
@@ -708,6 +822,33 @@ function MaintenanceSection(): React.JSX.Element {
   return (
     <>
       <Problem message={error} />
+      <Row
+        label="Chat history"
+        description="Deletes your own stored conversations within a chosen window. The files go from disk; there is no undo."
+      >
+        <Select label="How far back" value={window} options={WINDOWS} onChange={setWindow} />
+        <button type="button" onClick={() => setConfirming(true)}>
+          <Trash2 size={15} />
+          Clear
+        </button>
+      </Row>
+
+      {confirming && (
+        <Dialog
+          title="Clear chat history?"
+          body={`${
+            WINDOWS.find((w) => w.value === window)?.label ?? 'Everything'
+          }, for ${currentUser.username}. The conversation files are removed from disk and cannot be recovered.`}
+          confirmLabel="Clear"
+          destructive
+          onCancel={() => setConfirming(false)}
+          onConfirm={() => {
+            setConfirming(false);
+            clearHistory.mutate();
+          }}
+        />
+      )}
+
       <Row
         label="Conversation index"
         description="Rebuilds the derived index from the conversation files on disk."

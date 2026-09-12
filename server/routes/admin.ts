@@ -6,6 +6,7 @@ import { toDto, type UserStore } from '../auth/users.ts';
 import type { SessionManager } from '../auth/sessions.ts';
 import type { GenerationManager } from '../generation/manager.ts';
 import type { ChatIndex } from '../storage/index.ts';
+import type { ConversationStore } from '../storage/conversations.ts';
 import type { ProviderRegistry, ProviderConfigEntry } from '../provider/registry.ts';
 import type { ProviderHub } from '../provider/hub.ts';
 import type { SettingsStore } from '../admin/settings.ts';
@@ -43,7 +44,9 @@ const ACTION = {
   providerTest: 'provider.test',
   settingsUpdate: 'settings.update',
   modelsRefresh: 'models.refresh',
+  samplerUpdate: 'models.sampler',
   indexRebuild: 'index.rebuild',
+  clearHistory: 'history.clear',
 } as const;
 
 const roleSchema = z.enum(['user', 'admin']);
@@ -106,8 +109,41 @@ const settingsSchema = z.strictObject({
 
 const rebuildSchema = z.strictObject({ userId: z.string().min(1).optional() });
 
+/**
+ * One model's sampling. `null` on a field clears it, so the provider's own
+ * default applies again — distinct from omitting the field, which leaves it
+ * as it was.
+ */
+/**
+ * Clearing chat history.
+ *
+ * `withinHours` deletes conversations *touched inside* that window, which is
+ * what "clear the last hour" means to the person asking. Omitting it clears
+ * everything. A user id narrows it to one account; without one it applies to
+ * every account, which is why the route demands the window be stated
+ * explicitly rather than defaulting to the most destructive reading.
+ */
+const clearHistorySchema = z.strictObject({
+  userId: z.string().min(1).optional(),
+  withinHours: z.union([z.literal(1), z.literal(6), z.literal(12), z.literal(24)]).optional(),
+  /** Must be sent deliberately; there is no accidental path to this. */
+  confirm: z.literal(true),
+});
+
+const samplerBodySchema = z.strictObject({
+  providerId: z.string().min(1),
+  modelId: z.string().min(1),
+  temperature: z.number().min(0).max(2).nullable().optional(),
+  topP: z.number().min(0).max(1).nullable().optional(),
+  topK: z.number().int().min(0).max(100).nullable().optional(),
+  minP: z.number().min(0).max(1).nullable().optional(),
+  repeatPenalty: z.number().min(1).max(2).nullable().optional(),
+  systemPrompt: z.string().max(8_000).nullable().optional(),
+});
+
 export interface AdminRoutesOptions {
   users: UserStore;
+  store: ConversationStore;
   sessions: SessionManager;
   manager: GenerationManager;
   index: ChatIndex;
@@ -162,6 +198,7 @@ function toProviderAdminDto(entry: ProviderConfigEntry): Record<string, unknown>
 
 export function adminRouter({
   users,
+  store,
   sessions,
   manager,
   index,
@@ -464,6 +501,67 @@ export function adminRouter({
     res.json({ settings: settings.stored(), resolved });
   });
 
+  /**
+   * Replaces one model's sampling.
+   *
+   * A field set to `null` is removed rather than stored as zero: "no override"
+   * and "override with 0" are different instructions, and temperature 0 is a
+   * perfectly ordinary thing to want.
+   */
+  router.patch('/models/sampler', validateBody(samplerBodySchema), async (req, res) => {
+    const body = req.body as z.infer<typeof samplerBodySchema>;
+    const { providerId, modelId } = body;
+
+    // Must name a real pair, for the same reason a generation must (INV-18):
+    // otherwise settings accumulate for models that do not exist.
+    await hub.resolveModel(providerId, modelId);
+
+    const current = settings.stored().samplers ?? [];
+    const existing = current.find(
+      (entry) => entry.providerId === providerId && entry.modelId === modelId
+    );
+
+    const merged: Record<string, unknown> = { ...(existing ?? { providerId, modelId }) };
+    for (const field of [
+      'temperature',
+      'topP',
+      'topK',
+      'minP',
+      'repeatPenalty',
+      'systemPrompt',
+    ] as const) {
+      if (!(field in body)) continue;
+      const value = body[field];
+      if (value === null || value === '') delete merged[field];
+      else merged[field] = value;
+    }
+
+    const samplers = [
+      ...current.filter((entry) => !(entry.providerId === providerId && entry.modelId === modelId)),
+      merged as (typeof current)[number],
+    ];
+
+    const stored = settings.stored();
+    await settings.save({
+      ...(stored.registrationMode === undefined
+        ? {}
+        : { registrationMode: stored.registrationMode }),
+      ...(stored.defaultModel === undefined ? {} : { defaultModel: stored.defaultModel }),
+      ...(stored.hiddenModels === undefined ? {} : { hiddenModels: stored.hiddenModels }),
+      samplers,
+    });
+
+    await audit.record({
+      ...actorEntry(req),
+      action: ACTION.samplerUpdate,
+      target: `${providerId}/${modelId}`,
+      outcome: 'success',
+      // Which knobs are set, never a system prompt's contents.
+      details: { fields: Object.keys(merged).length - 2 },
+    });
+    res.json({ sampler: merged });
+  });
+
   router.post('/models/refresh', async (req, res) => {
     await hub.refresh();
     const providers = await hub.listProviders();
@@ -476,6 +574,54 @@ export function adminRouter({
       details: { providerCount: providers.length },
     });
     res.json({ providers });
+  });
+
+  router.post('/maintenance/clear-history', validateBody(clearHistorySchema), async (req, res) => {
+    const { userId, withinHours } = req.body as z.infer<typeof clearHistorySchema>;
+
+    const targets = userId === undefined ? (await users.list()).map((u) => u.id) : [userId];
+    const cutoff = withinHours === undefined ? null : Date.now() - withinHours * 60 * 60 * 1000;
+
+    let deleted = 0;
+    let cancelled = 0;
+
+    for (const id of targets) {
+      /*
+       * Anything running belongs to a conversation inside the window by
+       * definition — it is being written to right now — so it is stopped
+       * before the files go, rather than left writing into a deleted
+       * conversation (INV-17).
+       */
+      cancelled += manager.cancelAllForOwner(id);
+
+      const entries = await index.list(id).catch(() => []);
+      for (const entry of entries) {
+        if (cutoff !== null) {
+          const touched = Date.parse(entry.updatedAt);
+          // An unparseable timestamp is left alone: a window is a claim about
+          // when something happened, and we cannot make that claim here.
+          if (!Number.isFinite(touched) || touched < cutoff) continue;
+        }
+
+        await store.delete(id, entry.id);
+        await index.remove(id, entry.id);
+        deleted += 1;
+      }
+    }
+
+    await audit.record({
+      ...actorEntry(req),
+      action: ACTION.clearHistory,
+      target: userId ?? null,
+      outcome: 'success',
+      details: {
+        scope: userId === undefined ? 'all users' : 'one user',
+        window: withinHours === undefined ? 'everything' : `${withinHours}h`,
+        conversationsDeleted: deleted,
+        generationsCancelled: cancelled,
+      },
+    });
+    res.json({ ok: true, deleted, cancelled });
   });
 
   router.post('/maintenance/rebuild-index', validateBody(rebuildSchema), async (req, res) => {

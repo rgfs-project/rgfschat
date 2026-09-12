@@ -1217,12 +1217,31 @@ button.linkish:hover {
     grid-template-rows: auto 1fr;
   }
 
+  /*
+   * Scrolls sideways rather than wrapping.
+   *
+   * Wrapping put a lone section on a second line and changed the height of the
+   * whole strip as the list grew, which moved everything below it. One row that
+   * scrolls keeps the header a fixed height however many sections there are.
+   */
   .admin__rail {
     flex-direction: row;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
+    overflow-x: auto;
     border-right: none;
     border-bottom: 1px solid var(--border);
+    scrollbar-width: none;
+  }
+
+  .admin__rail::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Never squeezed to fit: a shrunk label is worse than one you scroll to. */
+  .admin__rail-item,
+  .admin__close {
+    flex: none;
   }
 
   /*
@@ -1235,4 +1254,153 @@ button.linkish:hover {
     align-self: center;
     margin-bottom: 0;
   }
+}
+
+/* --- sampler -------------------------------------------------------------- */
+
+.sampler {
+  margin-top: 1.5rem;
+  animation: rise-in var(--motion-fast) var(--ease-out);
+}
+
+.sampler__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.875rem;
+  border-bottom: 1px solid var(--border);
+}
+
+/* A subheading under the pane's own title, so it sits a step below it. */
+.sampler__title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 500;
+}
+
+.sampler__note {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.sampler__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 1.25rem 1.5rem;
+  margin: 1.5rem 0;
+}
+
+/*
+ * An overridden field is marked down its left edge rather than by colour,
+ * since the palette is achromatic and there is no hue to spend. The rule is
+ * quiet until it means something.
+ */
+.sampler__field {
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--border);
+  transition: border-color var(--motion-fast) var(--ease-out);
+}
+
+.sampler__field.is-override {
+  border-left-color: var(--text);
+}
+
+.sampler__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+/* Sentence case, at the size the admin rows use for their own labels. */
+.sampler__label {
+  font-size: 0.875rem;
+  color: var(--muted);
+  cursor: help;
+}
+
+.sampler__field.is-override .sampler__label {
+  color: var(--text);
+}
+
+.sampler__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.125rem;
+}
+
+/* Typed when a slider cannot land on the value you want. */
+/* Flush with the row edge, so the box's right side lands exactly on the end of
+   the slider below it. */
+.sampler__number {
+  width: 4.25rem;
+  padding: 0.2rem 0.375rem;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 0.375rem;
+  color: var(--muted);
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  transition:
+    border-color var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
+.sampler__field.is-override .sampler__number {
+  color: var(--text);
+}
+
+.sampler__number:hover,
+.sampler__number:focus {
+  border-color: var(--border-strong);
+  outline: none;
+}
+
+.sampler__undo,
+.sampler__undo-slot {
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: none;
+}
+
+.sampler input[type='range'] {
+  width: 100%;
+  margin: 0.5rem 0 0.25rem;
+  accent-color: var(--text);
+}
+
+/* Says where the number came from, which is the thing a number cannot say. */
+.sampler__origin {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.sampler__prompt {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+
+/* Sized and bordered like the message editor, which is the other multi-line
+   field in the application. */
+.sampler__prompt textarea {
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  background: var(--raised);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 0.625rem;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.sampler__prompt textarea::placeholder {
+  color: var(--muted);
 }

@@ -1,3 +1,4 @@
+import type { SamplerSettings } from '@shared/generation.ts';
 import { AppError } from '../errors/AppError.ts';
 import type { Logger } from '../logger.ts';
 import { ModelCatalog, type ProviderModels } from './catalog.ts';
@@ -34,7 +35,13 @@ export interface GroupedModels {
   providerName: string;
   status: ProviderModels['status'];
   stale: boolean;
-  models: { id: string; inputModalities: string[]; loaded: boolean }[];
+  models: {
+    id: string;
+    inputModalities: string[];
+    loaded: boolean;
+    /** What the provider was launched with, where it reports it. */
+    defaults?: SamplerSettings;
+  }[];
 }
 
 export class ProviderHub {
@@ -205,6 +212,8 @@ export class ProviderHub {
           id: model.id,
           inputModalities: model.inputModalities,
           loaded: model.loaded,
+          // Numbers parsed from the launch line, never the line itself (INV-04).
+          ...(model.defaults === undefined ? {} : { defaults: model.defaults }),
         })),
       });
     }

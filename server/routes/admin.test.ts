@@ -52,6 +52,8 @@ let manager: GenerationManager;
 let hub: ProviderHub;
 let settings: SettingsStore;
 let paths: StoragePaths;
+let store: ConversationStore;
+let index: ChatIndex;
 
 let admin: TestClient;
 let adminId: string;
@@ -63,8 +65,8 @@ beforeEach(async () => {
   dataDir = await mkdtemp(join(tmpdir(), 'workspace-admin-'));
   paths = new StoragePaths(dataDir);
 
-  const store = new ConversationStore({ paths, logger });
-  const index = new ChatIndex({ store, logger });
+  store = new ConversationStore({ paths, logger });
+  index = new ChatIndex({ store, logger });
   users = new UserStore({ paths, logger, argon2Options: ARGON2_TEST_OPTIONS });
   sessions = new SessionManager({
     paths,
@@ -215,7 +217,17 @@ function routeSpecs(): RouteSpec[] {
     { method: 'get', path: '/api/admin/settings' },
     { method: 'patch', path: '/api/admin/settings', body: { registrationMode: 'open' } },
     { method: 'post', path: '/api/admin/models/refresh' },
+    {
+      method: 'patch',
+      path: '/api/admin/models/sampler',
+      body: { providerId: 'local', modelId: 'echo-small', temperature: 0.7 },
+    },
     { method: 'post', path: '/api/admin/maintenance/rebuild-index', body: {} },
+    {
+      method: 'post',
+      path: '/api/admin/maintenance/clear-history',
+      body: { userId: plainUserId, withinHours: 1, confirm: true },
+    },
   ];
 }
 
@@ -675,6 +687,189 @@ describe('settings and model visibility', () => {
     });
 
     expect((await (await fetch(`${base}/api/auth/session`)).json()).registrationOpen).toBe(true);
+  });
+});
+
+describe('per-model sampler', () => {
+  const setSampler = (body: Record<string, unknown>): Promise<Response> =>
+    admin.fetch('/api/admin/models/sampler', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ providerId: 'local', modelId: 'echo-small', ...body }),
+    });
+
+  it('stores only the fields that were sent', async () => {
+    await setSampler({ temperature: 0.7 });
+
+    expect(settings.samplerFor('local', 'echo-small')).toEqual({ temperature: 0.7 });
+  });
+
+  it('merges later edits rather than replacing the whole set', async () => {
+    await setSampler({ temperature: 0.7 });
+    await setSampler({ topK: 40 });
+
+    expect(settings.samplerFor('local', 'echo-small')).toEqual({ temperature: 0.7, topK: 40 });
+  });
+
+  it('clears a field with null, so the provider default applies again', async () => {
+    await setSampler({ temperature: 0.7, topK: 40 });
+    await setSampler({ temperature: null });
+
+    const sampler = settings.samplerFor('local', 'echo-small');
+    expect(sampler).toEqual({ topK: 40 });
+    // Cleared, not stored as zero — temperature 0 is a thing someone may want.
+    expect('temperature' in sampler).toBe(false);
+  });
+
+  it('keeps an explicit zero', async () => {
+    await setSampler({ temperature: 0 });
+    expect(settings.samplerFor('local', 'echo-small')).toEqual({ temperature: 0 });
+  });
+
+  it('refuses a model that does not exist (INV-18)', async () => {
+    const res = await admin.fetch('/api/admin/models/sampler', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ providerId: 'local', modelId: 'not-a-model', temperature: 0.5 }),
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  it.each([
+    ['temperature', 3],
+    ['topP', 2],
+    ['topK', 500],
+    ['repeatPenalty', 0.5],
+  ])('refuses %s out of range', async (field, value) => {
+    const res = await setSampler({ [field]: value });
+    expect(res.status).toBe(400);
+  });
+
+  it('never writes a system prompt into the audit log', async () => {
+    await setSampler({ systemPrompt: 'sentinel-system-prompt-do-not-log' });
+
+    const dir = paths.auditDir();
+    const files = await readdir(dir).catch(() => [] as string[]);
+    let text = '';
+    for (const file of files) text += await readFile(join(dir, file), 'utf8');
+
+    expect(text).toContain('models.sampler');
+    expect(text).not.toContain('sentinel-system-prompt-do-not-log');
+  });
+});
+
+describe('clearing chat history', () => {
+  /** A conversation whose index entry claims it was last touched `hoursAgo`. */
+  async function seed(ownerId: string, title: string, hoursAgo: number): Promise<string> {
+    const { id } = await store.create(ownerId, title);
+    await index.upsert(ownerId, {
+      id,
+      title,
+      createdAt: new Date(Date.now() - hoursAgo * 3_600_000).toISOString(),
+      updatedAt: new Date(Date.now() - hoursAgo * 3_600_000).toISOString(),
+      messageCount: 1,
+      malformed: false,
+    });
+    return id;
+  }
+
+  const clear = (body: Record<string, unknown>): Promise<Response> =>
+    admin.fetch('/api/admin/maintenance/clear-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: true, ...body }),
+    });
+
+  it('deletes only conversations inside the window', async () => {
+    const recent = await seed(plainUserId, 'recent', 0.5);
+    const old = await seed(plainUserId, 'old', 30);
+
+    const res = await clear({ userId: plainUserId, withinHours: 1 });
+    expect(res.status).toBe(200);
+
+    const left = (await index.list(plainUserId)).map((entry) => entry.id);
+    expect(left).toContain(old);
+    expect(left).not.toContain(recent);
+    // And the file is gone, not merely unindexed.
+    expect(await store.exists(plainUserId, recent)).toBe(false);
+  });
+
+  it.each([
+    [1, ['0.5h']],
+    [6, ['0.5h', '3h']],
+    [12, ['0.5h', '3h', '9h']],
+    [24, ['0.5h', '3h', '9h', '20h']],
+  ])('the %ih window takes exactly %s', async (hours, expected) => {
+    for (const age of [0.5, 3, 9, 20, 40]) await seed(plainUserId, `${age}h`, age);
+
+    await clear({ userId: plainUserId, withinHours: hours });
+
+    const left = (await index.list(plainUserId)).map((entry) => entry.title);
+    for (const title of expected) expect(left, `${title} should be gone`).not.toContain(title);
+    // Anything older than the window survives.
+    expect(left).toContain('40h');
+  });
+
+  it('clears everything when no window is given', async () => {
+    await seed(plainUserId, 'recent', 0.5);
+    await seed(plainUserId, 'ancient', 500);
+
+    await clear({ userId: plainUserId });
+
+    expect(await index.list(plainUserId)).toHaveLength(0);
+  });
+
+  it('leaves other users alone when one is named', async () => {
+    await seed(plainUserId, 'theirs', 0.5);
+    await seed(adminId, 'mine', 0.5);
+
+    await clear({ userId: plainUserId });
+
+    expect(await index.list(plainUserId)).toHaveLength(0);
+    expect(await index.list(adminId)).toHaveLength(1);
+  });
+
+  it('clears every account when no user is named', async () => {
+    await seed(plainUserId, 'theirs', 0.5);
+    await seed(adminId, 'mine', 0.5);
+
+    await clear({});
+
+    expect(await index.list(plainUserId)).toHaveLength(0);
+    expect(await index.list(adminId)).toHaveLength(0);
+  });
+
+  it('refuses without an explicit confirmation', async () => {
+    await seed(plainUserId, 'kept', 0.5);
+
+    const res = await admin.fetch('/api/admin/maintenance/clear-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: plainUserId }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(await index.list(plainUserId)).toHaveLength(1);
+  });
+
+  it('refuses a window it does not offer', async () => {
+    const res = await clear({ userId: plainUserId, withinHours: 3 });
+    expect(res.status).toBe(400);
+  });
+
+  it('records the scope and the count, never a conversation title', async () => {
+    await seed(plainUserId, 'sentinel-conversation-title', 0.5);
+    await clear({ userId: plainUserId, withinHours: 1 });
+
+    const dir = paths.auditDir();
+    const files = await readdir(dir).catch(() => [] as string[]);
+    let text = '';
+    for (const file of files) text += await readFile(join(dir, file), 'utf8');
+
+    expect(text).toContain('history.clear');
+    expect(text).toContain('conversationsDeleted');
+    expect(text).not.toContain('sentinel-conversation-title');
   });
 });
 

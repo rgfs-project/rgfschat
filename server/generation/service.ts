@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { deriveTitle, DEFAULT_TITLE, type AssistantMessage } from '@shared/conversation.ts';
-import type { GenerationState, TerminalState } from '@shared/generation.ts';
+import type { GenerationState, SamplerSettings, TerminalState } from '@shared/generation.ts';
 import { AppError } from '../errors/AppError.ts';
 import type { Logger } from '../logger.ts';
 import type { ProviderHub } from '../provider/hub.ts';
@@ -41,6 +41,12 @@ export interface GenerationServiceOptions {
   logger: Logger;
   defaultContextTokens: number;
   maxOutputTokens: number;
+  /**
+   * Per-model sampler and system prompt, applied here rather than accepted
+   * from the browser: these are an administrator's settings for everyone, and
+   * a client that could send its own would be setting policy for itself.
+   */
+  settings?: { samplerFor: (providerId: string, modelId: string) => SamplerSettings };
 }
 
 export interface StartResult {
@@ -58,6 +64,7 @@ export class GenerationService {
   readonly #logger: Logger;
   readonly #defaultContextTokens: number;
   readonly #maxOutputTokens: number;
+  readonly #settings: GenerationServiceOptions['settings'];
 
   /** Conversations with a generation that has not yet reached a terminal state. */
   readonly #active = new Map<string, string>();
@@ -71,6 +78,12 @@ export class GenerationService {
     this.#logger = options.logger;
     this.#defaultContextTokens = options.defaultContextTokens;
     this.#maxOutputTokens = options.maxOutputTokens;
+    this.#settings = options.settings;
+  }
+
+  /** The configured sampling for a model, or nothing. */
+  #samplerFor(providerId: string, model: string): SamplerSettings {
+    return this.#settings?.samplerFor(providerId, model) ?? {};
   }
 
   /**
@@ -94,6 +107,7 @@ export class GenerationService {
     // minted or persisted (INV-18). A model valid on another provider is not
     // valid here.
     const { entry, client } = await this.#hub.resolveModel(providerId, model);
+    const sampler = this.#samplerFor(providerId, model);
 
     const prepared = await this.#store.locks.run(key, async () => {
       if (this.#active.has(key)) {
@@ -122,6 +136,7 @@ export class GenerationService {
         contextTokens:
           client.contextLength(model) ?? entry.contextTokens ?? this.#defaultContextTokens,
         maxOutputTokens: this.#maxOutputTokens,
+        ...(sampler.systemPrompt === undefined ? {} : { systemPrompt: sampler.systemPrompt }),
       });
 
       const written = await this.#store.writeUnderLock(userId, conversationId, next);
@@ -142,7 +157,7 @@ export class GenerationService {
       model,
       prepared.prompt.messages,
       client,
-      { conversationId, providerId }
+      { conversationId, providerId, sampler }
     );
     this.#active.set(key, generationId);
 
@@ -176,6 +191,7 @@ export class GenerationService {
   ): Promise<{ generationId: string; assistantMessageId: string }> {
     const key = conversationKey(userId, conversationId);
     const { entry, client } = await this.#hub.resolveModel(providerId, model);
+    const sampler = this.#samplerFor(providerId, model);
 
     const prepared = await this.#store.locks.run(key, async () => {
       if (this.#active.has(key)) {
@@ -201,6 +217,7 @@ export class GenerationService {
         contextTokens:
           client.contextLength(model) ?? entry.contextTokens ?? this.#defaultContextTokens,
         maxOutputTokens: this.#maxOutputTokens,
+        ...(sampler.systemPrompt === undefined ? {} : { systemPrompt: sampler.systemPrompt }),
       });
 
       const written = await this.#store.writeUnderLock(userId, conversationId, next);
@@ -214,7 +231,7 @@ export class GenerationService {
       model,
       prepared.prompt.messages,
       client,
-      { conversationId, providerId }
+      { conversationId, providerId, sampler }
     );
     this.#active.set(key, generationId);
 

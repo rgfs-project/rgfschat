@@ -15,6 +15,14 @@ export interface ModelDto {
   inputModalities: Modality[];
   /** Whether the provider currently holds this model in memory. Advisory only. */
   loaded: boolean;
+  /**
+   * The sampling the provider itself was launched with, where it reports it.
+   *
+   * Advisory: it tells an administrator what a model does when nothing is
+   * configured here, so "reset to defaults" can show what it is resetting *to*
+   * rather than an empty slider.
+   */
+  defaults?: SamplerSettings;
 }
 
 export type MessageRole = 'system' | 'user' | 'assistant';
@@ -90,3 +98,32 @@ export type GenerationEvent =
   | { type: 'reasoning'; delta: string }
   | { type: 'state'; state: GenerationState }
   | { type: 'done'; state: GenerationState; errorCode?: string };
+
+/**
+ * Per-model sampler settings.
+ *
+ * Every field is optional and an absent one is *not sent upstream at all*, so
+ * the provider's own default applies. That matters: llama.cpp's defaults vary
+ * by build and by model, and writing our own guesses into every request would
+ * silently override whatever the server operator configured.
+ */
+export interface SamplerSettings {
+  temperature?: number | undefined;
+  topP?: number | undefined;
+  topK?: number | undefined;
+  minP?: number | undefined;
+  repeatPenalty?: number | undefined;
+  /** Prepended to every conversation with this model. */
+  systemPrompt?: string | undefined;
+}
+
+/** The bounds the UI offers and the server enforces. */
+export const SAMPLER_LIMITS = {
+  temperature: { min: 0, max: 2, step: 0.05 },
+  topP: { min: 0, max: 1, step: 0.01 },
+  topK: { min: 0, max: 100, step: 1 },
+  minP: { min: 0, max: 1, step: 0.01 },
+  repeatPenalty: { min: 1, max: 2, step: 0.01 },
+} as const;
+
+export const SYSTEM_PROMPT_MAX_LENGTH = 8_000;

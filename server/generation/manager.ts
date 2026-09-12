@@ -7,7 +7,7 @@ import type {
   GenerationState,
   TerminalState,
 } from '@shared/generation.ts';
-import { isTerminal } from '@shared/generation.ts';
+import { isTerminal, type SamplerSettings } from '@shared/generation.ts';
 import type { CheckpointStore } from './checkpoints.ts';
 import { AppError, isAppError } from '../errors/AppError.ts';
 import type { Logger } from '../logger.ts';
@@ -48,6 +48,9 @@ interface GenerationRecord {
   ownerId: string;
   /** The client this run streams from; different generations may use different providers. */
   provider: Provider;
+  /** Settled when the run starts, so a mid-flight settings change cannot alter
+      a generation that is already under way. */
+  sampler?: SamplerSettings;
   assistantMessageId: string;
   model: string;
   state: GenerationState;
@@ -135,7 +138,12 @@ export class GenerationManager {
     model: string,
     messages: ChatMessage[],
     provider?: Provider,
-    context: { conversationId?: string; providerId?: string } = {}
+    context: {
+      conversationId?: string;
+      providerId?: string;
+      /** Administrator-configured sampling for this model, if any. */
+      sampler?: SamplerSettings;
+    } = {}
   ): { generationId: string; assistantMessageId: string } {
     const client = provider ?? this.#provider;
     if (client === undefined) {
@@ -147,6 +155,7 @@ export class GenerationManager {
       conversationId: context.conversationId ?? '',
       providerId: context.providerId ?? '',
       ownerId,
+      ...(context.sampler === undefined ? {} : { sampler: context.sampler }),
       provider: client,
       assistantMessageId: randomUUID(),
       model,
@@ -185,6 +194,7 @@ export class GenerationManager {
         model: record.model,
         messages,
         maxOutputTokens: this.#maxOutputTokens,
+        ...(record.sampler === undefined ? {} : { sampler: record.sampler }),
         signal: record.abort.signal,
       });
 
