@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import express, { type Express } from 'express';
 import { JSON_BODY_LIMIT } from './config.ts';
@@ -15,6 +15,7 @@ import { meRouter } from './routes/me.ts';
 import { authRouter } from './routes/auth.ts';
 import { adminRouter } from './routes/admin.ts';
 import { createAttachmentsRouter } from './routes/attachments.ts';
+import { scriptHash, securityHeaders } from './middleware/securityHeaders.ts';
 import type { AttachmentStore } from './attachments/store.ts';
 import { authenticate, requireAdmin, requireAuth, requireCsrf } from './auth/middleware.ts';
 import type { ProviderRegistry } from './provider/registry.ts';
@@ -88,6 +89,18 @@ export function createApp({
   const app = express();
 
   app.disable('x-powered-by');
+
+  /*
+   * Before every route, including the static client and the 404, so no
+   * response can escape without them. The inline theme script in `index.html`
+   * is read once and allowed by hash — see the note in the middleware.
+   */
+  app.use(
+    securityHeaders({
+      isProduction,
+      inlineScriptHashes: inlineScriptHashesFor(clientDir),
+    })
+  );
 
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
@@ -237,4 +250,36 @@ export function createApp({
   app.use(errorHandler(logger));
 
   return app;
+}
+
+/**
+ * The hashes of any inline scripts the served `index.html` contains.
+ *
+ * Read from the built file rather than hard-coded, so editing the theme script
+ * cannot leave a stale hash behind — which would fail closed, with a white
+ * flash on every load and a console full of CSP violations, and would be
+ * noticed late because everything else would still work.
+ *
+ * An unreadable or absent shell yields no hashes, which is correct: with no
+ * client to serve there is no inline script to allow.
+ */
+function inlineScriptHashesFor(clientDir: string | undefined): string[] {
+  if (clientDir === undefined) return [];
+
+  let html: string;
+  try {
+    html = readFileSync(join(clientDir, 'index.html'), 'utf8');
+  } catch {
+    return [];
+  }
+
+  const hashes: string[] = [];
+  // Inline only: a `<script src=…>` is covered by `'self'` and has no body to
+  // hash. The lazy body match stops at the first closing tag.
+  const inline = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g;
+  for (const match of html.matchAll(inline)) {
+    const body = match[1] ?? '';
+    if (body.trim() !== '') hashes.push(scriptHash(body));
+  }
+  return hashes;
 }

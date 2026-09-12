@@ -98,17 +98,25 @@ test('a pasted image is attached', async ({ app, page }) => {
    * clipboard cannot be populated from the test side — and the event is
    * dispatched on the textarea, which is where a real paste would land.
    */
-  await page.evaluate(async (base64) => {
-    const response = await fetch(`data:image/png;base64,${base64}`);
-    const file = new File([await response.blob()], 'pasted.png', { type: 'image/png' });
+  await page.evaluate(
+    (bytes) => {
+      /*
+       * Built from the bytes directly rather than by fetching a `data:` URL.
+       * The application's CSP sets `connect-src 'self'`, which does not include
+       * `data:` — correctly, since nothing here fetches one — so a test that did
+       * would be testing the CSP rather than the paste.
+       */
+      const file = new File([new Uint8Array(bytes)], 'pasted.png', { type: 'image/png' });
 
-    const transfer = new DataTransfer();
-    transfer.items.add(file);
+      const transfer = new DataTransfer();
+      transfer.items.add(file);
 
-    document
-      .querySelector('textarea')
-      ?.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true }));
-  }, RED_PNG.toString('base64'));
+      document
+        .querySelector('textarea')
+        ?.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true }));
+    },
+    [...RED_PNG]
+  );
 
   await expect(page.locator('.chip--ready')).toHaveCount(1);
   await expect(page.locator('.chip__name')).toContainText('pasted.png');
