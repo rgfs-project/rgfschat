@@ -292,6 +292,8 @@ export interface SendVariables {
   providerId: string;
   model: string;
   content: string;
+  /** Uploaded and still pending; the server links them to the new message. */
+  attachmentIds?: readonly string[];
 }
 
 /**
@@ -312,8 +314,8 @@ export function useSendMessage(): UseMutationResult<
   const client = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ conversationId, providerId, model, content }) =>
-      startGeneration(conversationId, providerId, model, content),
+    mutationFn: ({ conversationId, providerId, model, content, attachmentIds }) =>
+      startGeneration(conversationId, providerId, model, content, attachmentIds ?? []),
 
     onMutate: async ({ conversationId, content }) => {
       const key = keys.conversation(conversationId);

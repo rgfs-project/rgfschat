@@ -1,3 +1,4 @@
+import type { AttachmentDto } from '@shared/attachment.ts';
 import type { HealthDto } from '@shared/api.ts';
 import type { GenerationAcceptedDto, GenerationSnapshotDto } from '@shared/generation.ts';
 import type { Message } from '@shared/conversation.ts';
@@ -180,12 +181,21 @@ export function startGeneration(
   conversationId: string,
   providerId: string,
   model: string,
-  content: string
+  content: string,
+  attachmentIds: readonly string[] = []
 ): Promise<GenerationAcceptedDto> {
   return request<GenerationAcceptedDto>('/api/generations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ conversationId, providerId, model, content }),
+    body: JSON.stringify({
+      conversationId,
+      providerId,
+      model,
+      content,
+      // Omitted rather than sent empty: the route's schema rejects unknown
+      // fields and accepts an absent one, and an empty array says nothing.
+      ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
+    }),
   });
 }
 
@@ -740,4 +750,74 @@ export function clearAdminHistory(body: {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...body, confirm: true }),
   });
+}
+
+/**
+ * Uploads one file and returns what the server made of it.
+ *
+ * `XMLHttpRequest` rather than `fetch`, for exactly one reason: progress. A
+ * `fetch` upload gives no way to observe how much has been sent, and a reader
+ * attaching a 9 MB image over a slow link needs to see that something is
+ * happening. Everything else here would be shorter with `fetch`.
+ */
+export function uploadAttachment(
+  file: File,
+  options: { onProgress?: (fraction: number) => void; signal?: AbortSignal } = {}
+): Promise<AttachmentDto> {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.append('file', file, file.name);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/attachments');
+    xhr.responseType = 'json';
+    if (csrfToken !== null) xhr.setRequestHeader('X-CSRF-Token', csrfToken);
+
+    xhr.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable) options.onProgress?.(event.loaded / event.total);
+    });
+
+    xhr.addEventListener('load', () => {
+      const body: unknown = xhr.response;
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(body as AttachmentDto);
+        return;
+      }
+      // The canonical error contract, the same as every other route's.
+      const error = (body as { error?: { code?: string; message?: string } } | null)?.error;
+      reject(
+        new ApiError(
+          (error?.code as ErrorCode | undefined) ?? 'INTERNAL',
+          error?.message ?? 'The file could not be uploaded.'
+        )
+      );
+    });
+
+    xhr.addEventListener('error', () =>
+      reject(new ApiError('NETWORK', 'The file could not be uploaded.'))
+    );
+    xhr.addEventListener('abort', () =>
+      reject(new ApiError('NETWORK', 'The upload was cancelled.'))
+    );
+
+    options.signal?.addEventListener('abort', () => {
+      xhr.abort();
+    });
+
+    xhr.send(form);
+  });
+}
+
+/** Discards an attachment that has not been sent with a message yet. */
+export function deleteAttachment(id: string): Promise<void> {
+  return request(`/api/attachments/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** Where an attachment's bytes live, for an `<img>` or a download link. */
+export function attachmentContentUrl(id: string): string {
+  return `/api/attachments/${encodeURIComponent(id)}/content`;
+}
+
+export function getAttachment(id: string): Promise<AttachmentDto> {
+  return request<AttachmentDto>(`/api/attachments/${encodeURIComponent(id)}`);
 }

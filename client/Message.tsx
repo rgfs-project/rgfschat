@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Check, ChevronRight, Copy, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import type { Message as MessageModel, MessageStatus } from '@shared/conversation.ts';
 import { Markdown } from './Markdown.tsx';
+import { MessageAttachments } from './MessageAttachments.tsx';
 
 /**
  * One turn in the transcript.
@@ -130,6 +131,8 @@ export function Message({
           <Markdown>{message.body}</Markdown>
         )}
       </div>
+
+      {message.type === 'user' && <MessageAttachments ids={message.attachments ?? []} />}
 
       {statusLabel !== undefined && <p className="msg__status">{statusLabel}</p>}
 

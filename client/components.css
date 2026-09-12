@@ -2100,3 +2100,169 @@ button.linkish:hover {
     min-height: 2.75rem;
   }
 }
+
+/* ==========================================================================
+   Attachments
+   ========================================================================== */
+
+/* Only visible to a screen reader — the file input the attach button drives. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The composer while a file is over it. A ring rather than a fill: the field
+   underneath still has to be readable, and a wash over it reads as disabled. */
+.composer.is-dropping {
+  outline: 2px dashed var(--border-strong);
+  outline-offset: -3px;
+}
+
+.composer__warning {
+  margin: 0 0 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+/* --- chips, above the field ---------------------------------------------- */
+
+.chips {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  max-width: 100%;
+  padding: 0.25rem 0.25rem 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  font-size: 0.75rem;
+  background: var(--surface);
+}
+
+/*
+ * Progress as a fill behind the name rather than as a bar of its own.
+ *
+ * A separate bar would make an uploading chip taller than a finished one, so
+ * the whole strip — and the composer above it — would resize as each upload
+ * completed. This way the chip is one size for its whole life.
+ */
+.chip--uploading {
+  background: linear-gradient(
+    to right,
+    var(--surface-2) 0 var(--chip-progress, 0%),
+    var(--surface) var(--chip-progress, 0%) 100%
+  );
+}
+
+.chip--error {
+  border-color: var(--danger, #b3261e);
+  color: var(--danger, #b3261e);
+}
+
+.chip__icon {
+  display: inline-flex;
+  color: var(--muted);
+  flex: none;
+}
+
+/* A thumbnail stands in for the icon once there is one to show. */
+.chip__thumb {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 0.25rem;
+  object-fit: cover;
+  flex: none;
+}
+
+.chip__name {
+  min-width: 0;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip__meta {
+  flex: none;
+  font-size: 0.6875rem;
+}
+
+.chip__remove {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex: none;
+}
+
+/* --- in the transcript ---------------------------------------------------- */
+
+.attachments {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* A user message is a right-aligned bubble; what it carried aligns with it. */
+.msg--user .attachments {
+  justify-content: flex-end;
+}
+
+.attachment {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+}
+
+.attachment--image img {
+  display: block;
+  max-width: 12rem;
+  max-height: 12rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+}
+
+.attachment--file,
+.attachment--missing,
+.attachment--loading {
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.attachment--file a {
+  color: var(--text);
+}
+
+.attachment--missing {
+  border-style: dashed;
+}
+
+@media (pointer: coarse) {
+  .chip__remove {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .attachment--file,
+  .attachment--missing {
+    min-height: 2.75rem;
+  }
+}

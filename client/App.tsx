@@ -28,6 +28,7 @@ import {
 import { useGeneration } from './useGeneration.ts';
 import { useNarrowViewport } from './useNarrowViewport.ts';
 import { useScrollPin } from './useScrollPin.ts';
+import { useAttachments } from './useAttachments.ts';
 
 /** An in-flight generation survives a reload, so its id is parked in storage. */
 const ACTIVE_KEY = 'workspace.activeGeneration';
@@ -162,6 +163,7 @@ export function App({
   const sendMessage = useSendMessage();
   const regenerate = useRegenerate();
 
+  const attachments = useAttachments();
   const [generationId, setGenerationId] = useState<string | null>(() => readStored(ACTIVE_KEY));
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<PendingDialog | null>(null);
@@ -252,6 +254,22 @@ export function App({
       (currentId !== null ? selectionByConversation[currentId] : undefined) ?? fallbackSelection,
     [currentId, selectionByConversation, fallbackSelection]
   );
+
+  /**
+   * Whether the chosen model can read an image.
+   *
+   * Read from discovery rather than configured: the provider reports each
+   * model's input modalities, so this is what the server itself will check
+   * against when the message is sent.
+   */
+  const modelHasVision = useMemo(() => {
+    if (selection === null) return true;
+    const group = groups.find((candidate) => candidate.providerId === selection.providerId);
+    const model = group?.models.find((candidate) => candidate.id === selection.modelId);
+    // Unknown means "do not warn": the server is the authority, and a warning
+    // shown because the catalogue had not loaded would be noise.
+    return model === undefined || model.inputModalities.includes('image');
+  }, [groups, selection]);
 
   /** The conversation could not be parsed; only deletion is offered. */
   const malformed =
@@ -454,9 +472,13 @@ export function App({
         providerId: selection.providerId,
         model: selection.modelId,
         content: text,
+        attachmentIds: attachments.readyIds,
       });
       writeStored(ACTIVE_KEY, accepted.generationId);
       setGenerationId(accepted.generationId);
+      // Only once the server has them: cleared earlier, a failed send would
+      // lose the files as well as the text.
+      attachments.clear();
     } catch (err) {
       // The optimistic message has already been rolled back by the mutation;
       // the text goes back in the composer so it is not simply lost.
@@ -472,6 +494,7 @@ export function App({
     sendMessage,
     onDraftChange,
     onConversationCreated,
+    attachments,
   ]);
 
   const onRegenerate = useCallback(async () => {
@@ -766,6 +789,8 @@ export function App({
             )}
 
             <Composer
+              attachments={attachments}
+              modelHasVision={modelHasVision}
               value={draft}
               onChange={onDraftChange}
               onSend={() => void send()}
