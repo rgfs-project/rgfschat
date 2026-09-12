@@ -134,6 +134,19 @@ body {
   padding: 0.75rem 0.75rem 0.625rem;
 }
 
+/*
+ * A hairline between the ways out of this pane and the conversations below it.
+ *
+ * A flex child rather than a border on the container, so it takes the content
+ * width and lines up with the rows instead of running to the sidebar's edges,
+ * and the column's own gap spaces it without any margin of its own.
+ */
+.sidebar__actions::after {
+  content: '';
+  height: 1px;
+  background: var(--border);
+}
+
 /* The only scrolling part of the sidebar. */
 .sidebar__list {
   flex: 1;
