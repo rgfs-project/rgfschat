@@ -5,7 +5,7 @@ maintained **outside this repository** alongside the phase prompts that drive th
 This document records what is **actually built** and where each invariant is enforced.
 If this file and the contract disagree, the contract wins and the discrepancy is a bug.
 
-Current state: **Phase 11 complete.**
+Current state: **Phase 12 complete.**
 
 ## 1. Process shape
 
@@ -147,6 +147,29 @@ never disguised as an empty stream.
 
 `content` and `reasoning` are separate event types and separate fields
 throughout. Reasoning is never sent back to the model (contracts §4).
+
+## 4c. Security review (Phase 12)
+
+The full review — controls, the tests backing each, the exception register, and the backup and
+restore procedure — is in [`SECURITY.md`](SECURITY.md). It is a separate file because it is
+read by a different person at a different time: an operator deciding whether to run this, not
+someone changing the code.
+
+Two things found by that review are worth recording here, because both were architectural
+rather than local:
+
+- **The auth router is mounted before the global `requireAuth` + `requireCsrf` gate**, because
+  login and registration must be reachable without a session. That placement silently exempted
+  the _authenticated_ routes in the same router — `logout` and `password` — from CSRF. They now
+  require the token per route rather than relying on a gate they sit above.
+- **Two limits were missing entirely** for input this process accepts but does not control: an
+  image's declared dimensions (a hundred-byte PNG can claim 60000x60000) and a provider's
+  response length. Both are now bounded; see §13 and `provider/llamacpp.ts`.
+
+Enumerated tests drive from the real router and from `StoragePaths` itself rather than from
+hand-written lists, so a route or a path constructor added later is covered the moment it
+exists. That is the property worth having: the failure being guarded against is not a hole in
+reviewed code, but one added afterwards by someone who did not know to update a list.
 
 ## 5. Invariant register
 
