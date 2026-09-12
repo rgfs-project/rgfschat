@@ -124,6 +124,7 @@ const rebuildSchema = z.strictObject({ userId: z.string().min(1).optional() });
  * explicitly rather than defaulting to the most destructive reading.
  */
 const clearHistorySchema = z.strictObject({
+  /** One account. Absent means the caller's own, never everyone's. */
   userId: z.string().min(1).optional(),
   withinHours: z.union([z.literal(1), z.literal(6), z.literal(12), z.literal(24)]).optional(),
   /** Must be sent deliberately; there is no accidental path to this. */
@@ -586,10 +587,20 @@ export function adminRouter({
     res.json({ providers });
   });
 
+  /**
+   * Clears stored conversations for **one** account.
+   *
+   * Absent `userId` means the caller's own, which is what the control in the
+   * admin panel sends and what its description promises. It used to mean every
+   * account on the instance: one unparameterised request, sent by a button
+   * labelled "deletes your own", took every conversation belonging to everyone.
+   * There is no request shape that means "all users" any more — an operation
+   * that deletes files with no undo should have to name what it is deleting.
+   */
   router.post('/maintenance/clear-history', validateBody(clearHistorySchema), async (req, res) => {
     const { userId, withinHours } = req.body as z.infer<typeof clearHistorySchema>;
 
-    const targets = userId === undefined ? (await users.list()).map((u) => u.id) : [userId];
+    const targets = [userId ?? actor(req).id];
     const cutoff = withinHours === undefined ? null : Date.now() - withinHours * 60 * 60 * 1000;
 
     let deleted = 0;
@@ -625,7 +636,7 @@ export function adminRouter({
       target: userId ?? null,
       outcome: 'success',
       details: {
-        scope: userId === undefined ? 'all users' : 'one user',
+        scope: userId === undefined ? 'self' : 'one user',
         window: withinHours === undefined ? 'everything' : `${withinHours}h`,
         conversationsDeleted: deleted,
         generationsCancelled: cancelled,

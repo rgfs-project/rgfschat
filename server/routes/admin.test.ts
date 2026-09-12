@@ -841,14 +841,38 @@ describe('clearing chat history', () => {
     expect(await index.list(adminId)).toHaveLength(1);
   });
 
-  it('clears every account when no user is named', async () => {
+  /**
+   * The body the admin panel's own control sends.
+   *
+   * This asserted the opposite until it was found the hard way: an absent
+   * `userId` meant every account, so a button described as deleting your own
+   * conversations deleted everybody's. A test named for the behaviour is not
+   * the same as a test of the right behaviour.
+   */
+  it('clears only the caller when no user is named', async () => {
     await seed(plainUserId, 'theirs', 0.5);
     await seed(adminId, 'mine', 0.5);
 
     await clear({});
 
-    expect(await index.list(plainUserId)).toHaveLength(0);
     expect(await index.list(adminId)).toHaveLength(0);
+    expect(await index.list(plainUserId)).toHaveLength(1);
+    // And their file is still on disk, not merely still indexed.
+    expect(await store.exists(plainUserId, (await index.list(plainUserId))[0]!.id)).toBe(true);
+  });
+
+  it('names one account in the audit trail rather than a sweep', async () => {
+    await seed(adminId, 'mine', 0.5);
+    await clear({});
+
+    const dir = paths.auditDir();
+    const files = await readdir(dir).catch(() => [] as string[]);
+    let text = '';
+    for (const file of files) text += await readFile(join(dir, file), 'utf8');
+
+    expect(text).toContain('history.clear');
+    expect(text).toContain('"scope":"self"');
+    expect(text).not.toContain('all users');
   });
 
   it('refuses without an explicit confirmation', async () => {
