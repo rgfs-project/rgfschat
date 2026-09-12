@@ -12,6 +12,7 @@ import { ConversationStore } from './storage/conversations.ts';
 import { ChatIndex } from './storage/index.ts';
 import { PreferencesStore } from './storage/preferences.ts';
 import { MemoryStore } from './storage/memories.ts';
+import { AttachmentStore } from './attachments/store.ts';
 import { StoragePaths } from './storage/paths.ts';
 import { GenerationService } from './generation/service.ts';
 import { CheckpointStore } from './generation/checkpoints.ts';
@@ -54,6 +55,7 @@ async function main(): Promise<void> {
   const index = new ChatIndex({ store, logger });
   const preferences = new PreferencesStore(paths0, logger);
   const memories = new MemoryStore(paths0, logger);
+  const attachments = new AttachmentStore(paths0, config.attachments);
 
   /*
    * Loaded before the generation service is built, because the service asks it
@@ -111,6 +113,7 @@ async function main(): Promise<void> {
     settings,
     audit,
     policy: config.hostPolicy,
+    attachments,
   });
 
   // Prepares the user's directories and sweeps temp files left by a crash

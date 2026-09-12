@@ -73,6 +73,36 @@ const envSchema = z.object({
   PROVIDER_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(120_000),
   DEFAULT_CONTEXT_TOKENS: z.coerce.number().int().min(512).max(2_000_000).default(8_192),
   MAX_OUTPUT_TOKENS: z.coerce.number().int().min(16).max(1_000_000).default(2_048),
+
+  /*
+   * Attachments (Phase 11).
+   *
+   * The per-file limit is deliberately well under what a model can actually be
+   * sent: an image is re-encoded as base64 into the prompt, so the bytes cost
+   * roughly a third more again, and the context budget runs out long before a
+   * disk does.
+   */
+  ATTACHMENT_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .min(1_024)
+    .max(64 * 1024 * 1024)
+    .default(10 * 1024 * 1024),
+  ATTACHMENT_MAX_TOTAL_BYTES_PER_USER: z.coerce
+    .number()
+    .int()
+    .min(1_024)
+    .max(64 * 1024 * 1024 * 1024)
+    .default(512 * 1024 * 1024),
+  /** How long an upload nobody referenced survives before it is collected. */
+  ATTACHMENT_PENDING_TTL_MS: z.coerce
+    .number()
+    .int()
+    .min(60_000)
+    .max(30 * 24 * 60 * 60 * 1000)
+    .default(24 * 60 * 60 * 1000),
+  /** Characters of a text attachment inlined into a prompt before truncation. */
+  ATTACHMENT_MAX_INLINE_CHARS: z.coerce.number().int().min(1_000).max(2_000_000).default(100_000),
 });
 
 export interface Config {
@@ -89,6 +119,16 @@ export interface Config {
   hostPolicy: HostPolicy;
   streaming: StreamingConfig;
   provider: ProviderConfig;
+  attachments: AttachmentConfig;
+}
+
+/** Phase 11. Grouped like the others, so one thing owns the whole subject. */
+export interface AttachmentConfig {
+  maxBytes: number;
+  maxTotalBytesPerUser: number;
+  pendingTtlMs: number;
+  /** Characters, not bytes: what is counted is what goes into a prompt. */
+  maxInlineChars: number;
 }
 
 export interface StreamingConfig {
@@ -158,6 +198,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     PROVIDER_TIMEOUT_MS,
     DEFAULT_CONTEXT_TOKENS,
     MAX_OUTPUT_TOKENS,
+    ATTACHMENT_MAX_BYTES,
+    ATTACHMENT_MAX_TOTAL_BYTES_PER_USER,
+    ATTACHMENT_PENDING_TTL_MS,
+    ATTACHMENT_MAX_INLINE_CHARS,
   } = parsed.data;
 
   return {
@@ -171,6 +215,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       registrationMode: REGISTRATION_MODE,
       absoluteTtlMs: SESSION_ABSOLUTE_TTL_MS,
       idleTtlMs: SESSION_IDLE_TTL_MS,
+    },
+    attachments: {
+      maxBytes: ATTACHMENT_MAX_BYTES,
+      maxTotalBytesPerUser: ATTACHMENT_MAX_TOTAL_BYTES_PER_USER,
+      pendingTtlMs: ATTACHMENT_PENDING_TTL_MS,
+      maxInlineChars: ATTACHMENT_MAX_INLINE_CHARS,
     },
     streaming: {
       checkpointMs: GENERATION_CHECKPOINT_MS,

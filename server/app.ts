@@ -14,6 +14,8 @@ import type { MemoryStore } from './storage/memories.ts';
 import { meRouter } from './routes/me.ts';
 import { authRouter } from './routes/auth.ts';
 import { adminRouter } from './routes/admin.ts';
+import { createAttachmentsRouter } from './routes/attachments.ts';
+import type { AttachmentStore } from './attachments/store.ts';
 import { authenticate, requireAdmin, requireAuth, requireCsrf } from './auth/middleware.ts';
 import type { ProviderRegistry } from './provider/registry.ts';
 import type { SettingsStore } from './admin/settings.ts';
@@ -52,6 +54,8 @@ export interface AppOptions {
   settings?: SettingsStore;
   audit?: AuditLog;
   policy?: HostPolicy;
+  /** Phase 11. Absent in tests that do not exercise attachments. */
+  attachments?: AttachmentStore;
 }
 
 /**
@@ -79,6 +83,7 @@ export function createApp({
   settings,
   audit,
   policy,
+  attachments,
 }: AppOptions): Express {
   const app = express();
 
@@ -142,6 +147,17 @@ export function createApp({
     sessions !== undefined
   ) {
     app.use('/api', meRouter({ store, index, manager, preferences, memories, users, sessions }));
+
+    /*
+     * After the JSON parser, and unaffected by it: the upload route reads the
+     * raw request stream itself, and `express.json` ignores a multipart body.
+     * Its own size limit is enforced while streaming rather than by a body
+     * parser, so `JSON_BODY_LIMIT` does not apply here (the phase asks for a
+     * separate limit, and this is it).
+     */
+    if (attachments !== undefined) {
+      app.use('/api', createAttachmentsRouter(attachments));
+    }
   }
 
   if (hub !== undefined && manager !== undefined && service !== undefined) {
