@@ -290,3 +290,35 @@ describe('discarding', () => {
     expect((await owner.fetch(`/api/attachments/${created.id}`)).status).toBe(404);
   });
 });
+
+describe('rate limiting', () => {
+  it('refuses a flood of uploads with RATE_LIMITED and a Retry-After', async () => {
+    /*
+     * Sixty per minute is the configured budget. Sent serially rather than in
+     * parallel so the counter's order is the request order, and the first
+     * refusal is unambiguous.
+     */
+    let refused: Response | undefined;
+    for (let i = 0; i < 65; i += 1) {
+      const response = await upload(owner, `f${i}.txt`, Buffer.from('x'));
+      if (response.status === 429) {
+        refused = response;
+        break;
+      }
+    }
+
+    expect(refused, 'the upload limit never engaged').toBeDefined();
+    expect(Number(refused?.headers.get('retry-after'))).toBeGreaterThan(0);
+    expect(await refused?.json()).toMatchObject({ error: { code: 'RATE_LIMITED' } });
+  });
+
+  it("one account's flood does not spend another's budget", async () => {
+    for (let i = 0; i < 65; i += 1) {
+      const response = await upload(owner, `f${i}.txt`, Buffer.from('x'));
+      if (response.status === 429) break;
+    }
+
+    // The limit is per account, so the other one is untouched.
+    expect((await upload(other, 'mine.txt', Buffer.from('x'))).status).toBe(201);
+  });
+});

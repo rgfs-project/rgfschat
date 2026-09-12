@@ -1,4 +1,4 @@
-import { Router, type Response } from 'express';
+import { Router, type RequestHandler, type Response } from 'express';
 import { z } from 'zod';
 import {
   PASSWORD_MAX_LENGTH,
@@ -9,6 +9,7 @@ import {
 } from '@shared/auth.ts';
 import type { AuthConfig } from '../config.ts';
 import { AppError } from '../errors/AppError.ts';
+import { addressOf, rateLimit, userOf, type RateLimiter } from '../middleware/rateLimit.ts';
 import { validateBody } from '../http/validate.ts';
 import type { Logger } from '../logger.ts';
 import { requireAuth, requireSameOrigin } from '../auth/middleware.ts';
@@ -28,6 +29,8 @@ const changePasswordSchema = z.strictObject({
 export interface AuthRoutesOptions {
   users: UserStore;
   sessions: SessionManager;
+  /** Shared with every other limited route, so one process has one budget. */
+  limiter: RateLimiter;
   config: AuthConfig;
   isProduction: boolean;
   logger: Logger;
@@ -48,9 +51,34 @@ export function authRouter({
   config,
   isProduction,
   logger,
+  limiter,
   registrationMode = () => config.registrationMode,
 }: AuthRoutesOptions): Router {
   const router = Router();
+
+  /*
+   * Both dimensions, because either alone leaves a hole: per address lets a
+   * botnet spread one account's guesses across many hosts, and per username
+   * lets one host work through a list of accounts. A caller must stay under
+   * both.
+   *
+   * The username is lowercased for the key because usernames are
+   * case-insensitive (contracts §6) — otherwise `Root` and `root` would be two
+   * budgets for one account.
+   */
+  const perAddress = (name: string, limit: number): RequestHandler =>
+    rateLimit(limiter, { name, limit, windowMs: 15 * 60_000, key: addressOf });
+
+  const perUsername = (name: string, limit: number): RequestHandler =>
+    rateLimit(limiter, {
+      name,
+      limit,
+      windowMs: 15 * 60_000,
+      key: (req) => {
+        const body = req.body as { username?: unknown };
+        return typeof body?.username === 'string' ? body.username.toLowerCase() : null;
+      },
+    });
 
   const setSessionCookie = (res: Response, token: string): void => {
     res.cookie(SESSION_COOKIE, token, {
@@ -84,6 +112,8 @@ export function authRouter({
     '/auth/register',
     requireSameOrigin(),
     validateBody(credentialsSchema),
+    perAddress('register-address', 10),
+    perUsername('register-username', 5),
     async (req, res) => {
       if (registrationMode() !== 'open') {
         throw new AppError('REGISTRATION_CLOSED', 'Registration is closed.');
@@ -103,6 +133,8 @@ export function authRouter({
     '/auth/login',
     requireSameOrigin(),
     validateBody(credentialsSchema),
+    perAddress('login-address', 20),
+    perUsername('login-username', 10),
     async (req, res) => {
       const { username, password } = req.body as z.infer<typeof credentialsSchema>;
 
@@ -137,6 +169,14 @@ export function authRouter({
     '/auth/password',
     requireAuth(),
     validateBody(changePasswordSchema),
+    // Per account: this route verifies the current password, so it is a
+    // guessing oracle for anyone who has stolen a session but not the password.
+    rateLimit(limiter, {
+      name: 'password-change',
+      limit: 10,
+      windowMs: 15 * 60_000,
+      key: userOf,
+    }),
     async (req, res) => {
       const { currentPassword, newPassword } = req.body as z.infer<typeof changePasswordSchema>;
       const auth = req.auth!;

@@ -16,6 +16,7 @@ import { authRouter } from './routes/auth.ts';
 import { adminRouter } from './routes/admin.ts';
 import { createAttachmentsRouter } from './routes/attachments.ts';
 import { scriptHash, securityHeaders } from './middleware/securityHeaders.ts';
+import { RateLimiter, rateLimit, userOf } from './middleware/rateLimit.ts';
 import type { AttachmentStore } from './attachments/store.ts';
 import { authenticate, requireAdmin, requireAuth, requireCsrf } from './auth/middleware.ts';
 import type { ProviderRegistry } from './provider/registry.ts';
@@ -91,6 +92,13 @@ export function createApp({
   app.disable('x-powered-by');
 
   /*
+   * One limiter for the whole process, shared by every rule. Separate limiters
+   * would each keep their own counters and a caller would get one budget per
+   * route family rather than the budget the operator configured.
+   */
+  const limiter = new RateLimiter();
+
+  /*
    * Before every route, including the static client and the 404, so no
    * response can escape without them. The inline theme script in `index.html`
    * is read once and allowed by hash — see the note in the middleware.
@@ -114,6 +122,7 @@ export function createApp({
     app.use(
       '/api',
       authRouter({
+        limiter,
         users,
         sessions,
         config: authConfig,
@@ -176,10 +185,40 @@ export function createApp({
    * and this is how it is separate.
    */
   if (attachments !== undefined) {
+    /*
+     * Uploads are limited per account rather than per address: they require a
+     * session, so the account is the thing that can be held responsible, and
+     * limiting by address would punish everyone behind one office NAT.
+     */
+    app.use(
+      '/api/attachments',
+      rateLimit(limiter, {
+        name: 'upload',
+        limit: 60,
+        windowMs: 60_000,
+        key: (req) => (req.method === 'POST' ? userOf(req) : null),
+      })
+    );
     app.use('/api', createAttachmentsRouter(attachments));
   }
 
   if (hub !== undefined && manager !== undefined && service !== undefined) {
+    /*
+     * A generation is the most expensive thing a request can ask for — it
+     * occupies the provider and, on a router-mode server, can evict a resident
+     * model. Limited per account, generously enough that a person never meets
+     * it and a loop does.
+     */
+    app.use(
+      '/api/generations',
+      rateLimit(limiter, {
+        name: 'generation-start',
+        limit: 30,
+        windowMs: 60_000,
+        key: (req) => (req.method === 'POST' ? userOf(req) : null),
+      })
+    );
+
     app.use(
       '/api',
       generationRouter({ manager, hub, service, ...(settings === undefined ? {} : { settings }) })

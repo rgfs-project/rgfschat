@@ -35,6 +35,8 @@ export const ERROR_CODES = [
   'UNSUPPORTED_MEDIA_TYPE',
   'QUOTA_EXCEEDED',
   'MODEL_CAPABILITY_UNSUPPORTED',
+  // Phase 12
+  'RATE_LIMITED',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -72,6 +74,9 @@ export const ERROR_STATUS: Readonly<Record<ErrorCode, number>> = {
   // The request is valid and the model cannot do it — an unprocessable
   // entity rather than a bad one.
   MODEL_CAPABILITY_UNSUPPORTED: 422,
+  // Accompanied by `Retry-After`, so the caller is told when to return rather
+  // than left to retry into the same wall.
+  RATE_LIMITED: 429,
 };
 
 /**
