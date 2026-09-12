@@ -205,13 +205,21 @@ export const test = base.extend<{ app: AppFixture }>({
 
 export { expect } from '@playwright/test';
 
-/** Signs in through the real login form and lands on the chat view. */
+/**
+ * Signs in through the real login form and lands on the chat view.
+ *
+ * Waits on the composer rather than on "New chat". The latter lives inside the
+ * sidebar, and below the breakpoint the sidebar is a closed drawer — so on any
+ * narrow viewport this waited for a control that was deliberately hidden and
+ * timed out after a minute. The composer is in the main column at every width,
+ * and it appears only once signed in, which is the thing being waited for.
+ */
 export async function signIn(page: Page, baseUrl: string): Promise<void> {
   await page.goto(baseUrl);
   await page.getByLabel('Username').fill(ADMIN_USERNAME);
   await page.getByLabel('Password').fill(ADMIN_PASSWORD);
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await page.getByRole('button', { name: 'New chat' }).waitFor();
+  await composerField(page).waitFor();
 }
 
 /** Creates a conversation and sends one message, leaving it mid-stream. */
@@ -249,8 +257,27 @@ async function expectEnabled(locator: ReturnType<typeof composerField>): Promise
  *
  * Returns the marker written into each, so a test can tell which one it is
  * looking at.
+ *
+ * **Call this before `signIn`, not after.** Dropping the index while a page is
+ * already loaded races the server: a `GET /conversations` still in flight from
+ * that page rebuilds and writes the index, and if that write lands after this
+ * delete, the reload is served a stale index listing nothing. Seeding before
+ * anything has loaded closes the window rather than waiting it out.
  */
-export async function seedConversations(dataDir: string, count: number): Promise<string[]> {
+export interface SeedOptions {
+  /** The body of each seeded message, when the marker alone is not enough —
+      a wide code block, say, for a test about horizontal overflow. */
+  body?: string;
+  /** How many user messages each conversation gets, for tests that need the
+      transcript to be taller than the viewport. Defaults to one. */
+  messages?: number;
+}
+
+export async function seedConversations(
+  dataDir: string,
+  count: number,
+  options: SeedOptions = {}
+): Promise<string[]> {
   const { serializeConversation } = await import('../server/storage/markdown.ts');
   const { FORMAT_VERSION } = await import('../shared/conversation.ts');
 
@@ -265,9 +292,19 @@ export async function seedConversations(dataDir: string, count: number): Promise
   const markers: string[] = [];
   const now = new Date().toISOString();
 
+  const perConversation = Math.max(1, options.messages ?? 1);
+
   for (let index = 0; index < count; index += 1) {
     const marker = `marker-for-conversation-${index}`;
     markers.push(marker);
+
+    // The marker stays in the first message whatever the body is, so a test
+    // can still find the conversation it seeded.
+    const messages = Array.from({ length: perConversation }, (_unused, position) => ({
+      type: 'user' as const,
+      id: randomUUID(),
+      body: position === 0 ? (options.body ?? marker) : `${marker} line ${position}`,
+    }));
 
     await writeFile(
       join(chats, `${randomUUID()}.md`),
@@ -276,7 +313,7 @@ export async function seedConversations(dataDir: string, count: number): Promise
         title: `Conversation ${index}`,
         createdAt: now,
         updatedAt: now,
-        messages: [{ type: 'user', id: randomUUID(), body: marker }],
+        messages,
       }),
       'utf8'
     );

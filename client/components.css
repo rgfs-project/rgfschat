@@ -1669,7 +1669,10 @@ button.linkish:hover {
   justify-content: flex-end;
 }
 
-@media (max-width: 48rem) {
+/* 56rem, not 48: the same line `useNarrowViewport` watches. At 48 there was a
+   128px band where the sidebar had already become a drawer while the panel
+   still laid itself out as though a desktop were behind it. */
+@media (max-width: 56rem) {
   .panel__card {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
@@ -1861,4 +1864,136 @@ button.linkish:hover {
 
 .sampler__prompt textarea::placeholder {
   color: var(--muted);
+}
+
+/* ==========================================================================
+   Touch
+   ==========================================================================
+
+   A finger is not a cursor: it covers roughly 44 CSS px and it arrives without
+   a hover to say where it is about to land. Both facts are asked as capability
+   queries rather than as widths, because they are properties of the input
+   device — a touchscreen laptop at 1440px needs the larger targets as much as a
+   phone does, and a phone attached to a mouse does not.
+   ========================================================================== */
+
+@media (pointer: coarse) {
+  /*
+   * The controls are grown, rather than given an invisible pad that is larger
+   * than they are.
+   *
+   * The pad is the usual trick — an absolutely positioned `::after` stretched
+   * to 44px and pushed behind with `z-index: -1` — and it has two failure modes
+   * that are both silent. Behind is behind: an ancestor that paints a
+   * background covers the pad, and taps that look like they are on the control
+   * land on the ancestor instead. And two neighbours 8px apart each grown by 6
+   * on a side overlap, so one of them quietly answers for four pixels of the
+   * other.
+   *
+   * Sizing the control itself has neither problem, and the cost is only that
+   * its hover and press fills are drawn at 44px on a device that has no hover
+   * and shows a press for 120ms. 56px headers and 65px footers already have the
+   * room.
+   */
+  .icon-button,
+  .msg__actions .icon-button,
+  .composer__send {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  /* Rows: height only. They are already the full width of their container, and
+     widening them is what would push a scroll container into overflowing. */
+  .conversation__open,
+  .menu__item,
+  .model-option,
+  .model-trigger,
+  .panel__rail-item,
+  .nav-button,
+  .account {
+    min-height: 2.75rem;
+  }
+
+  /*
+   * The message field is a target as much as the buttons beside it — it is the
+   * one a reader aims at most often, and at 34px it was the smallest thing on
+   * the screen. `min-height` rather than `height` because it grows with what is
+   * typed into it and must keep doing so.
+   */
+  .composer textarea {
+    min-height: 2.75rem;
+  }
+}
+
+/* ==========================================================================
+   Narrow windows
+   ==========================================================================
+
+   Matches `--breakpoint-narrow` in `theme.css`, the same line
+   `useNarrowViewport` watches. Below it the sidebar is a drawer, and every
+   overlay that was positioned against a desktop's spare room has to be told
+   what to do without any.
+   ========================================================================== */
+
+@media (max-width: 56rem) {
+  /*
+   * Menus become sheets at the bottom of the screen.
+   *
+   * A menu anchored to its trigger is right when there is room below it and
+   * wrong on a phone, where the trigger is as likely to be at the bottom edge
+   * as anywhere and the menu opens off-screen or is flipped into the middle of
+   * the transcript. The bottom of the screen is also simply where a thumb is.
+   *
+   * `position: fixed` with the inline offsets overridden: these are portalled
+   * and carry a computed `left`/`top` as inline style, which `inset` alone
+   * would not beat — hence `!important` here and nowhere else in this file.
+   */
+  .menu,
+  .model-menu {
+    position: fixed !important;
+    inset: auto 0 0 0 !important;
+    width: auto !important;
+    max-width: none;
+    max-height: 70dvh;
+    border-radius: var(--radius) var(--radius) 0 0;
+    border-bottom: none;
+    padding-bottom: var(--safe-bottom);
+    animation: sheet-in var(--motion) var(--ease-out);
+  }
+
+  .model-menu__list {
+    /* The sheet owns the height now; an inner cap would scroll twice. */
+    max-height: none;
+  }
+
+  @keyframes sheet-in {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: none;
+    }
+  }
+
+  /*
+   * Dialogs sit against the bottom too, for the same reason, but keep their
+   * side margins: a confirmation that fills the screen edge to edge reads as a
+   * new page rather than as a question about the one behind it.
+   */
+  .modal .modal__card {
+    align-self: end;
+    width: 100%;
+    max-width: none;
+    margin-bottom: max(0.5rem, var(--safe-bottom));
+  }
+
+  /* Panels are full-screen: they are a place, not an overlay, at this width. */
+  .panel__card {
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+    padding-bottom: var(--safe-bottom);
+  }
 }

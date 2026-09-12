@@ -14,6 +14,12 @@ import { useSyncExternalStore } from 'react';
  * so the sidebar never flashes open on a narrow window before an effect closes
  * it.
  */
+/**
+ * Kept in step with `--breakpoint-narrow` in `theme.css`, which is where the
+ * number is explained. A custom property cannot be read from a media query, so
+ * this is a copy rather than a reference; `e2e/mobile.spec.ts` tests the
+ * boundary at ±1px, which is what fails if the two ever drift apart again.
+ */
 const QUERY = '(max-width: 56rem)';
 
 /**

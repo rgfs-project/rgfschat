@@ -24,10 +24,9 @@ function transcript(page: Page) {
 
 test.describe('transcript scrolling', () => {
   test('scrolls independently of the document in a long conversation', async ({ app, page }) => {
-    await signIn(page, app.baseUrl);
     await seedConversations(app.dataDir, 1);
     await seedMessages(app.dataDir, 200);
-    await page.reload();
+    await signIn(page, app.baseUrl);
     await page.locator('.conversation__open').first().click();
 
     await expect(page.locator('.msg--user')).toHaveCount(200);
@@ -75,13 +74,12 @@ test.describe('transcript scrolling', () => {
   });
 
   test('jump to latest appears when unpinned and returns to the bottom', async ({ app, page }) => {
-    await signIn(page, app.baseUrl);
     await seedConversations(app.dataDir, 1);
 
     // The transcript has to overflow before "scrolled away" means anything —
     // in a conversation that fits on screen the user is always at the bottom.
     await seedMessages(app.dataDir, 60);
-    await page.reload();
+    await signIn(page, app.baseUrl);
     await page.locator('.conversation__open').first().click();
     await expect(page.locator('.msg--user')).toHaveCount(60);
 
@@ -172,9 +170,8 @@ test.describe('overlays are not clipped', () => {
   });
 
   test('a confirmation dialog renders above the shell', async ({ app, page }) => {
-    await signIn(page, app.baseUrl);
     await seedConversations(app.dataDir, 1);
-    await page.reload();
+    await signIn(page, app.baseUrl);
 
     await page.locator('.conversation').first().hover();
     await page

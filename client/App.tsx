@@ -185,6 +185,20 @@ export function App({
   useEffect(() => {
     setNarrowOpen(false);
   }, [narrow]);
+
+  /**
+   * Navigating closes the drawer, but only while it is one.
+   *
+   * A drawer covers what it navigates to: tapping a conversation on a phone
+   * opened it *behind* the sidebar, so the reader arrived at a screen that
+   * looked exactly like the one they had just left and had to dismiss the
+   * drawer by hand to see the thing they had asked for. As a column on a wide
+   * window it covers nothing, and closing it there would throw away a layout
+   * the reader chose every time they changed conversation.
+   */
+  const dismissIfDrawer = useCallback(() => {
+    if (narrow) setNarrowOpen(false);
+  }, [narrow]);
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
     readStored(THEME_KEY) === 'dark' ? 'dark' : 'light'
   );
@@ -588,8 +602,14 @@ export function App({
             theme={theme}
             onToggleTheme={toggleTheme}
             onCollapse={closeSidebar}
-            onCreate={onCreate}
-            onOpen={onSelectConversation}
+            onCreate={() => {
+              onCreate();
+              dismissIfDrawer();
+            }}
+            onOpen={(id) => {
+              onSelectConversation(id);
+              dismissIfDrawer();
+            }}
             onSearch={() => setSearchOpen(true)}
             onRename={(id, currentTitle) => setDialog({ kind: 'rename', id, title: currentTitle })}
             onDelete={(id) => setDialog({ kind: 'delete-conversation', id })}
@@ -598,11 +618,21 @@ export function App({
             onSettings={() => setSettingsOpen(true)}
             onOpenAdmin={() => setAdminOpen(true)}
             onSignOut={onSignOut}
+            modal={narrow && sidebarOpen}
           />
         </div>
       </ErrorBoundary>
 
-      <main className="main">
+      {/*
+        While the drawer is over the page, the page is not there to be used.
+
+        `inert` rather than `aria-hidden`: the latter hides it from assistive
+        technology but leaves every control tabbable and clickable, so a reader
+        could still Tab into a transcript they cannot see behind a scrim. This
+        is the half the focus trap cannot do — the trap keeps focus in, and this
+        takes the page behind out of reach of everything else.
+      */}
+      <main className="main" inert={narrow && sidebarOpen}>
         <header className="main__header">
           {/*
             On a narrow window this stays put whether the drawer is open or

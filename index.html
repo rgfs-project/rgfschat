@@ -2,7 +2,22 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      `viewport-fit=cover` lets the page paint into the display cutout and the
+      home-indicator strip; the layout then holds its own contents clear with
+      `env(safe-area-inset-*)`. Without it the browser letterboxes the page and
+      the insets all report 0, so there is nothing to opt into later.
+
+      `interactive-widget=resizes-content` makes the on-screen keyboard shorten
+      the layout viewport instead of sliding the page up under itself. That is
+      what lets the composer stay above the keys in CSS alone — `100dvh` simply
+      becomes the smaller number — rather than by measuring `visualViewport`
+      and writing positions from JavaScript on every resize.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <title>ChatUI</title>
 
     <!--

@@ -17,6 +17,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { Menu } from './Menu.tsx';
+import { useFocusTrap } from './useFocusTrap.ts';
 import type { UserDto } from '@shared/auth.ts';
 import type { ConversationSummary } from './api.ts';
 
@@ -48,6 +49,15 @@ export interface SidebarProps {
   onSettings: () => void;
   onOpenAdmin: () => void;
   onSignOut: () => void;
+  /**
+   * Open as a drawer over the page rather than standing beside it.
+   *
+   * Only then is it a dialog: it covers what it is in front of, so focus has to
+   * be held inside it and Escape has to dismiss it. As a column on a wide window
+   * it is just another region of the page and trapping focus in it would be a
+   * bug, not a feature.
+   */
+  modal?: boolean;
 }
 
 /**
@@ -90,7 +100,10 @@ export function Sidebar({
   onSettings,
   onOpenAdmin,
   onSignOut,
+  modal = false,
 }: SidebarProps): React.JSX.Element {
+  const trap = useFocusTrap<HTMLElement>({ active: modal, onEscape: onCollapse });
+
   const grouped = useMemo(() => {
     const startOfToday = new Date().setHours(0, 0, 0, 0);
     const buckets = new Map<string, ConversationSummary[]>();
@@ -109,7 +122,18 @@ export function Sidebar({
   }, [conversations]);
 
   return (
-    <aside className="sidebar">
+    <aside
+      className="sidebar"
+      ref={trap}
+      /*
+       * A drawer announces itself as a dialog; a column is just a landmark.
+       * Marking it a dialog on a wide window would tell a screen-reader user
+       * that something had opened over the page when nothing had.
+       */
+      {...(modal
+        ? ({ role: 'dialog', 'aria-modal': true, 'aria-label': 'Navigation' } as const)
+        : {})}
+    >
       {/*
         Wordmark and collapse control. The bar is the same height as the main
         header so the two dividers line up across the seam and read as one rule.

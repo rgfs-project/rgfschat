@@ -73,15 +73,34 @@ body {
    * tabbable from behind the page.
    */
   transform: translateX(-100%);
+  /*
+   * Hidden as well as moved, so nothing off-screen is reachable or announced.
+   *
+   * The two directions are timed separately, and the difference is load-bearing
+   * rather than cosmetic. Given a duration, `visibility` does not ease — it
+   * flips at a point *inside* the transition. Held visible for the whole slide
+   * out is what is wanted here. On the way in it is not: the drawer stayed
+   * unrendered for the first part of its own entrance, and an unrendered
+   * element cannot take focus — `focus()` is refused silently, so the focus
+   * trap appeared to do nothing and the keyboard stayed on the page behind.
+   *
+   * Measured, with a plain `visibility var(--motion)` on the way in: the
+   * computed visibility is still `hidden` on the next animation frame, so even
+   * deferring the focus by a frame does not help. The `0s` on the expanded rule
+   * below is the part that makes the drawer focusable at all.
+   */
   visibility: hidden;
   transition:
     transform var(--motion) var(--ease-out),
-    visibility var(--motion);
+    visibility 0s linear var(--motion);
 }
 
 .shell[data-sidebar='expanded'] .sidebar {
   transform: none;
   visibility: visible;
+  transition:
+    transform var(--motion) var(--ease-out),
+    visibility 0s;
 }
 
 /* The main column follows it on a wide window, at the same rate. */
@@ -114,8 +133,15 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: 0 0.5rem;
-  height: var(--header-height);
+  /*
+   * The status bar sits on top of this row on a notched phone, so the bar grows
+   * by the inset and pads its contents down past it. Height rather than margin:
+   * the row is still the thing against the top of the screen, and its background
+   * and bottom rule have to reach the top edge or there is a strip of page
+   * showing through above them.
+   */
+  padding: var(--safe-top) 0.5rem 0 max(0.5rem, var(--safe-left));
+  height: calc(var(--header-height) + var(--safe-top));
   border-bottom: 1px solid var(--border);
 }
 
@@ -166,6 +192,9 @@ body {
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  /* The drawer is over the transcript on a phone; scrolling to the end of the
+     conversation list must not start scrolling the transcript underneath it. */
+  overscroll-behavior: contain;
   /* The same side padding as the actions above it, so a conversation row and
      the Admin row are one width and sit on one edge. Nothing on top: the rule
      above is the list's edge, and a row scrolling up should meet it. */
@@ -176,7 +205,9 @@ body {
 .sidebar__footer {
   display: flex;
   align-items: center;
-  padding: 0.75rem 0.5rem;
+  /* `max` rather than `+`: on a phone the home indicator is the thing to clear,
+     on a desktop the inset is 0 and the designed padding is what remains. */
+  padding: 0.75rem 0.5rem max(0.75rem, var(--safe-bottom)) max(0.5rem, var(--safe-left));
   border-top: 1px solid var(--border);
 }
 
@@ -201,8 +232,11 @@ body {
   /* The control and the title are two elements in one bar; the gutter is what
      holds the bar off the edge, not what separates them. */
   gap: 0.5rem;
-  padding: 0 var(--gutter);
-  height: var(--header-height);
+  /* Grown by the status bar exactly as the sidebar's own header is, so the two
+     stay one line across the seam on a notched phone as well as on a desktop. */
+  padding: var(--safe-top) max(var(--gutter), var(--safe-right)) 0
+    max(var(--gutter), var(--safe-left));
+  height: calc(var(--header-height) + var(--safe-top));
   border-bottom: 1px solid var(--border);
 }
 
@@ -259,6 +293,15 @@ body {
   position: relative;
   /* Stops a streaming reply from making the browser fight the scroll anchor. */
   overflow-anchor: none;
+  /*
+   * Reaching the end of the transcript stops there rather than handing the
+   * gesture on. There is nothing behind it to scroll — the document is
+   * `overflow: hidden` — so what this actually suppresses is the overscroll
+   * *glass*: the rubber-band on iOS and pull-to-refresh on Android, both of
+   * which read as the whole app coming loose when the reader is only trying to
+   * reach the last message.
+   */
+  overscroll-behavior: contain;
 }
 
 /*
@@ -280,7 +323,9 @@ body {
   /* The bottom is deeper than the top on purpose. The last message's controls
      hang below it and eat most of this padding themselves, so it has to cover
      their height as well as the gap — otherwise they sit against the composer. */
-  padding: 2.5rem 1.25rem 4.5rem;
+  /* The side insets matter in landscape, where the cutout is beside the text
+     rather than above it and an unpadded first character sits under it. */
+  padding: 2.5rem max(1.25rem, var(--safe-right)) 4.5rem max(1.25rem, var(--safe-left));
   display: flex;
   flex-direction: column;
   /* Fills the scroll port even when nearly empty, so the empty state's
@@ -299,9 +344,20 @@ body {
   gap: 2.5rem;
 }
 
+/*
+ * The composer sits at the bottom of the shell, and the shell is `100dvh`.
+ *
+ * With `interactive-widget=resizes-content` the keyboard shortens the layout
+ * viewport, so `dvh` resolves to the space left above the keys and the composer
+ * follows it up with no measurement at all. This is the whole of the
+ * keyboard-avoidance strategy: there is no `visualViewport` listener, because
+ * CSS already expresses it and a JS one would have to fight the same reflow it
+ * was reacting to.
+ */
 .composer-region {
   flex: none;
-  padding: 0 1.25rem 0.875rem;
+  padding: 0 max(1.25rem, var(--safe-right)) max(0.875rem, var(--safe-bottom))
+    max(1.25rem, var(--safe-left));
 }
 
 /* Positioning context for the jump-to-latest control above it. */

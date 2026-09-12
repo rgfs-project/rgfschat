@@ -4,10 +4,12 @@ A self-hosted chat workspace. Conversations are plain Markdown files on disk, ge
 owned by the server, and the model provider is replaceable.
 
 This repository is built in phases against a project contract kept outside the repository.
-**Phase 6** is complete: the foundation and HTTP
-conventions, canonical Markdown persistence with a rebuildable index, accounts with sessions
-and CSRF protection, multiple model providers with SSRF-protected discovery, and
-reconnectable streaming that survives a reload, a dropped connection, or a restart.
+**Phase 10** is complete: the foundation and HTTP conventions, canonical Markdown persistence
+with a rebuildable index, accounts with sessions and CSRF protection, multiple model providers
+with SSRF-protected discovery, reconnectable streaming that survives a reload, a dropped
+connection, or a restart, the chat interface and its conversation navigation, a resilient
+client data layer, an admin surface with server-enforced authorization, per-user settings, and
+a layout that is responsive by design from a 390px phone to a wide desktop.
 
 ## Prerequisites
 
@@ -125,6 +127,22 @@ scripts/    dev, build-server, verify, probe-provider
 docs/       provider-notes.md — observed provider behaviour
 data/       Persistent boundary — committed empty; contents are never tracked
 ```
+
+## On a phone
+
+The interface is responsive by design rather than a shrunk desktop. One breakpoint at
+**56rem (896px)**: above it the sidebar is a column beside the transcript, below it a modal
+drawer over the page — with a backdrop, a focus trap, Escape and backdrop dismissal, and the
+page behind marked `inert`. Menus become bottom sheets, panels go full-screen, and every
+touch target is at least 44×44 CSS px on a coarse pointer.
+
+The on-screen keyboard is handled in CSS alone. `interactive-widget=resizes-content` makes it
+shorten the layout viewport, so the composer stays above the keys and the page itself never
+becomes the scroll container. `viewport-fit=cover` plus `env(safe-area-inset-*)` keeps content
+clear of a display cutout and the home indicator.
+
+`e2e/mobile.spec.ts` covers 390×844, 402×714 (an iPhone 17 in Safari), 820×1180, 1440×900,
+and the breakpoint at ±1px.
 
 ## First run
 

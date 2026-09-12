@@ -5,7 +5,7 @@ maintained **outside this repository** alongside the phase prompts that drive th
 This document records what is **actually built** and where each invariant is enforced.
 If this file and the contract disagree, the contract wins and the discrepancy is a bug.
 
-Current state: **Phase 6 complete.**
+Current state: **Phase 10 complete.**
 
 ## 1. Process shape
 
@@ -151,6 +151,11 @@ throughout. Reasoning is never sent back to the model (contracts §4).
 ## 5. Invariant register
 
 Every invariant is enforced in code and covered by at least one test whose title names it.
+
+Phase 10 added no invariant. It changes only how the existing application is presented — no
+new boundary, no new authority, nothing a server route can be made to get wrong — and an
+invariant that only a stylesheet can break is not one this register is for. Its guarantees
+are layout, and they are asserted as layout in `e2e/mobile.spec.ts`.
 
 | ID     | Invariant                                                                                                       | Phase | Enforced in                                                       | Tests                                                                     |
 | ------ | --------------------------------------------------------------------------------------------------------------- | ----- | ----------------------------------------------------------------- | ------------------------------------------------------------------------- |
@@ -488,9 +493,42 @@ Overlays — the model menu and dialogs — render through a portal to `document
 composer is a rounded, overflow-clipped box, so a menu rendered inside it would be cut off at
 its edge; portalling puts it outside every ancestor's overflow and stacking context.
 
-When the sidebar collapses its grid **track** is removed, not set to zero width: the sidebar
-is unmounted, so with a two-track template `main` would auto-place into the first track and a
-zero width would collapse the whole application to nothing.
+The sidebar is **positioned over** the main column rather than taking a track beside it.
+Sharing the width meant every toggle re-measured the transcript — the text column narrowed,
+lines re-wrapped, and the conversation shifted under the reader for a change that had nothing
+to do with its content. On a wide window `main` takes a `padding-left` of the sidebar's width
+so its content is not hidden underneath; on a narrow one it does not, because there the
+sidebar is a drawer over the page and insetting would push the transcript off the right edge
+to make room for something already covering it.
+
+### Responsive model (Phase 10)
+
+One breakpoint, **56rem (896px)**, declared as `--breakpoint-narrow` in `theme.css`. It is
+asked in two languages that cannot reference each other — `matchMedia` in
+`useNarrowViewport`, `@media` in the stylesheets — so `e2e/mobile.spec.ts` asserts both at
+895px and 897px. They had already drifted once (56rem against 48rem), leaving a 128px band
+where the sidebar was a drawer while the panels still laid out for a desktop.
+
+Below the breakpoint:
+
+- **The sidebar is a modal drawer.** `useFocusTrap` moves focus in, wraps Tab at both ends,
+  closes on Escape, and restores focus to the trigger. `main` carries `inert` while it is
+  open — not `aria-hidden`, which hides a region from assistive technology but leaves every
+  control tabbable and clickable behind the scrim. Choosing a conversation dismisses the
+  drawer, since a drawer covers what it navigates to.
+- **Overlays become bottom sheets.** A menu anchored to its trigger is wrong on a phone,
+  where the trigger is as likely to be at the bottom edge as anywhere. Panels go full-screen.
+- **Touch targets are ≥ 44px**, under `@media (pointer: coarse)` — a capability query, not a
+  width, because a touchscreen laptop needs them and a phone with a mouse does not. The
+  controls are grown rather than given an invisible `::after` pad: a pad pushed behind with
+  `z-index: -1` is covered by any ancestor background, and two neighbours 8px apart each
+  grown by 6 on a side overlap and answer for each other's taps.
+
+Keyboard avoidance is **CSS only**: `interactive-widget=resizes-content` in the viewport meta
+makes the on-screen keyboard shorten the layout viewport, so `100dvh` resolves to the space
+above the keys and the composer follows it with no measurement. `env(safe-area-inset-*)` holds
+content clear of the cutout and the home indicator. `visualViewport` is listened to in exactly
+one place (see below) and is never measured.
 
 ### Scroll intent
 
@@ -507,6 +545,17 @@ a window, since it emits a run of intermediate positions — but it only happens
 "jump to latest", where the user has just asked to go to the bottom.
 
 Unpinned, arriving content raises a "jump to latest" control instead of moving the viewport.
+
+A **viewport resize is not a scroll** (Phase 10). Opening the on-screen keyboard shortens the
+scroller without moving `scrollTop`, and the browser dispatches no `scroll` event for it —
+measured at 390×844: `clientHeight` 635 → 211, `scrollTop` unchanged, zero events. A reader
+who was at the bottom is therefore left 424px above it with the newest message behind the
+keys, and nothing in the scroll path ever learns. So `resize` is handled directly: if pinned,
+re-scroll to the bottom. The opposite direction — the viewport growing, which clamps
+`scrollTop` down and _does_ emit an event — is covered by a 250ms guard that re-pins rather
+than reading the clamp as intent. Both `window.resize` and `visualViewport.resize` are bound,
+the latter because a browser that ignores `interactive-widget` moves only the visual viewport;
+it is evidence that the reader did not scroll, not a measurement.
 
 ### Client data layer
 

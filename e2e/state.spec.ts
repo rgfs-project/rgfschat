@@ -66,10 +66,8 @@ test('a slow cold load shows no signed-in or signed-out flash', async ({ app, pa
 });
 
 test('rapid conversation switching lands on the last one chosen', async ({ app, page }) => {
-  await signIn(page, app.baseUrl);
-
   const markers = await seedConversations(app.dataDir, 3);
-  await page.reload();
+  await signIn(page, app.baseUrl);
 
   const rows = page.locator('.conversation__open');
   await expect(rows).toHaveCount(3);

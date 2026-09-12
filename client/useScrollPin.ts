@@ -23,6 +23,20 @@ const POSITION_EPSILON_PX = 2;
 /** How long a smooth scroll is allowed to keep emitting events. */
 const SMOOTH_GUARD_MS = 400;
 
+/**
+ * How long after a viewport resize a scroll event is still the resize's fault.
+ *
+ * Opening the on-screen keyboard shortens the layout viewport, which shortens
+ * the transcript, which moves `scrollTop` — and the browser dispatches a
+ * `scroll` event for it. Nobody scrolled. Without this guard, tapping the
+ * composer at the bottom of a conversation silently unpinned the transcript,
+ * and the next token of the reply arrived somewhere the reader could not see.
+ *
+ * Long enough to cover the reflow and the animation the keyboard slides in on,
+ * short enough that a real scroll a moment later is still read as one.
+ */
+const RESIZE_GUARD_MS = 250;
+
 export interface ScrollPin {
   ref: React.RefObject<HTMLDivElement | null>;
   /** Whether new content should follow the bottom. */
@@ -72,6 +86,9 @@ export function useScrollPin(): ScrollPin {
   const smoothUntil = useRef(0);
   const smoothTimer = useRef<number | null>(null);
 
+  /** Set while a viewport resize could still be producing scroll events. */
+  const resizeUntil = useRef(0);
+
   const isAtBottom = useCallback((element: HTMLElement): boolean => {
     const distance = element.scrollHeight - element.scrollTop - element.clientHeight;
     return distance <= PIN_THRESHOLD_PX;
@@ -105,6 +122,22 @@ export function useScrollPin(): ScrollPin {
     const onScroll = (): void => {
       // Ours, not theirs: carries no intent.
       if (Date.now() < smoothUntil.current) return;
+
+      /*
+       * The viewport's, not theirs. A resize that leaves the transcript at the
+       * bottom re-pins rather than merely being ignored: shortening the
+       * container can push `scrollTop` past the threshold on its own, and
+       * ignoring that would leave a transcript that is visibly at the bottom
+       * marked as scrolled away.
+       */
+      if (Date.now() < resizeUntil.current) {
+        if (isAtBottom(element)) {
+          pinnedRef.current = true;
+          setPinned(true);
+        }
+        return;
+      }
+
       if (
         programmaticTop.current !== null &&
         Math.abs(element.scrollTop - programmaticTop.current) <= POSITION_EPSILON_PX
@@ -119,9 +152,48 @@ export function useScrollPin(): ScrollPin {
       setPinned(atBottom);
     };
 
+    /*
+     * Both events, because they are different questions on a phone.
+     *
+     * `window.resize` fires when the layout viewport changes — which, under
+     * `interactive-widget=resizes-content`, is what the keyboard does. But a
+     * browser that does not honour that hint leaves the layout viewport alone
+     * and only moves the *visual* one, and there `visualViewport.resize` is the
+     * single signal there is. This is the one place `visualViewport` is used
+     * (the prompt asks for that to be justified): it is not being measured, it
+     * is being listened to as evidence that the reader did not scroll.
+     */
+    const markResize = (): void => {
+      resizeUntil.current = Date.now() + RESIZE_GUARD_MS;
+
+      /*
+       * The bottom moved, so follow it.
+       *
+       * Shortening the scroller does not move `scrollTop`, and the browser
+       * fires no `scroll` event for it — measured: `clientHeight` 635 → 211
+       * with `scrollTop` unchanged and zero events. So a reader who was at the
+       * bottom is silently left 424px above it, with the newest message under
+       * the keyboard, and nothing in the scroll path ever learns about it.
+       *
+       * Re-pinning here is what keeps "at the bottom" meaning the same thing
+       * before and after the keyboard opens. The guard above handles the
+       * opposite direction, where the viewport *grows* and the browser clamps
+       * `scrollTop` down — that one does emit an event, and it is not intent
+       * either.
+       */
+      if (pinnedRef.current) scrollToBottom(element, false);
+    };
+
     element.addEventListener('scroll', onScroll, { passive: true });
-    return () => element.removeEventListener('scroll', onScroll);
-  }, [isAtBottom]);
+    window.addEventListener('resize', markResize);
+    window.visualViewport?.addEventListener('resize', markResize);
+
+    return () => {
+      element.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', markResize);
+      window.visualViewport?.removeEventListener('resize', markResize);
+    };
+  }, [isAtBottom, scrollToBottom]);
 
   useEffect(
     () => () => {
