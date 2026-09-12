@@ -12,7 +12,7 @@ import { AppError } from '../errors/AppError.ts';
 import { addressOf, rateLimit, userOf, type RateLimiter } from '../middleware/rateLimit.ts';
 import { validateBody } from '../http/validate.ts';
 import type { Logger } from '../logger.ts';
-import { requireAuth, requireSameOrigin } from '../auth/middleware.ts';
+import { requireAuth, requireCsrf, requireSameOrigin } from '../auth/middleware.ts';
 import { SESSION_COOKIE, type SessionManager } from '../auth/sessions.ts';
 import { toDto, type UserStore } from '../auth/users.ts';
 
@@ -157,17 +157,45 @@ export function authRouter({
     }
   );
 
-  router.post('/auth/logout', requireAuth(), async (req, res) => {
-    // Server-side destruction, not merely a cleared cookie: a copied token
-    // must stop working too.
-    await sessions.destroy(req.auth!.token);
-    res.clearCookie(SESSION_COOKIE, { path: '/' });
-    res.status(204).end();
-  });
+  /*
+   * `requireCsrf` explicitly, on each authenticated route in this router.
+   *
+   * The router is mounted *before* the global `requireAuth(), requireCsrf()`
+   * gate, because login and registration have to be reachable without a
+   * session — and that placement silently exempted the authenticated routes
+   * here from the gate as well. Logging someone out from a cross-site form is
+   * a small harm; changing a password from one would not be, and the reason
+   * that did not happen was `validateBody` rejecting the request first, which
+   * is not a security control.
+   *
+   * Mounted per route rather than with `router.use`, so a route added above
+   * the gate is unprotected *visibly* rather than by accident.
+   */
+  router.post(
+    '/auth/logout',
+    requireAuth(),
+    requireCsrf(),
+    /*
+     * An empty strict schema, so this route rejects a body like every other
+     * (contracts §5). A route with no schema at all accepts whatever it is
+     * handed and ignores it, which is indistinguishable from a route whose
+     * schema was forgotten — and the enumerated test cannot tell the
+     * difference either.
+     */
+    validateBody(z.strictObject({}).optional()),
+    async (req, res) => {
+      // Server-side destruction, not merely a cleared cookie: a copied token
+      // must stop working too.
+      await sessions.destroy(req.auth!.token);
+      res.clearCookie(SESSION_COOKIE, { path: '/' });
+      res.status(204).end();
+    }
+  );
 
   router.post(
     '/auth/password',
     requireAuth(),
+    requireCsrf(),
     validateBody(changePasswordSchema),
     // Per account: this route verifies the current password, so it is a
     // guessing oracle for anyone who has stolen a session but not the password.
