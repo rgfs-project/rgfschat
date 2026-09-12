@@ -1,3 +1,4 @@
+import { textOf } from '@shared/generation.ts';
 import type { ModelDto } from '@shared/generation.ts';
 import { AppError } from '../errors/AppError.ts';
 import type { ChatRequest, Provider, ProviderChunk } from './types.ts';
@@ -38,7 +39,12 @@ export class EchoProvider implements Provider {
     ];
     this.#reply =
       options.reply ??
-      ((request) => ({ content: `echo: ${request.messages.at(-1)?.content ?? ''}` }));
+      // `textOf` because a message may now carry content parts; the echo is of
+      // what was said, not of the envelope it arrived in.
+      ((request) => {
+        const last = request.messages.at(-1);
+        return { content: `echo: ${last === undefined ? '' : textOf(last.content)}` };
+      });
     this.#failListModels = options.failListModels ?? false;
     this.#contextTokens = options.contextTokens ?? null;
     this.#chunkDelayMs = options.chunkDelayMs ?? 0;

@@ -27,9 +27,37 @@ export interface ModelDto {
 
 export type MessageRole = 'system' | 'user' | 'assistant';
 
+/**
+ * One piece of a multimodal message.
+ *
+ * The OpenAI content-part shape, verified against a live llama.cpp server
+ * (docs/provider-notes.md §9). An image is always a `data:` URL — a remote one
+ * would make the provider fetch on our behalf, which is a request the client
+ * would be choosing, so it is never sent.
+ */
+export type ContentPart =
+  { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+
 export interface ChatMessage {
   role: MessageRole;
-  content: string;
+  /**
+   * A plain string for text, or parts when the message carries images.
+   *
+   * Both forms are accepted upstream, and the string form is kept for the
+   * overwhelmingly common case: sending `[{type:'text',…}]` for every message
+   * would make every request larger and every log harder to read, to express
+   * exactly the same thing.
+   */
+  content: string | ContentPart[];
+}
+
+/** The text of a message, whichever form it is in. */
+export function textOf(content: string | ContentPart[]): string {
+  if (typeof content === 'string') return content;
+  return content
+    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+    .map((part) => part.text)
+    .join('\n\n');
 }
 
 /**

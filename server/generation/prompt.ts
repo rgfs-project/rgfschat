@@ -1,4 +1,4 @@
-import type { ChatMessage } from '@shared/generation.ts';
+import { textOf, type ChatMessage, type ContentPart } from '@shared/generation.ts';
 import type { Conversation } from '@shared/conversation.ts';
 import { AppError } from '../errors/AppError.ts';
 
@@ -10,6 +10,26 @@ import { AppError } from '../errors/AppError.ts';
  * Markdown, so what the model sees is exactly what is on disk.
  */
 
+/**
+ * An attachment, resolved for the prompt.
+ *
+ * Resolution happens before assembly rather than inside it: assembly is pure
+ * and synchronous, and reading files from it would make the budget arithmetic
+ * depend on the filesystem. An attachment the store could not produce is simply
+ * absent from this map, which is what turns a missing file into a skipped part
+ * rather than a failed generation.
+ */
+export interface ResolvedAttachment {
+  id: string;
+  filename: string;
+  kind: 'image' | 'text';
+  mediaType: string;
+  /** Text content, already truncated; or a `data:` URL for an image. */
+  content: string;
+  /** Whether the text was cut short, so the marker can say so. */
+  truncated: boolean;
+}
+
 export interface BudgetOptions {
   /** Administrator-configured, prepended ahead of the conversation's own. */
   systemPrompt?: string | undefined;
@@ -17,6 +37,18 @@ export interface BudgetOptions {
   contextTokens: number;
   /** Reserved for the reply; subtracted from the context to get the input budget. */
   maxOutputTokens: number;
+  /** Resolved attachments by id. Absent ones are skipped, not fatal. */
+  attachments?: ReadonlyMap<string, ResolvedAttachment>;
+  /**
+   * Whether the chosen model can see.
+   *
+   * Only consulted for images already in the conversation's history. A *new*
+   * message with an image is refused before anything is persisted, by the
+   * caller — reaching this point means the images belong to older turns, and
+   * dropping them silently is better than refusing to continue a conversation
+   * because of a picture three questions ago.
+   */
+  vision?: boolean;
 }
 
 /**
@@ -35,8 +67,28 @@ export function estimateTokens(text: string): number {
 /** Per-message overhead for role framing and separators, charged conservatively. */
 const MESSAGE_OVERHEAD_TOKENS = 4;
 
+/**
+ * What an image costs against the context budget.
+ *
+ * A documented estimate, as contracts §4 requires, not a measurement: the true
+ * cost depends on the model's patch size and on how it tiles an image, and the
+ * only way to learn it is to send the image and read `usage` back — by which
+ * point the budget decision has already been made. 1200 is roughly a 1024px
+ * square at common patch sizes, and erring high is the safe direction: the
+ * consequence of guessing low is a request the provider refuses outright.
+ */
+const IMAGE_TOKENS_ESTIMATE = 1_200;
+
 function costOf(message: ChatMessage): number {
-  return estimateTokens(message.content) + MESSAGE_OVERHEAD_TOKENS;
+  if (typeof message.content === 'string') {
+    return estimateTokens(message.content) + MESSAGE_OVERHEAD_TOKENS;
+  }
+
+  let total = MESSAGE_OVERHEAD_TOKENS;
+  for (const part of message.content) {
+    total += part.type === 'text' ? estimateTokens(part.text) : IMAGE_TOKENS_ESTIMATE;
+  }
+  return total;
 }
 
 export interface AssembledPrompt {
@@ -63,7 +115,7 @@ export interface AssembledPrompt {
  */
 export function assemblePrompt(
   conversation: Conversation,
-  { contextTokens, maxOutputTokens, systemPrompt }: BudgetOptions
+  { contextTokens, maxOutputTokens, systemPrompt, attachments, vision = false }: BudgetOptions
 ): AssembledPrompt {
   const system: ChatMessage[] = [];
   const turns: ChatMessage[] = [];
@@ -87,7 +139,7 @@ export function assemblePrompt(
       continue;
     }
     if (message.type === 'user') {
-      turns.push({ role: 'user', content: message.body });
+      turns.push(userMessage(message.body, message.attachments ?? [], { attachments, vision }));
       continue;
     }
     // Assistant: body only. `reasoning` is intentionally not read here.
@@ -131,4 +183,57 @@ export function assemblePrompt(
     dropped: turns.length - kept.length,
     estimatedTokens: used,
   };
+}
+
+/**
+ * A user turn, with whatever it carried.
+ *
+ * Text attachments are inlined as fenced blocks labelled with their filename,
+ * because that is the only way a model can read them and it keeps the prompt a
+ * single readable document. Images become content parts, and only when the
+ * model can see — an image sent to a model without a projector is a 500 from
+ * the provider (docs/provider-notes.md §9), so a history containing one must
+ * not be able to break every later message in the conversation.
+ *
+ * An attachment that is missing from the map is skipped. A file can be deleted
+ * out from under a message, and a conversation that can no longer be continued
+ * because of it would be a worse outcome than one that continues without it
+ * (contracts §7).
+ */
+function userMessage(
+  body: string,
+  ids: readonly string[],
+  options: { attachments: ReadonlyMap<string, ResolvedAttachment> | undefined; vision: boolean }
+): ChatMessage {
+  const resolved = ids
+    .map((id) => options.attachments?.get(id))
+    .filter((found): found is ResolvedAttachment => found !== undefined);
+
+  if (resolved.length === 0) return { role: 'user', content: body };
+
+  const texts = resolved.filter((attachment) => attachment.kind === 'text');
+  const images = options.vision ? resolved.filter((a) => a.kind === 'image') : [];
+
+  const inlined = texts.map((attachment) => {
+    const marker = attachment.truncated ? '\n\n[truncated]' : '';
+    return `Attached file: ${attachment.filename}\n\n\u0060\u0060\u0060\n${attachment.content}${marker}\n\u0060\u0060\u0060`;
+  });
+
+  const text = [body, ...inlined].filter((part) => part !== '').join('\n\n');
+
+  if (images.length === 0) return { role: 'user', content: text };
+
+  const parts: ContentPart[] = [
+    { type: 'text', text },
+    ...images.map((image): ContentPart => ({
+      type: 'image_url',
+      image_url: { url: image.content },
+    })),
+  ];
+  return { role: 'user', content: parts };
+}
+
+/** Re-exported so callers can measure a message the way the budget does. */
+export function messageText(message: ChatMessage): string {
+  return textOf(message.content);
 }
