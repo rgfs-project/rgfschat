@@ -127,7 +127,7 @@ export function Sidebar({
             of the three ways out of this pane, so it looks like the other two. */}
         <button type="button" className="nav-button" onClick={onSearch}>
           <Search size={18} />
-          Search chats
+          Search
         </button>
       </div>
 

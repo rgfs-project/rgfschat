@@ -44,7 +44,7 @@ async function mountSignedIn(): Promise<void> {
 /** Opens the palette and gets as far as a rendered result list. */
 async function search(query: string, results: unknown[]): Promise<void> {
   const user = userEvent.setup();
-  await user.click(screen.getByRole('button', { name: 'Search chats' }));
+  await user.click(screen.getByRole('button', { name: 'Search' }));
   await user.type(screen.getByLabelText('Search conversations and messages'), query);
 
   await server.waitFor('/api/conversations/search');

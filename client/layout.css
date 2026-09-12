@@ -131,7 +131,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.625rem;
-  padding: 0.75rem 0.75rem 0.625rem;
+  /* No padding under the rule: it marks where the scrolling list begins, so
+     anything between the two is a band of empty sidebar that scrolled content
+     disappears behind. */
+  padding: 0.75rem 0.75rem 0;
 }
 
 /*
@@ -154,8 +157,9 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
   /* The same side padding as the actions above it, so a conversation row and
-     the Admin row are one width and sit on one edge. */
-  padding: 0.25rem 0.75rem 0.75rem;
+     the Admin row are one width and sit on one edge. Nothing on top: the rule
+     above is the list's edge, and a row scrolling up should meet it. */
+  padding: 0 0.75rem 0.75rem;
 }
 
 .sidebar__footer {
