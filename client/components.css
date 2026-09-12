@@ -203,7 +203,10 @@
      two-glyph block, and enough below the message that they are not touching
      the text they belong to. */
   gap: 0.375rem;
-  margin-top: 0.375rem;
+  /* Close under the text they belong to. The row is chrome attached to a
+     message, not a band between two messages, so it sits nearer its own
+     message than to the next one. */
+  margin-top: 0.0625rem;
   opacity: 0;
   pointer-events: none;
   /* Appears at once, but lingers on the way out — a pointer that strays a few
@@ -231,9 +234,21 @@
  * of every control hung over the next message — unreachable, since the strip
  * that overlapped could not trigger the hover that makes them live.
  */
+/*
+ * Wider than tall.
+ *
+ * A square button puts as much empty space above and below the glyph as beside
+ * it, which on a row that hangs under a message reads as a gap the message has
+ * grown rather than as controls belonging to it. Trimming only the height keeps
+ * the glyphs the same size and the targets comfortably apart sideways, and
+ * takes 8px out of the vertical space each turn spends on its own controls.
+ *
+ * The coarse-pointer block near the end of this file overrides both axes back
+ * to 44px, so this is a desktop-only tightening.
+ */
 .msg__actions .icon-button {
   width: 1.75rem;
-  height: 1.75rem;
+  height: 1.375rem;
 }
 
 @media (hover: none) {
