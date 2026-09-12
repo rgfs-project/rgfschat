@@ -1,4 +1,4 @@
-import { composerField, expect, seedDistinctConversations, signIn, test } from './fixtures.ts';
+import { composerField, expect, seedConversations, signIn, test } from './fixtures.ts';
 
 /**
  * Client state and loading, in a real browser.
@@ -68,12 +68,7 @@ test('a slow cold load shows no signed-in or signed-out flash', async ({ app, pa
 test('rapid conversation switching lands on the last one chosen', async ({ app, page }) => {
   await signIn(page, app.baseUrl);
 
-  for (let i = 0; i < 3; i += 1) {
-    await page.getByRole('button', { name: 'New chat' }).click();
-    await expect(composerField(page)).toBeEnabled();
-  }
-
-  const markers = await seedDistinctConversations(app.dataDir);
+  const markers = await seedConversations(app.dataDir, 3);
   await page.reload();
 
   const rows = page.locator('.conversation__open');

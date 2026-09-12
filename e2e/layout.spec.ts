@@ -1,4 +1,12 @@
-import { composerField, expect, seedMessages, signIn, startGeneration, test } from './fixtures.ts';
+import {
+  composerField,
+  expect,
+  seedConversations,
+  seedMessages,
+  signIn,
+  startGeneration,
+  test,
+} from './fixtures.ts';
 import type { Page } from '@playwright/test';
 
 /**
@@ -17,9 +25,7 @@ function transcript(page: Page) {
 test.describe('transcript scrolling', () => {
   test('scrolls independently of the document in a long conversation', async ({ app, page }) => {
     await signIn(page, app.baseUrl);
-    await page.getByRole('button', { name: 'New chat' }).click();
-    await expect(composerField(page)).toBeEnabled();
-
+    await seedConversations(app.dataDir, 1);
     await seedMessages(app.dataDir, 200);
     await page.reload();
     await page.locator('.conversation__open').first().click();
@@ -70,8 +76,7 @@ test.describe('transcript scrolling', () => {
 
   test('jump to latest appears when unpinned and returns to the bottom', async ({ app, page }) => {
     await signIn(page, app.baseUrl);
-    await page.getByRole('button', { name: 'New chat' }).click();
-    await expect(composerField(page)).toBeEnabled();
+    await seedConversations(app.dataDir, 1);
 
     // The transcript has to overflow before "scrolled away" means anything —
     // in a conversation that fits on screen the user is always at the bottom.
@@ -168,7 +173,8 @@ test.describe('overlays are not clipped', () => {
 
   test('a confirmation dialog renders above the shell', async ({ app, page }) => {
     await signIn(page, app.baseUrl);
-    await page.getByRole('button', { name: 'New chat' }).click();
+    await seedConversations(app.dataDir, 1);
+    await page.reload();
 
     await page.locator('.conversation').first().hover();
     await page

@@ -226,14 +226,49 @@ describe('Strict Mode', () => {
     await server.waitFor('/api/models');
     server.respond('/api/models', modelsBody());
 
+    // Sending is what creates a conversation, so that is the mutation to watch.
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'New chat' }));
+    await user.type(await screen.findByLabelText('Message'), 'hello');
+    await user.click(screen.getByRole('button', { name: 'Send message' }));
 
     await server.waitFor('/api/conversations', 2);
     await new Promise((r) => setTimeout(r, 30));
 
     // One POST, not two.
-    expect(server.requests.filter((r) => r.method === 'POST').length).toBe(1);
+    const posts = server.requests.filter(
+      (r) => r.method === 'POST' && r.url.includes('/api/conversations')
+    );
+    expect(posts).toHaveLength(1);
+  });
+
+  /**
+   * The list is for conversations, not for intentions.
+   *
+   * Creating on the click meant opening a new chat and changing your mind left
+   * an empty conversation behind, and a handful of those are indistinguishable
+   * from each other in the sidebar.
+   */
+  it('New chat creates nothing until there is a message to put in it', async () => {
+    mount();
+    await server.waitFor('/api/auth/session');
+    server.respond('/api/auth/session', sessionBody());
+    await server.waitFor('/api/conversations');
+    server.respond('/api/conversations', conversationsBody([{ id: 'c1', title: 'First' }]));
+    await server.waitFor('/api/models');
+    server.respond('/api/models', modelsBody());
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'First' }));
+    await server.waitFor('/api/conversations/c1');
+    server.respond('/api/conversations/c1', conversationBody('c1'));
+
+    await user.click(screen.getByRole('button', { name: 'New chat' }));
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(server.requests.filter((r) => r.method === 'POST')).toHaveLength(0);
+
+    // It is a cleared view, not a stored conversation: the composer is ready.
+    expect(screen.getByLabelText('Message').hasAttribute('disabled')).toBe(false);
   });
 });
 

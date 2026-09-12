@@ -330,13 +330,20 @@ export function App({
     [currentId]
   );
 
+  /**
+   * New chat clears the view; it does not create anything.
+   *
+   * Creating on the click left an untitled, empty conversation behind every
+   * time someone opened one and changed their mind, and those accumulated in
+   * the list as a row of identical "New conversation" entries with nothing in
+   * them. A conversation now begins when there is something to put in it —
+   * `send` creates one on the first message, which it already did for anyone
+   * who started typing without opening a chat first.
+   */
   const onCreate = useCallback(() => {
     setError(null);
-    createConversation.mutate(undefined, {
-      onSuccess: (created) => onSelectConversation(created.id),
-      onError: () => setError('Could not create a conversation.'),
-    });
-  }, [createConversation, onSelectConversation]);
+    onSelectConversation(null);
+  }, [onSelectConversation]);
 
   const applyRename = useCallback(
     (id: string, title: string) => {

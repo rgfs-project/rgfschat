@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test as base, type Page } from '@playwright/test';
@@ -239,6 +239,57 @@ async function expectEnabled(locator: ReturnType<typeof composerField>): Promise
 }
 
 /**
+ * Creates `count` conversations on disk, each with one distinguishable message.
+ *
+ * New chat no longer creates anything — a conversation begins when a message is
+ * sent — so a test that needs conversations to exist either drives a generation
+ * per conversation, which tests the provider rather than the thing under test,
+ * or writes them. This writes them with the server's own serializer, and drops
+ * the derived index so the server rebuilds it from what is actually there.
+ *
+ * Returns the marker written into each, so a test can tell which one it is
+ * looking at.
+ */
+export async function seedConversations(dataDir: string, count: number): Promise<string[]> {
+  const { serializeConversation } = await import('../server/storage/markdown.ts');
+  const { FORMAT_VERSION } = await import('../shared/conversation.ts');
+
+  // `_system` holds users and sessions; the conversation directories are the
+  // per-user ones beside it.
+  const userId = (await readdir(dataDir)).find((name) => !name.startsWith('_'));
+  if (userId === undefined) throw new Error('seed: no user directory');
+
+  const chats = join(dataDir, userId, 'chats');
+  await mkdir(chats, { recursive: true });
+
+  const markers: string[] = [];
+  const now = new Date().toISOString();
+
+  for (let index = 0; index < count; index += 1) {
+    const marker = `marker-for-conversation-${index}`;
+    markers.push(marker);
+
+    await writeFile(
+      join(chats, `${randomUUID()}.md`),
+      serializeConversation({
+        formatVersion: FORMAT_VERSION,
+        title: `Conversation ${index}`,
+        createdAt: now,
+        updatedAt: now,
+        messages: [{ type: 'user', id: randomUUID(), body: marker }],
+      }),
+      'utf8'
+    );
+  }
+
+  // Derived, deletable, rebuildable — so deleting it is how a fixture tells the
+  // server that what is on disk has changed underneath it.
+  await rm(join(dataDir, userId, 'index', 'chats.json'), { force: true });
+
+  return markers;
+}
+
+/**
  * Grows an existing conversation to `count` user messages by rewriting its file.
  *
  * There is no API for appending a message — messages only come from a
@@ -273,49 +324,4 @@ async function findOnlyConversationFile(dataDir: string): Promise<string> {
     if (first !== undefined) return join(chats, first);
   }
   throw new Error('seed: no conversation file found');
-}
-
-/**
- * Gives every existing conversation a distinct body, so a test can tell which
- * one is on screen.
- *
- * Same reasoning as `seedMessages`: there is no API for appending a message, and
- * driving a generation per conversation would test the provider rather than the
- * switching behaviour under test.
- */
-export async function seedDistinctConversations(dataDir: string): Promise<string[]> {
-  const { parseConversation, serializeConversation } =
-    await import('../server/storage/markdown.ts');
-
-  const files = await listConversationFiles(dataDir);
-  const markers: string[] = [];
-
-  for (const [index, file] of files.entries()) {
-    const parsed = parseConversation(await readFile(file, 'utf8'));
-    if (!parsed.ok) throw new Error('seed: conversation did not parse');
-
-    const marker = `marker-for-conversation-${index}`;
-    markers.push(marker);
-    await writeFile(
-      file,
-      serializeConversation({
-        ...parsed.conversation,
-        title: `Conversation ${index}`,
-        messages: [{ type: 'user', id: randomUUID(), body: marker }],
-      }),
-      'utf8'
-    );
-  }
-
-  return markers;
-}
-
-async function listConversationFiles(dataDir: string): Promise<string[]> {
-  for (const userId of await readdir(dataDir)) {
-    const chats = join(dataDir, userId, 'chats');
-    const entries = await readdir(chats).catch(() => [] as string[]);
-    const files = entries.filter((name) => name.endsWith('.md')).sort();
-    if (files.length > 0) return files.map((name) => join(chats, name));
-  }
-  throw new Error('seed: no conversation files found');
 }
