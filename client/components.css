@@ -130,6 +130,33 @@
 }
 
 /*
+ * A hover bridge across the gap the controls live in.
+ *
+ * The controls sit *below* their message and are `pointer-events: none` until
+ * the message is hovered — so leaving the bubble to reach them ended the hover,
+ * which turned them off, which meant the pointer passed straight through them.
+ * There was no path in at any speed.
+ *
+ * This is a child of the message, so the pointer crossing it keeps
+ * `.msg:hover` true all the way down to the controls. It covers only the gap
+ * between turns, which belongs to neither message, and sits below the controls
+ * in paint order so it never swallows their clicks.
+ */
+.msg::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 2.5rem;
+  pointer-events: none;
+}
+
+.msg:hover::after {
+  pointer-events: auto;
+}
+
+/*
  * Taken out of flow on purpose.
  *
  * In flow and merely `opacity: 0`, the controls still occupy their full height
@@ -148,10 +175,12 @@
      two-glyph block, and enough below the message that they are not touching
      the text they belong to. */
   gap: 0.375rem;
-  margin-top: 0.625rem;
+  margin-top: 0.375rem;
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--motion-fast) var(--ease-out);
+  /* Appears at once, but lingers on the way out — a pointer that strays a few
+     pixels off the message should not have to start again. */
+  transition: opacity var(--motion-fast) var(--ease-out) 400ms;
 }
 
 .msg--assistant .msg__actions {
@@ -161,12 +190,22 @@
 
 .msg:hover .msg__actions,
 .msg:focus-within .msg__actions {
+  opacity: 1;
   pointer-events: auto;
+  transition-delay: 0s;
 }
 
-.msg:hover .msg__actions,
-.msg:focus-within .msg__actions {
-  opacity: 1;
+/*
+ * Smaller than a standalone icon button, because these have to fit in the gap
+ * between two turns.
+ *
+ * At the full 2rem the row stood 42px tall against a 28px gap, so the bottom
+ * of every control hung over the next message — unreachable, since the strip
+ * that overlapped could not trigger the hover that makes them live.
+ */
+.msg__actions .icon-button {
+  width: 1.75rem;
+  height: 1.75rem;
 }
 
 @media (hover: none) {

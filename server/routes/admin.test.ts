@@ -721,6 +721,17 @@ describe('per-model sampler', () => {
     expect('temperature' in sampler).toBe(false);
   });
 
+  it('drops the entry once nothing is set, rather than leaving a bare pair', async () => {
+    await setSampler({ temperature: 0.7 });
+    await setSampler({ temperature: null });
+
+    const res = (await (await admin.fetch('/api/admin/settings')).json()) as {
+      resolved: { samplers: unknown[] };
+    };
+    // Clearing the last field should leave no record at all.
+    expect(res.resolved.samplers).toHaveLength(0);
+  });
+
   it('keeps an explicit zero', async () => {
     await setSampler({ temperature: 0 });
     expect(settings.samplerFor('local', 'echo-small')).toEqual({ temperature: 0 });

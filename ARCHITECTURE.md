@@ -681,8 +681,11 @@ Only the sampling flags are parsed out; the array itself never leaves
 `parseLaunchSampler`, because it contains `--api-key-file` and the model's path
 on disk (INV-04).
 
-The settled sampler is stored on the generation record when it starts, so
-changing the settings mid-flight cannot alter a run already under way.
+The sampler is **copied** onto the generation record when a run starts. The
+settings store hands out the object it holds, so keeping the reference would let
+an edit landing mid-flight reach into a generation already under way. Clearing
+the last field removes the record entirely rather than leaving a bare
+`(providerId, modelId)` pair behind.
 
 ### Clearing chat history
 

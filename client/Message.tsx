@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronRight, Pencil, RefreshCw, Trash2, Check, X } from 'lucide-react';
+import { Check, ChevronRight, Copy, Pencil, RefreshCw, Trash2, X } from 'lucide-react';
 import type { Message as MessageModel, MessageStatus } from '@shared/conversation.ts';
 import { Markdown } from './Markdown.tsx';
 
@@ -38,6 +38,18 @@ export function Message({
 }: MessageProps): React.JSX.Element {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.body);
+  const [copied, setCopied] = useState(false);
+
+  /** Copies the message as it was written, not as it was rendered. */
+  const copy = (): void => {
+    void navigator.clipboard
+      .writeText(message.body)
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => undefined);
+  };
 
   const status = message.type === 'assistant' ? message.status : undefined;
   const statusLabel = status === undefined ? undefined : STATUS_LABEL[status];
@@ -106,6 +118,18 @@ export function Message({
 
       {!busy && (
         <div className="msg__actions">
+          {/* On both sides: wanting a copy of what you asked is as ordinary as
+              wanting a copy of the answer. */}
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={copied ? 'Copied' : 'Copy message'}
+            title={copied ? 'Copied' : 'Copy'}
+            onClick={copy}
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+          </button>
+
           {message.type === 'user' && (
             <button
               type="button"

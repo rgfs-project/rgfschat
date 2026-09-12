@@ -7,7 +7,7 @@ import {
   type MockProvider,
   type MockProviderOptions,
 } from '../provider/mockServer.ts';
-import type { Provider, ProviderChunk } from '../provider/types.ts';
+import type { ChatRequest, Provider, ProviderChunk } from '../provider/types.ts';
 import { GenerationManager } from './manager.ts';
 
 const logger = createLogger({ level: 'silent', write: () => {} });
@@ -299,5 +299,71 @@ describe('GenerationManager', () => {
 
     expect(managerWithCap.size).toBeLessThanOrEqual(4);
     managerWithCap.shutdown();
+  });
+});
+
+describe('sampler settings reach the provider', () => {
+  /** Captures the request a generation actually makes. */
+  function capturing(): { provider: Provider; seen: ChatRequest[] } {
+    const seen: ChatRequest[] = [];
+    const provider: Provider = {
+      listModels: () => Promise.resolve([]),
+      contextLength: () => null,
+      streamChat(request) {
+        seen.push(request);
+        return (async function* (): AsyncIterable<ProviderChunk> {
+          // Nothing to wait for, but the interface is async; yielding to the
+          // loop once keeps it honest rather than suppressing the rule.
+          await Promise.resolve();
+          yield { type: 'content', text: 'ok' };
+        })();
+      },
+    };
+    return { provider, seen };
+  }
+
+  it('carries the configured sampler from start() into streamChat', async () => {
+    const { provider, seen } = capturing();
+    const m = new GenerationManager({ logger, maxOutputTokens: 64 });
+
+    const { generationId } = m.start(OWNER, 'GPT', [{ role: 'user', content: 'hi' }], provider, {
+      conversationId: 'c1',
+      providerId: 'local',
+      sampler: { temperature: 0.25, topK: 7 },
+    });
+    await m.whenTerminal(generationId);
+    m.shutdown();
+
+    // The link the provider's own tests cannot cover: the settings a route
+    // resolved have to survive the manager to reach the request at all.
+    expect(seen[0]?.sampler).toEqual({ temperature: 0.25, topK: 7 });
+  });
+
+  it('sends no sampler when none was configured', async () => {
+    const { provider, seen } = capturing();
+    const m = new GenerationManager({ logger, maxOutputTokens: 64 });
+
+    const { generationId } = m.start(OWNER, 'GPT', [{ role: 'user', content: 'hi' }], provider);
+    await m.whenTerminal(generationId);
+    m.shutdown();
+
+    expect(seen[0]?.sampler).toBeUndefined();
+  });
+
+  it('settles the sampler at the start, so a later change cannot alter the run', async () => {
+    const { provider, seen } = capturing();
+    const m = new GenerationManager({ logger, maxOutputTokens: 64 });
+    const sampler = { temperature: 0.25 };
+
+    const { generationId } = m.start(OWNER, 'GPT', [{ role: 'user', content: 'hi' }], provider, {
+      sampler,
+    });
+    // An administrator editing the settings object mid-flight must not reach
+    // into a generation that has already begun.
+    sampler.temperature = 1.9;
+    await m.whenTerminal(generationId);
+    m.shutdown();
+
+    expect(seen[0]?.sampler?.temperature).toBe(0.25);
   });
 });

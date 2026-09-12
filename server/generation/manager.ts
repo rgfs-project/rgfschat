@@ -48,8 +48,8 @@ interface GenerationRecord {
   ownerId: string;
   /** The client this run streams from; different generations may use different providers. */
   provider: Provider;
-  /** Settled when the run starts, so a mid-flight settings change cannot alter
-      a generation that is already under way. */
+  /** A copy, settled when the run starts, so a settings change landing
+      mid-flight cannot alter a generation already under way. */
   sampler?: SamplerSettings;
   assistantMessageId: string;
   model: string;
@@ -155,7 +155,15 @@ export class GenerationManager {
       conversationId: context.conversationId ?? '',
       providerId: context.providerId ?? '',
       ownerId,
-      ...(context.sampler === undefined ? {} : { sampler: context.sampler }),
+      /*
+       * Copied, not referenced.
+       *
+       * The settings store hands out the object it holds. Holding the same
+       * reference would let an edit that lands mid-flight reach into a
+       * generation already under way — so what this run uses is decided once,
+       * here, and cannot change under it.
+       */
+      ...(context.sampler === undefined ? {} : { sampler: { ...context.sampler } }),
       provider: client,
       assistantMessageId: randomUUID(),
       model,

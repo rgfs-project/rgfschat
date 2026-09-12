@@ -536,10 +536,20 @@ export function adminRouter({
       else merged[field] = value;
     }
 
-    const samplers = [
-      ...current.filter((entry) => !(entry.providerId === providerId && entry.modelId === modelId)),
-      merged as (typeof current)[number],
-    ];
+    const others = current.filter(
+      (entry) => !(entry.providerId === providerId && entry.modelId === modelId)
+    );
+
+    /*
+     * An entry that no longer sets anything is dropped rather than kept as a
+     * bare pair. Otherwise clearing every field leaves a record that says
+     * nothing, and `settings.json` slowly fills with models someone once
+     * opened and changed their mind about.
+     */
+    const setsSomething = Object.keys(merged).some(
+      (field) => field !== 'providerId' && field !== 'modelId'
+    );
+    const samplers = setsSomething ? [...others, merged as (typeof current)[number]] : others;
 
     const stored = settings.stored();
     await settings.save({

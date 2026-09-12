@@ -252,11 +252,17 @@ body {
   /* Fills the scroll port even when nearly empty, so the empty state's
      `margin: auto` has a full column height to centre itself within. */
   min-height: 100%;
-  /* Turns are separated by whitespace alone — there are no dividers or speaker
-     labels, so the gap is the only thing marking the boundary. Enough to part
-     them clearly, but not so much that a one-word reply floats away from the
-     question it answers. */
-  gap: 1.75rem;
+  /*
+   * Turns are separated by whitespace alone — there are no dividers or speaker
+   * labels, so the gap is the only thing marking the boundary. Enough to part
+   * them clearly, but not so much that a one-word reply floats away from the
+   * question it answers.
+   *
+   * It also has to clear the hover controls, which hang out of flow below their
+   * message: too small and their lower edge lands on the next turn, where it
+   * cannot be clicked at all.
+   */
+  gap: 2.5rem;
 }
 
 .composer-region {
