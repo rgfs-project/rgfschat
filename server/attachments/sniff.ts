@@ -137,19 +137,30 @@ const REFUSED_CONTAINERS: { label: string; test: (bytes: Uint8Array) => boolean 
  * Markup that must never be stored as text, however it is labelled.
  *
  * A stored `.md` file is not dangerous on its own — it is served with
- * `Content-Disposition: attachment` and a sandbox CSP, and rendered as
- * Markdown rather than HTML. This is defence in depth: the cost of refusing a
- * file that opens with `<svg` or `<!doctype html` is near zero, and it removes
- * a whole class of "but what if the headers are wrong one day".
+ * `Content-Disposition: attachment`, `nosniff`, and a sandbox CSP, so a
+ * browser downloads it rather than rendering it. This check is defence in
+ * depth on top of that, and the contract requires it: SVG *and* HTML are to be
+ * rejected, not merely served inertly.
  *
- * SVG is the specific reason. It is an image to everyone who talks about it
- * and a scriptable document to a browser, and the contract rejects it by name.
+ * An earlier version listed specific opening strings — `<svg`, `<html`,
+ * `<!doctype` — and a pentest walked straight through the gap: a file whose
+ * first bytes are `<script>` is HTML by any reasonable reading and matched none
+ * of them, so it was accepted and stored as `text/plain`. It was not
+ * exploitable, because the serving headers held, but "not exploitable today"
+ * is exactly the assumption defence in depth exists to not depend on.
+ *
+ * So the rule is now structural rather than a denylist: content whose first
+ * non-space character begins a tag — `<` followed by a letter, `/`, `!`, or
+ * `?` — is treated as markup. The deliberate cost is that a text or Markdown
+ * file whose very first visible character is `<` (a document opening with a raw
+ * HTML block) is refused; that is rare, the reader can wrap it, and refusing it
+ * is the safe direction. A `<` that appears later in the file is fine, so prose
+ * and code that merely *mention* a tag are unaffected.
  */
-const MARKUP_PREFIXES = ['<?xml', '<svg', '<!doctype html', '<html', '<!--'];
+const MARKUP_OPENING = /^<[!?/a-z]/i;
 
 function looksLikeMarkup(text: string): boolean {
-  const start = text.slice(0, 512).trimStart().toLowerCase();
-  return MARKUP_PREFIXES.some((prefix) => start.startsWith(prefix));
+  return MARKUP_OPENING.test(text.slice(0, 512).trimStart());
 }
 
 /**

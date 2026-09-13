@@ -74,8 +74,13 @@ describe('markup is refused however it is labelled', () => {
     ['html', '<!DOCTYPE html><html><body><script>alert(1)</script>'],
     ['bare html', '<html><img src=x onerror=alert(1)>'],
     ['comment-led html', '<!-- hi --><html>'],
+    ['a script-led document', '<script>alert(document.cookie)</script>'],
+    ['an iframe-led document', '<iframe src="//evil"></iframe>'],
+    ['a body-led fragment', '<body onload=alert(1)>'],
+    ['a closing tag first', '</textarea><script>x</script>'],
+    ['an image onerror payload', '<img src=x onerror=alert(1)>'],
   ])('rejects %s', (_label, content) => {
-    const result = sniff(utf8(content), 'image.svg');
+    const result = sniff(utf8(content), 'notes.txt');
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toMatch(/SVG|Markup/i);
@@ -88,6 +93,14 @@ describe('markup is refused however it is labelled', () => {
   it('does not reject Markdown that merely contains a tag later on', () => {
     const document = '# Title\n\nSome prose, and then <svg/> mentioned in passing.\n';
     expect(sniff(utf8(document), 'notes.md')).toEqual({ ok: true, mediaType: 'text/markdown' });
+  });
+  it('accepts text that merely mentions a tag later on', () => {
+    expect(sniff(utf8('See the <div> element for layout.'), 'notes.md').ok).toBe(true);
+  });
+
+  it('accepts a comparison that starts a line', () => {
+    // A `<` that is not opening a tag — `<letter` is the tag shape, `< ` is not.
+    expect(sniff(utf8('3 < 5 is true'), 'math.txt').ok).toBe(true);
   });
 });
 
