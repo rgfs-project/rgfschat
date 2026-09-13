@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Check, ChevronRight, Copy, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import type { Message as MessageModel, MessageStatus } from '@shared/conversation.ts';
 import { Markdown } from './Markdown.tsx';
+import { exactTime, relativeTime } from './relativeTime.ts';
 import { MessageAttachments } from './MessageAttachments.tsx';
 
 /**
@@ -63,6 +64,19 @@ export function Message({
       })
       .catch(() => undefined);
   };
+
+  /*
+   * Computed as the row renders rather than kept ticking on a timer.
+   *
+   * A timer would have to re-render every message in the transcript once a
+   * minute to keep "4 minutes ago" honest, and the row it would be correcting
+   * is only on screen while the pointer is on the message — by which time any
+   * of the things a reader does (send, scroll into a new query, switch chats)
+   * has re-rendered it anyway. The `title` carries the exact time for when the
+   * relative one is not precise enough to settle a question.
+   */
+  const sentAt = message.type === 'system' ? undefined : message.time;
+  const sentLabel = relativeTime(sentAt);
 
   const status = message.type === 'assistant' ? message.status : undefined;
   const statusLabel = status === undefined ? undefined : STATUS_LABEL[status];
@@ -138,17 +152,15 @@ export function Message({
 
       {!busy && (
         <div className="msg__actions">
-          {/* On both sides: wanting a copy of what you asked is as ordinary as
-              wanting a copy of the answer. */}
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={copied ? 'Copied' : 'Copy message'}
-            title={copied ? 'Copied' : 'Copy'}
-            onClick={copy}
-          >
-            {copied ? <Check size={14} /> : <Copy size={14} />}
-          </button>
+          {/* Leads the row: it says something about the message, where the rest
+              of the row acts on it, and a reader following the column of times
+              down a conversation should not have to find them at a different
+              offset under every message. */}
+          {sentAt !== undefined && sentLabel !== undefined && (
+            <time className="msg__time" dateTime={sentAt} title={exactTime(sentAt)}>
+              {sentLabel}
+            </time>
+          )}
 
           {message.type === 'user' && (
             <button
@@ -175,6 +187,21 @@ export function Message({
               <RefreshCw size={14} />
             </button>
           )}
+
+          {/* On both sides: wanting a copy of what you asked is as ordinary as
+              wanting a copy of the answer. It sits second on both, so the one
+              control that differs between a question and an answer is the one
+              in the position that differs — and copy and delete stay where the
+              hand left them when the eye moves down the transcript. */}
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={copied ? 'Copied' : 'Copy message'}
+            title={copied ? 'Copied' : 'Copy'}
+            onClick={copy}
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+          </button>
           <button
             type="button"
             className="icon-button"

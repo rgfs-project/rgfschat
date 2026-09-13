@@ -63,6 +63,8 @@ export interface GenerationServiceOptions {
    * that supplied its own memories would be writing another reader's context.
    */
   memories?: { prompt: (userId: string) => Promise<string | null> };
+  /** Injectable so a test can pin the instant stamped on a message. */
+  now?: () => Date;
 }
 
 export interface StartResult {
@@ -84,6 +86,7 @@ export class GenerationService {
   readonly #maxInlineChars: number;
   readonly #settings: GenerationServiceOptions['settings'];
   readonly #memories: GenerationServiceOptions['memories'];
+  readonly #now: () => Date;
 
   /** Conversations with a generation that has not yet reached a terminal state. */
   readonly #active = new Map<string, string>();
@@ -101,6 +104,7 @@ export class GenerationService {
     this.#maxOutputTokens = options.maxOutputTokens;
     this.#settings = options.settings;
     this.#memories = options.memories;
+    this.#now = options.now ?? ((): Date => new Date());
   }
 
   /**
@@ -187,6 +191,10 @@ export class GenerationService {
             id: userMessageId,
             body: content,
             ...(attached.length === 0 ? {} : { attachments: attached.map((a) => a.id) }),
+            // Stamped when the question is persisted rather than when the
+            // request arrived: the file is the record, and this is the instant
+            // the record gained it.
+            time: this.#now().toISOString(),
           },
         ],
       };
@@ -461,6 +469,9 @@ export class GenerationService {
           provider: providerId,
           model,
           ...(final.reasoning !== '' ? { reasoning: final.reasoning } : {}),
+          // The instant the reply was finished and filed, not the one it was
+          // asked for — a long generation is not backdated to its question.
+          time: this.#now().toISOString(),
           body: final.content,
         };
 

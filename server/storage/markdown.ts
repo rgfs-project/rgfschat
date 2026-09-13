@@ -39,15 +39,17 @@ const NEEDS_ESCAPE = /^\\*[ \t]*<!--[ \t]*cc:/;
 const MESSAGE_TYPES = ['system', 'user', 'reasoning', 'assistant'] as const;
 type BlockType = (typeof MESSAGE_TYPES)[number];
 
-const ATTRIBUTE_KEYS = ['id', 'status', 'provider', 'model', 'attachments'] as const;
+const ATTRIBUTE_KEYS = ['id', 'status', 'provider', 'model', 'attachments', 'time'] as const;
 type AttributeKey = (typeof ATTRIBUTE_KEYS)[number];
 
 /** Which attributes each type permits, and which are required (§3.4). */
 const ATTRIBUTE_RULES: Record<BlockType, { required: AttributeKey[]; optional: AttributeKey[] }> = {
   system: { required: ['id'], optional: [] },
-  user: { required: ['id'], optional: ['attachments'] },
+  user: { required: ['id'], optional: ['attachments', 'time'] },
   reasoning: { required: ['id'], optional: [] },
-  assistant: { required: ['id', 'status'], optional: ['provider', 'model'] },
+  // `time` sits on the assistant block, not on the reasoning block that may
+  // precede it: the two are one turn and share a single instant.
+  assistant: { required: ['id', 'status'], optional: ['provider', 'model', 'time'] },
 };
 
 interface ParsedDelimiter {
@@ -191,6 +193,11 @@ function validateAttributes(
   const status = attributes.get('status');
   if (status !== undefined && !(MESSAGE_STATUSES as readonly string[]).includes(status)) {
     return { ok: false, reason: `invalid status "${status}"`, line };
+  }
+
+  const time = attributes.get('time');
+  if (time !== undefined && !isCanonicalTimestamp(time)) {
+    return { ok: false, reason: 'time is not a canonical timestamp', line };
   }
 
   const attachments = attributes.get('attachments');
@@ -396,6 +403,7 @@ export function parseConversation(input: string): ParseResult {
           type: 'user',
           id,
           ...(attachments !== undefined ? { attachments: attachments.split(',') } : {}),
+          ...(attributes.has('time') ? { time: attributes.get('time') as string } : {}),
           body,
         });
         break;
@@ -408,6 +416,7 @@ export function parseConversation(input: string): ParseResult {
           ...(attributes.has('provider') ? { provider: attributes.get('provider') as string } : {}),
           ...(attributes.has('model') ? { model: attributes.get('model') as string } : {}),
           ...(pendingReasoning !== null ? { reasoning: pendingReasoning.body } : {}),
+          ...(attributes.has('time') ? { time: attributes.get('time') as string } : {}),
           body,
         };
         pendingReasoning = null;
@@ -488,7 +497,7 @@ export function serializeConversation(conversation: Conversation): string {
       blocks.push(block(delimiterFor('reasoning', [['id', message.id]]), message.reasoning));
     }
 
-    // Canonical attribute order: id, status, provider, model, attachments.
+    // Canonical attribute order: id, status, provider, model, attachments, time.
     const attributes: [AttributeKey, string][] = [['id', message.id]];
     if (message.type === 'assistant') {
       attributes.push(['status', message.status]);
@@ -497,6 +506,11 @@ export function serializeConversation(conversation: Conversation): string {
     }
     if (message.type === 'user' && message.attachments !== undefined) {
       attributes.push(['attachments', quote(message.attachments.join(','))]);
+    }
+    // Quoted, not bare: a canonical timestamp contains `:`, which is not in the
+    // BARE character set.
+    if (message.type !== 'system' && message.time !== undefined) {
+      attributes.push(['time', quote(message.time)]);
     }
 
     blocks.push(block(delimiterFor(message.type, attributes), message.body));

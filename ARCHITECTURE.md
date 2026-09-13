@@ -261,6 +261,26 @@ message. The contract requires a reasoning block to be immediately followed by i
 block, at most one per assistant; as a field those rules cannot be violated by construction,
 and reasoning can never be mistaken for prompt history.
 
+### `time` on a message block
+
+A user or assistant block may carry `time="<canonical timestamp>"`, which is when the
+message was sent — the transcript shows it under each turn. It is written by the generation
+service as each block is appended; recovery uses the checkpoint's own clock rather than the
+instant of the restart, so half a reply filed days after a crash is not backdated to the
+reboot.
+
+It is **optional on purpose**, and this is the part to keep in mind when reading contracts
+§3.4: a conversation written before the attribute existed has none, and must go on parsing
+unchanged, so a message without a time is rendered without one rather than with a guess. The
+attribute is not allowed on a `system` block, nor on a `reasoning` block — reasoning and the
+assistant block that follows it are one turn and share the assistant's single instant.
+
+This does extend the frozen `formatVersion: 1` grammar by one optional attribute rather than
+bumping the version. Files this build writes are therefore readable by it and by anything
+that ignores unknown attributes, but a _strict_ older parser built to the letter of §3.4
+would reject them. Nothing else in the format moved, and the round-trip invariant (INV-09)
+covers `time` along with everything else.
+
 Two format properties worth knowing:
 
 - An **empty body** is legal and emits no body lines — contracts §4 writes one for a failed

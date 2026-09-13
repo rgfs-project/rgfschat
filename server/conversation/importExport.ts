@@ -122,6 +122,19 @@ function isoOr(value: string | undefined, fallback: string): string {
   return Number.isFinite(at) ? new Date(at).toISOString() : fallback;
 }
 
+/**
+ * The export's own timestamp for one message, when it is usable.
+ *
+ * Unlike `isoOr` there is no fallback worth having: the conversation's
+ * `created_at` is not when this message was sent, and stamping every message
+ * with the moment of the import would be inventing a history. A message whose
+ * time cannot be read is written without one.
+ */
+function messageTime(value: string): string | undefined {
+  const at = Date.parse(value);
+  return Number.isFinite(at) ? new Date(at).toISOString() : undefined;
+}
+
 export interface Converted {
   id: string;
   conversation: Conversation;
@@ -144,8 +157,10 @@ export function convertConversation(source: z.infer<typeof conversationSchema>):
     // one rather than being forced into a path or an attribute.
     const id = isCanonicalUuid(message.uuid) ? message.uuid : randomUUID();
 
+    const time = messageTime(message.created_at);
+
     if (message.sender === 'human') {
-      messages.push({ type: 'user', id, body });
+      messages.push({ type: 'user', id, body, ...(time === undefined ? {} : { time }) });
     } else {
       messages.push({
         type: 'assistant',
@@ -153,6 +168,7 @@ export function convertConversation(source: z.infer<typeof conversationSchema>):
         status: 'complete',
         body,
         ...(reasoning === '' ? {} : { reasoning }),
+        ...(time === undefined ? {} : { time }),
       });
     }
   }
