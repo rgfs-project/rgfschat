@@ -34,6 +34,15 @@ export interface ResolvedAttachment {
   content: string;
   /** Whether the text was cut short, so the marker can say so. */
   truncated: boolean;
+  /**
+   * An image's area in pixels, when its header could be read.
+   *
+   * Carried because the budget is decided here and an image's token cost
+   * scales with its area, not with its file size — a 6 MP screenshot and a
+   * 0.3 MP thumbnail can weigh the same on disk. Absent for anything that is
+   * not an image, and for an image whose header did not parse.
+   */
+  pixels?: number;
 }
 
 export interface BudgetOptions {
@@ -75,16 +84,50 @@ export function estimateTokens(text: string): number {
 const MESSAGE_OVERHEAD_TOKENS = 4;
 
 /**
- * What an image costs against the context budget.
+ * How much of an image one token covers.
  *
- * A documented estimate, as contracts §4 requires, not a measurement: the true
- * cost depends on the model's patch size and on how it tiles an image, and the
- * only way to learn it is to send the image and read `usage` back — by which
- * point the budget decision has already been made. 1200 is roughly a 1024px
- * square at common patch sizes, and erring high is the safe direction: the
- * consequence of guessing low is a request the provider refuses outright.
+ * A vision model cuts an image into fixed patches, so its cost scales with
+ * *area*. The Qwen-VL family — the common case on the reference server — uses
+ * 28px patches merged 2x2, so one token covers 56x56 = 3136 pixels. Gemma 3
+ * lands in the same place by a different route.
+ *
+ * This replaces a flat per-image estimate, which was the bug: a flat figure is
+ * right at one resolution and wrong either side of it, and it was wrong in the
+ * dangerous direction. The store accepts images up to 50 MP, which is sixteen
+ * thousand tokens of picture charged as twelve hundred — so a screenshot from
+ * a high-density display passed the budget check here and was then refused by
+ * the provider for exceeding its context, which reaches the reader as a reply
+ * that failed with no output and no reason.
+ */
+const IMAGE_PIXELS_PER_TOKEN = 3_136;
+
+/**
+ * What an image costs when its dimensions could not be read, and the floor
+ * under every image.
+ *
+ * Roughly a 1024px square, which is what this estimate was for every image
+ * before area was taken into account. As a floor it covers the models that
+ * spend a fixed number of tokens on a tile however small the picture is; as a
+ * fallback it keeps an unreadable header from being charged nothing at all.
  */
 const IMAGE_TOKENS_ESTIMATE = 1_200;
+
+/**
+ * What one image costs against the context budget.
+ *
+ * A documented estimate, as contracts §4 requires, not a measurement: the true
+ * cost depends on the model's patch size and on how it tiles, and the only way
+ * to learn it is to send the image and read `usage` back — by which point the
+ * budget decision has already been made. Erring high is the safe direction,
+ * since the consequence of guessing low is a request the provider refuses
+ * outright.
+ */
+export function imageTokens(pixels: number | undefined): number {
+  if (pixels === undefined || !Number.isFinite(pixels) || pixels <= 0) {
+    return IMAGE_TOKENS_ESTIMATE;
+  }
+  return Math.max(IMAGE_TOKENS_ESTIMATE, Math.ceil(pixels / IMAGE_PIXELS_PER_TOKEN));
+}
 
 /**
  * What a clip of audio costs, as an estimate for the same reason.
@@ -103,16 +146,28 @@ function formatOf(mediaType: string): string {
   return 'wav';
 }
 
-function costOf(message: ChatMessage): number {
+/**
+ * What one message costs against the budget.
+ *
+ * `imageCosts` carries what the images in this message were charged, in the
+ * order their parts appear. It has to be passed alongside rather than read off
+ * the parts themselves: a content part is the provider's wire shape, and a
+ * field added to it for our arithmetic would be sent upstream along with the
+ * rest of the request.
+ */
+function costOf(message: ChatMessage, imageCosts: readonly number[] = []): number {
   if (typeof message.content === 'string') {
     return estimateTokens(message.content) + MESSAGE_OVERHEAD_TOKENS;
   }
 
   let total = MESSAGE_OVERHEAD_TOKENS;
+  let image = 0;
   for (const part of message.content) {
     if (part.type === 'text') total += estimateTokens(part.text);
-    else if (part.type === 'image_url') total += IMAGE_TOKENS_ESTIMATE;
-    else total += AUDIO_TOKENS_ESTIMATE;
+    else if (part.type === 'image_url') {
+      total += imageCosts[image] ?? IMAGE_TOKENS_ESTIMATE;
+      image += 1;
+    } else total += AUDIO_TOKENS_ESTIMATE;
   }
   return total;
 }
@@ -145,6 +200,10 @@ export function assemblePrompt(
 ): AssembledPrompt {
   const system: ChatMessage[] = [];
   const turns: ChatMessage[] = [];
+  /* What each turn's images were charged, kept beside the wire shape rather
+     than on it — see `costOf`. */
+  const costs = new Map<ChatMessage, number[]>();
+  const costFor = (message: ChatMessage): number => costOf(message, costs.get(message));
 
   /*
    * The administrator's prompt for this model leads, ahead of anything in the
@@ -165,7 +224,12 @@ export function assemblePrompt(
       continue;
     }
     if (message.type === 'user') {
-      turns.push(userMessage(message.body, message.attachments ?? [], { attachments, modalities }));
+      const { message: turn, imageCosts } = userMessage(message.body, message.attachments ?? [], {
+        attachments,
+        modalities,
+      });
+      turns.push(turn);
+      if (imageCosts.length > 0) costs.set(turn, imageCosts);
       continue;
     }
     // Assistant: body only. `reasoning` is intentionally not read here.
@@ -187,7 +251,7 @@ export function assemblePrompt(
 
   // The newest user message is mandatory, so it and the system messages set the
   // floor. If that alone does not fit, nothing can be dropped to help.
-  const floor = systemCost + (newest !== undefined ? costOf(newest) : 0);
+  const floor = systemCost + (newest !== undefined ? costFor(newest) : 0);
   if (floor > budget) {
     throw new AppError('CONTEXT_TOO_LARGE', 'This message is too large for the selected model.');
   }
@@ -198,7 +262,7 @@ export function assemblePrompt(
 
   for (let i = turns.length - 1; i >= 0; i -= 1) {
     const message = turns[i] as ChatMessage;
-    const cost = costOf(message);
+    const cost = costFor(message);
     if (used + cost > budget) break;
     used += cost;
     kept.unshift(message);
@@ -233,12 +297,12 @@ function userMessage(
     attachments: ReadonlyMap<string, ResolvedAttachment> | undefined;
     modalities: readonly string[];
   }
-): ChatMessage {
+): { message: ChatMessage; imageCosts: number[] } {
   const resolved = ids
     .map((id) => options.attachments?.get(id))
     .filter((found): found is ResolvedAttachment => found !== undefined);
 
-  if (resolved.length === 0) return { role: 'user', content: body };
+  if (resolved.length === 0) return { message: { role: 'user', content: body }, imageCosts: [] };
 
   const texts = resolved.filter((attachment) => attachment.kind === 'text');
   const media = resolved.filter(
@@ -254,7 +318,7 @@ function userMessage(
 
   const text = [body, ...inlined].filter((part) => part !== '').join('\n\n');
 
-  if (media.length === 0) return { role: 'user', content: text };
+  if (media.length === 0) return { message: { role: 'user', content: text }, imageCosts: [] };
 
   const parts: ContentPart[] = [
     { type: 'text', text },
@@ -267,7 +331,12 @@ function userMessage(
           }
     ),
   ];
-  return { role: 'user', content: parts };
+  return {
+    message: { role: 'user', content: parts },
+    imageCosts: media
+      .filter((attachment) => attachment.kind === 'image')
+      .map((attachment) => imageTokens(attachment.pixels)),
+  };
 }
 
 /** Re-exported so callers can measure a message the way the budget does. */

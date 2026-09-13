@@ -348,7 +348,7 @@ export class GenerationService {
     model: string
   ): Promise<{ generationId: string; assistantMessageId: string }> {
     const key = conversationKey(userId, conversationId);
-    const { entry, client } = await this.#hub.resolveModel(providerId, model);
+    const { entry, client, model: modelDto } = await this.#hub.resolveModel(providerId, model);
     const sampler = this.#samplerFor(providerId, model);
     // Read before the lock: it touches the filesystem, and the lock is held
     // across the whole check-and-append.
@@ -374,11 +374,32 @@ export class GenerationService {
       }
 
       const next = { ...current, messages: trimmed };
+
+      /*
+       * Resolved here as well as on the send path, and for the same reason.
+       *
+       * Without this the map is empty, every attachment in the history is
+       * skipped as unresolvable, and the question goes back to the model
+       * stripped of the picture it was asking about — so regenerating "what is
+       * in this screenshot" asked about nothing at all, and the budget was
+       * computed for a prompt that was not the one being sent.
+       */
+      const modalities = modelDto.inputModalities;
+      const resolved =
+        this.#attachments === undefined
+          ? new Map()
+          : await resolveAttachments(this.#attachments, userId, next, {
+              maxInlineChars: this.#maxInlineChars,
+              modalities,
+            });
+
       const prompt = assemblePrompt(next, {
         contextTokens:
           client.contextLength(model) ?? entry.contextTokens ?? this.#defaultContextTokens,
         maxOutputTokens: this.#maxOutputTokens,
         ...(systemPrompt === undefined ? {} : { systemPrompt }),
+        attachments: resolved,
+        modalities,
       });
 
       const written = await this.#store.writeUnderLock(userId, conversationId, next);
