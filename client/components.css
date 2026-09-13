@@ -1745,9 +1745,31 @@ button.linkish:hover {
    128px band where the sidebar had already become a drawer while the panel
    still laid itself out as though a desktop were behind it. */
 @media (max-width: 56rem) {
+  /*
+   * A sheet that uses the phone, rather than a card floating in it.
+   *
+   * The desktop shape is a dialog: 52x34rem centred in 2rem of dimmed page,
+   * which is right when the page around it is what you are coming back to. On a
+   * 402x714 viewport those same numbers leave a 338px card capped at 544px tall
+   * — four fifths of the screen given to a backdrop, with the settings squeezed
+   * into the rest and scrolling inside their own little window. Nothing is
+   * clipped, but everything reads a size too small for the device.
+   *
+   * So on a phone it fills what it is given, minus enough margin to still read
+   * as a layer over the page. The insets are `max(…)` against the safe areas so
+   * the sheet clears the cutout and the home indicator rather than tucking
+   * under them.
+   */
+  .panel {
+    padding: max(1rem, var(--safe-top)) max(1rem, var(--safe-right)) max(1rem, var(--safe-bottom))
+      max(1rem, var(--safe-left));
+  }
+
   .panel__card {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
+    width: 100%;
+    height: 100%;
   }
 
   /*
@@ -1950,6 +1972,35 @@ button.linkish:hover {
    ========================================================================== */
 
 @media (pointer: coarse) {
+  /*
+   * Nothing a finger can type into may be smaller than 16px.
+   *
+   * This is not a legibility preference, it is what stops iOS Safari zooming.
+   * Focus a field whose computed size is under 16px and Safari scales the whole
+   * page up to make it readable — and it does not scale back afterwards, so the
+   * layout is left cropped: the sidebar off one edge, a panel that no longer
+   * fits the screen, everything apparently the wrong size. Every text control
+   * here was between 13px and 15px, so every one of them did it.
+   *
+   * `1rem` rather than `16px` so a reader who has enlarged their browser's
+   * default text keeps the margin rather than being pinned at the threshold.
+   *
+   * Bare element selectors and `!important` on purpose. Each of these controls
+   * sets its own size through a class, which outranks an element selector, and
+   * listing the classes instead would mean the next field someone adds is the
+   * one that zooms — a regression that only appears on a phone, which is the
+   * worst place to discover it. This is a property of the input device, like
+   * the reduced-motion override at the top of the theme, and it has to win.
+   *
+   * Ranges and checkboxes are left out: they have no text to size, and they do
+   * not trigger the zoom.
+   */
+  input:not([type='range']):not([type='checkbox']):not([type='radio']),
+  textarea,
+  select {
+    font-size: 1rem !important;
+  }
+
   /*
    * The controls are grown, rather than given an invisible pad that is larger
    * than they are.
