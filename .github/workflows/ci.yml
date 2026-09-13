@@ -49,6 +49,12 @@ jobs:
       - name: End-to-end
         run: npm run test:e2e
 
+      # A fresh build must serve a full conversation with no test harness: the
+      # built CLI creates an admin, the built server boots, and a real HTTP
+      # round-trip runs against the deterministic mock provider.
+      - name: Clean-checkout proof
+        run: npm run clean-checkout
+
       - name: Upload Playwright artifacts
         if: failure()
         uses: actions/upload-artifact@v4

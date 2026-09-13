@@ -26,7 +26,8 @@
     "index:rebuild": "node scripts/rebuild-index.mjs",
     "user:create": "tsx --env-file-if-exists=.env server/scripts/createUser.ts",
     "import:claude": "tsx --env-file-if-exists=.env server/scripts/importClaudeExport.ts",
-    "test:e2e": "npm run build && playwright test"
+    "test:e2e": "npm run build && playwright test",
+    "clean-checkout": "node scripts/clean-checkout.mjs"
   },
   "dependencies": {
     "@fontsource-variable/playfair": "^5.3.0",

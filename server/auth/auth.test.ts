@@ -529,6 +529,48 @@ describe('INV-15: users cannot reach each other', () => {
     expect((await ada.call(`/api/conversations/${id}`)).status).toBe(200);
   });
 
+  it('INV-14: a request cannot choose its own identity via header or body', async () => {
+    await createUser('ada');
+    await createUser('grace');
+    const ada = await signInAs('ada');
+    const graceId = await signInAs('grace').then((g) => g.userId);
+
+    // Ada owns this.
+    const created = await (
+      await ada.call('/api/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Ada private' }),
+      })
+    ).json();
+    const id = (created as { id: string }).id;
+
+    /*
+     * Ada's session, but every request-controlled field that might carry an
+     * identity set to Grace's id. Identity comes only from the session
+     * (INV-14), so all of this is inert: the conversation still lists for Ada
+     * and the spoofed owner reaches nothing of Grace's.
+     */
+    const spoof = {
+      'X-User': graceId,
+      'X-User-Id': graceId,
+      'X-Auth-User': graceId,
+    };
+    const listed = await (await ada.call('/api/conversations', { headers: spoof })).json();
+    expect((listed as { conversations: { id: string }[] }).conversations.map((c) => c.id)).toEqual([
+      id,
+    ]);
+
+    // A body that names another user is a rejected unknown field, not an
+    // identity — the schema is strict, so this never even reaches a handler.
+    const withBody = await ada.call('/api/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...spoof },
+      body: JSON.stringify({ title: 'x', userId: graceId, ownerId: graceId }),
+    });
+    expect(withBody.status).toBe(400);
+  });
+
   it('a generation cannot be observed or cancelled by another user', async () => {
     await createUser('ada');
     await createUser('grace');
