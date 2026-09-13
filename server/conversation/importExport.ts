@@ -58,7 +58,11 @@ export const exportSchema = z.array(conversationSchema);
 
 export const memoriesFileSchema = z
   .object({
-    memory_files: z.array(z.object({ path: z.string(), content: z.string() }).passthrough()),
+    memory_files: z.array(
+      z
+        .object({ path: z.string(), content: z.string(), updated_at: z.string().optional() })
+        .passthrough()
+    ),
   })
   .passthrough();
 
@@ -209,9 +213,38 @@ export function memoryNameFrom(path: string, maxLength: number): string {
   return name === '' ? 'memory' : name;
 }
 
+/**
+ * A memory's text, without the export's own book-keeping.
+ *
+ * The export files carry YAML front matter — `name`, `description`, `sources`,
+ * `aliases` — describing how that product indexes the note. Every memory here
+ * is prepended to the system prompt of every generation, so keeping it would
+ * spend context on another application's filing system: on a short note it is
+ * most of the bytes. The name is already the filename, and the rest has no
+ * meaning on this side.
+ *
+ * Only a fence that opens on the first line is treated as front matter, and
+ * only when it closes. Anything else is a document that happens to contain a
+ * rule, and is left exactly as it was.
+ */
+export function memoryBody(content: string): string {
+  const normalised = content.replace(/\r\n/g, '\n');
+  if (!normalised.startsWith('---\n')) return content.trim();
+
+  const end = normalised.indexOf('\n---', 3);
+  if (end === -1) return content.trim();
+
+  const after = normalised.slice(end + 4);
+  const body = after.replace(/^[^\n]*\n?/, '').trim();
+
+  // A note that is nothing but front matter still has to be worth keeping:
+  // an empty memory is refused by the store, so the original is better.
+  return body === '' ? content.trim() : body;
+}
+
 export interface ExportContents {
   conversations: z.infer<typeof exportSchema>;
-  memories: { path: string; content: string }[];
+  memories: { path: string; content: string; updated_at?: string | undefined }[];
 }
 
 /**

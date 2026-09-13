@@ -493,6 +493,17 @@ export class GenerationService {
           // The instant the reply was finished and filed, not the one it was
           // asked for — a long generation is not backdated to its question.
           time: this.#now().toISOString(),
+          /*
+           * Why it stopped, when it stopped badly.
+           *
+           * The status already says a reply did not complete; this says what
+           * went wrong, so a transcript read tomorrow answers the question the
+           * server log answered today. A run that reached a terminal state
+           * without a classification simply carries none.
+           */
+          ...(final.state !== 'completed' && final.errorCode !== undefined
+            ? { error: final.errorCode }
+            : {}),
           body: final.content,
         };
 

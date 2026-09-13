@@ -1,4 +1,5 @@
 import { parseDocument, type Document } from 'yaml';
+import { ERROR_CODES } from '@shared/errors.ts';
 import {
   FORMAT_VERSION,
   MESSAGE_STATUSES,
@@ -39,7 +40,15 @@ const NEEDS_ESCAPE = /^\\*[ \t]*<!--[ \t]*cc:/;
 const MESSAGE_TYPES = ['system', 'user', 'reasoning', 'assistant'] as const;
 type BlockType = (typeof MESSAGE_TYPES)[number];
 
-const ATTRIBUTE_KEYS = ['id', 'status', 'provider', 'model', 'attachments', 'time'] as const;
+const ATTRIBUTE_KEYS = [
+  'id',
+  'status',
+  'provider',
+  'model',
+  'attachments',
+  'time',
+  'error',
+] as const;
 type AttributeKey = (typeof ATTRIBUTE_KEYS)[number];
 
 /** Which attributes each type permits, and which are required (§3.4). */
@@ -49,7 +58,8 @@ const ATTRIBUTE_RULES: Record<BlockType, { required: AttributeKey[]; optional: A
   reasoning: { required: ['id'], optional: [] },
   // `time` sits on the assistant block, not on the reasoning block that may
   // precede it: the two are one turn and share a single instant.
-  assistant: { required: ['id', 'status'], optional: ['provider', 'model', 'time'] },
+  // `error` is assistant-only: nothing else in the format can fail.
+  assistant: { required: ['id', 'status'], optional: ['provider', 'model', 'time', 'error'] },
 };
 
 interface ParsedDelimiter {
@@ -193,6 +203,14 @@ function validateAttributes(
   const status = attributes.get('status');
   if (status !== undefined && !(MESSAGE_STATUSES as readonly string[]).includes(status)) {
     return { ok: false, reason: `invalid status "${status}"`, line };
+  }
+
+  const error = attributes.get('error');
+  if (error !== undefined && !(ERROR_CODES as readonly string[]).includes(error)) {
+    return { ok: false, reason: `invalid error code "${error}"`, line };
+  }
+  if (error !== undefined && attributes.get('status') === 'complete') {
+    return { ok: false, reason: 'a complete message cannot carry an error', line };
   }
 
   const time = attributes.get('time');
@@ -417,6 +435,7 @@ export function parseConversation(input: string): ParseResult {
           ...(attributes.has('model') ? { model: attributes.get('model') as string } : {}),
           ...(pendingReasoning !== null ? { reasoning: pendingReasoning.body } : {}),
           ...(attributes.has('time') ? { time: attributes.get('time') as string } : {}),
+          ...(attributes.has('error') ? { error: attributes.get('error') as string } : {}),
           body,
         };
         pendingReasoning = null;
@@ -497,7 +516,7 @@ export function serializeConversation(conversation: Conversation): string {
       blocks.push(block(delimiterFor('reasoning', [['id', message.id]]), message.reasoning));
     }
 
-    // Canonical attribute order: id, status, provider, model, attachments, time.
+    // Canonical attribute order: id, status, provider, model, attachments, time, error.
     const attributes: [AttributeKey, string][] = [['id', message.id]];
     if (message.type === 'assistant') {
       attributes.push(['status', message.status]);
@@ -511,6 +530,11 @@ export function serializeConversation(conversation: Conversation): string {
     // BARE character set.
     if (message.type !== 'system' && message.time !== undefined) {
       attributes.push(['time', quote(message.time)]);
+    }
+    // Bare: an error code is upper-case letters and underscores, all of which
+    // the BARE alphabet admits.
+    if (message.type === 'assistant' && message.error !== undefined) {
+      attributes.push(['error', message.error]);
     }
 
     blocks.push(block(delimiterFor(message.type, attributes), message.body));

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Check, ChevronRight, Copy, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import type { Message as MessageModel, MessageStatus } from '@shared/conversation.ts';
 import { Markdown } from './Markdown.tsx';
+import { failureMessage } from './failureMessage.ts';
 import { exactTime, relativeTime } from './relativeTime.ts';
 import { MessageAttachments } from './MessageAttachments.tsx';
 
@@ -80,6 +81,18 @@ export function Message({
 
   const status = message.type === 'assistant' ? message.status : undefined;
   const statusLabel = status === undefined ? undefined : STATUS_LABEL[status];
+  /*
+   * The outcome, and under it what went wrong.
+   *
+   * The label alone says a reply did not finish; the reason says whether that
+   * is worth retrying. A reply stored before the reason was recorded, or one
+   * whose failure the server could not classify, keeps the label on its own
+   * rather than gaining a sentence that explains nothing.
+   */
+  const reason =
+    message.type === 'assistant' && message.error !== undefined
+      ? failureMessage(message.error)
+      : undefined;
   const reasoning = message.type === 'assistant' ? message.reasoning : undefined;
 
   const save = (): void => {
@@ -148,7 +161,12 @@ export function Message({
 
       {message.type === 'user' && <MessageAttachments ids={message.attachments ?? []} />}
 
-      {statusLabel !== undefined && <p className="msg__status">{statusLabel}</p>}
+      {statusLabel !== undefined && (
+        <p className="msg__status">
+          {statusLabel}
+          {reason !== undefined && <span className="msg__reason">{reason}</span>}
+        </p>
+      )}
 
       {!busy && (
         <div className="msg__actions">

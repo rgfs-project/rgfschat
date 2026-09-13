@@ -152,6 +152,19 @@
   padding-left: 0.625rem;
 }
 
+/*
+ * What went wrong, under the outcome it explains.
+ *
+ * Its own line rather than a continuation of the label: "Failed" is the fact
+ * and the sentence under it is the explanation, and running them together
+ * makes a short label read as the start of a long one.
+ */
+.msg__reason {
+  display: block;
+  margin-top: 0.125rem;
+  color: var(--muted);
+}
+
 .msg__empty {
   margin: 0;
   font-style: italic;

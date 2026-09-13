@@ -4,6 +4,7 @@ import {
   convertConversation,
   exportSchema,
   memoriesFileSchema,
+  memoryBody,
   memoryNameFrom,
 } from '../conversation/importExport.ts';
 import { loadConfig } from '../config.ts';
@@ -155,6 +156,7 @@ async function main(): Promise<void> {
   /* --- memories ---------------------------------------------------------- */
 
   let remembered = 0;
+  let skippedMemories = 0;
   if (options.memories !== '') {
     const parsed = memoriesFileSchema.safeParse(
       JSON.parse(await readFile(options.memories, 'utf8')) as unknown
@@ -163,12 +165,25 @@ async function main(): Promise<void> {
       throw new Error(`${options.memories} is not a Claude memories export.`);
     }
 
+    // Same rule as the route and as conversations: what is already there wins.
+    const existing = new Set((await memoryStore.list(account.id)).map((memory) => memory.name));
+
     for (const file of parsed.data.memory_files) {
       const name = memoryNameFrom(file.path, MEMORY_NAME_MAX_LENGTH);
-      if (!options.dryRun) await memoryStore.write(account.id, name, file.content);
+      if (existing.has(name)) {
+        skippedMemories += 1;
+        process.stdout.write(`  skip      memory ${name} (already present)\n`);
+        continue;
+      }
+
+      const content = memoryBody(file.content);
+      if (!options.dryRun) {
+        await memoryStore.write(account.id, name, content, { modifiedAt: file.updated_at });
+      }
+      existing.add(name);
       remembered += 1;
       process.stdout.write(
-        `  ${options.dryRun ? 'would  ' : 'ok     '}  memory ${name} (${Buffer.byteLength(file.content)} bytes)\n`
+        `  ${options.dryRun ? 'would  ' : 'ok     '}  memory ${name} (${Buffer.byteLength(content)} bytes)\n`
       );
     }
   }
@@ -176,7 +191,7 @@ async function main(): Promise<void> {
   process.stdout.write(
     `\n${options.dryRun ? 'Dry run. ' : ''}${report.imported} conversation(s) imported, ` +
       `${report.skippedExisting} already present, ${report.skippedEmpty} empty. ` +
-      `${remembered} memory/memories imported.\n` +
+      `${remembered} memory/memories imported, ${skippedMemories} already present.\n` +
       (report.toolBlocks > 0 ? `${report.toolBlocks} tool block(s) left out.\n` : '') +
       (report.attachments > 0
         ? `${report.attachments} attachment(s): the text read out of them was kept, the files were not.\n`

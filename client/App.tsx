@@ -6,6 +6,7 @@ import { ApiError, cancelGeneration, downloadConversation } from './api.ts';
 import { Composer } from './Composer.tsx';
 import { Dialog } from './Dialog.tsx';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
+import { failureMessage } from './failureMessage.ts';
 import { Message, StreamingMessage } from './Message.tsx';
 import type { ModelSelection } from './ModelPicker.tsx';
 import { SearchDialog } from './SearchDialog.tsx';
@@ -35,36 +36,6 @@ import { useAttachments } from './useAttachments.ts';
 const ACTIVE_KEY = 'workspace.activeGeneration';
 const THEME_KEY = 'workspace.theme';
 const SIDEBAR_KEY = 'workspace.sidebarCollapsed';
-/**
- * Why a generation failed, in words.
- *
- * The server classifies every failure — it is in the `done` event as
- * `errorCode` and in the log line beside it — and until now the interface threw
- * that away and said "check the server logs" for all of them. A reader who can
- * see the server logs is not the one being told, and the difference between a
- * provider that is down, a request too big for the model, and a reply that died
- * halfway is the difference between waiting, shortening, and retrying.
- *
- * An unrecognised code still points at the logs, because an unrecognised code
- * is one this interface genuinely has nothing to say about.
- */
-function failureMessage(code: string | undefined): string {
-  switch (code) {
-    case 'PROVIDER_UNAVAILABLE':
-      return 'The model provider is unreachable. It may be down or still loading.';
-    case 'MODEL_NOT_FOUND':
-      return 'That model is no longer available from this provider.';
-    case 'CONTEXT_TOO_LARGE':
-      return 'This conversation is too long for the model. Start a new one, or remove an attachment.';
-    case 'PROVIDER_ERROR':
-      return 'The model provider rejected the request or failed part-way through the reply.';
-    case 'INTERNAL':
-      return 'The generation failed inside this server. Check the server logs.';
-    default:
-      return 'The generation failed. Check the server logs.';
-  }
-}
-
 /** Last model used overall, the fallback for a conversation with no memory. */
 const LAST_MODEL_KEY = 'workspace.lastModel';
 

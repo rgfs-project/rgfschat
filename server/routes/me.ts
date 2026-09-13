@@ -3,7 +3,12 @@ import { z } from 'zod';
 import { validateBody } from '../http/validate.ts';
 import { AppError } from '../errors/AppError.ts';
 import { clearHistoryFor } from '../conversation/clearHistory.ts';
-import { convertConversation, memoryNameFrom, readExport } from '../conversation/importExport.ts';
+import {
+  convertConversation,
+  memoryBody,
+  memoryNameFrom,
+  readExport,
+} from '../conversation/importExport.ts';
 import { MEMORY_MAX_BYTES, type MemoryStore } from '../storage/memories.ts';
 import { isMemoryName, MEMORY_NAME_MAX_LENGTH } from '../storage/paths.ts';
 import type { PreferencesStore } from '../storage/preferences.ts';
@@ -219,6 +224,7 @@ export function meRouter({
       skippedExisting: 0,
       skippedEmpty: 0,
       memories: 0,
+      memoriesSkipped: 0,
       toolBlocks: 0,
       attachments: 0,
     };
@@ -241,12 +247,28 @@ export function meRouter({
       report.imported += 1;
     }
 
+    /*
+     * An existing memory is left alone, exactly as an existing conversation is.
+     *
+     * Re-importing an export is a normal thing to do — a second archive, a
+     * later download — and overwriting by name would silently discard whatever
+     * the reader had edited since. Skipping is the recoverable direction: a
+     * memory that was not imported can be imported by deleting the one in its
+     * place, whereas one that was overwritten is simply gone.
+     */
+    const existing = new Set((await memories.list(userId)).map((memory) => memory.name));
+
     for (const memory of found.memories) {
-      await memories.write(
-        userId,
-        memoryNameFrom(memory.path, MEMORY_NAME_MAX_LENGTH),
-        memory.content
-      );
+      const name = memoryNameFrom(memory.path, MEMORY_NAME_MAX_LENGTH);
+      if (existing.has(name)) {
+        report.memoriesSkipped += 1;
+        continue;
+      }
+
+      await memories.write(userId, name, memoryBody(memory.content), {
+        modifiedAt: memory.updated_at,
+      });
+      existing.add(name);
       report.memories += 1;
     }
 

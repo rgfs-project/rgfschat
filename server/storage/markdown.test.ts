@@ -229,6 +229,41 @@ describe('delimiter grammar', () => {
     }
   });
 
+  it('records why a reply failed, and only on a reply that did', () => {
+    const ok = parseOk(
+      `${FRONT}<!-- cc:assistant id=${ID_A} status=failed error=PROVIDER_ERROR -->\nhalf an\n`
+    );
+    expect(ok.messages[0]).toEqual({
+      type: 'assistant',
+      id: ID_A,
+      status: 'failed',
+      error: 'PROVIDER_ERROR',
+      body: 'half an',
+    });
+
+    expect(
+      expectMalformed(`${FRONT}<!-- cc:assistant id=${ID_A} status=failed error=NONSENSE -->\nx\n`)
+        .reason
+    ).toMatch(/invalid error code/);
+
+    // A reply that completed has nothing to explain.
+    expect(
+      expectMalformed(
+        `${FRONT}<!-- cc:assistant id=${ID_A} status=complete error=PROVIDER_ERROR -->\nx\n`
+      ).reason
+    ).toMatch(/complete message cannot carry an error/);
+
+    // And it belongs to a reply, not to a question.
+    expect(
+      expectMalformed(`${FRONT}<!-- cc:user id=${ID_A} error=PROVIDER_ERROR -->\nx\n`).reason
+    ).toMatch(/not allowed on "user"/);
+  });
+
+  it('leaves a failed reply stored before the reason existed without one', () => {
+    const ok = parseOk(`${FRONT}<!-- cc:assistant id=${ID_A} status=failed -->\nx\n`);
+    expect(ok.messages[0]).not.toHaveProperty('error');
+  });
+
   it('does not allow time on a system or a reasoning block', () => {
     const time = '2026-09-11T17:03:12.000Z';
 
@@ -461,8 +496,11 @@ const messageArb = (id: string): fc.Arbitrary<Message> =>
         model: fc.option(fc.string(), { nil: undefined }),
         reasoning: fc.option(bodyArb, { nil: undefined }),
         time: fc.option(timeArb, { nil: undefined }),
+        error: fc.option(fc.constantFrom('PROVIDER_ERROR', 'PROVIDER_TIMEOUT', 'INTERNAL'), {
+          nil: undefined,
+        }),
       })
-      .map(({ body, status, provider, model, reasoning, time }): Message => ({
+      .map(({ body, status, provider, model, reasoning, time, error }): Message => ({
         type: 'assistant',
         id,
         status,
@@ -470,6 +508,8 @@ const messageArb = (id: string): fc.Arbitrary<Message> =>
         ...(model !== undefined ? { model } : {}),
         ...(reasoning !== undefined ? { reasoning } : {}),
         ...(time !== undefined ? { time } : {}),
+        // Only a reply that did not complete may carry one.
+        ...(error !== undefined && status !== 'complete' ? { error } : {}),
         body,
       }))
   );

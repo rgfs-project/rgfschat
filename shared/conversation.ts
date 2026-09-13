@@ -58,6 +58,16 @@ export interface AssistantMessage {
   reasoning?: string;
   /** When the reply was written, as a canonical timestamp. Optional, as on a user message. */
   time?: string;
+  /**
+   * Why this reply did not complete, as an error code from the contract's table.
+   *
+   * Only meaningful alongside a non-`complete` status, and optional even then:
+   * every reply written before this existed has none, and a run can fail for a
+   * reason the server could not classify. Without it a failed reply reads as
+   * "Failed" forever — the server classifies the failure and logs it, but the
+   * person looking at the transcript is not the one who can read the log.
+   */
+  error?: string;
   body: string;
 }
 
