@@ -249,22 +249,33 @@ terminate TLS at a proxy in front. `/data` is the entire persistent state; back
 up the volume (it holds secrets — see SECURITY.md). `docker stop` /
 `podman stop` triggers the server's graceful shutdown via `dumb-init`.
 
+### The published image
+
+A built image is published to GHCR and is public, so it needs no login to pull:
+
+```bash
+podman pull ghcr.io/rgfs-project/rgfschat:latest
+```
+
+Every build is also tagged with its commit SHA
+(`ghcr.io/rgfs-project/rgfschat:<sha>`); prefer a SHA tag when you want a
+deployment pinned to an exact build rather than moving with `latest`. To use it
+with the Compose file above, replace the service's `build: .` with
+`image: ghcr.io/rgfs-project/rgfschat:latest`.
+
 ### Building the image in CI
 
 [`.github/workflows/docker.yml`](.github/workflows/docker.yml) builds the image
 on every push to `main` and on version tags, **smoke-tests that it is
 self-contained** (creates an admin, boots, checks `/api/health`, and confirms
 the API — not just a static server — answers with the canonical `401`), and
-**publishes to GHCR** at `ghcr.io/<owner>/<repo>` when the push is on the
-canonical repository. Nothing is published from a fork's pull request.
+**publishes to GHCR** — from the same cached layers it just tested, with a
+build-provenance attestation. Publishing is restricted to the canonical
+repository; nothing is published from a fork or from a pull request.
 
 To run it on demand — a first publish, or a manual re-build — open the repo's
 **Actions** tab, choose **Docker**, and click **Run workflow** (the
-`workflow_dispatch` trigger). Then pull the published image:
-
-```bash
-docker pull ghcr.io/<owner>/<repo>:latest
-```
+`workflow_dispatch` trigger).
 
 The workflow needs no secrets you have to set — it authenticates to GHCR with
 the built-in `GITHUB_TOKEN`. Its smoke-test credentials are throwaway, on a
