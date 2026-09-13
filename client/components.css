@@ -1126,7 +1126,7 @@ button.linkish:hover {
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
-  padding: 0.375rem;
+  padding: 0.25rem;
   background: var(--raised);
   border: 1px solid var(--border);
   border-radius: 0.75rem;
@@ -1141,7 +1141,7 @@ button.linkish:hover {
   align-items: center;
   gap: 0.75rem;
   width: 100%;
-  padding: 0.5rem 0.625rem;
+  padding: 0.375rem 0.5rem;
   border-radius: 0.5rem;
   text-align: left;
   color: var(--text);
@@ -1169,10 +1169,10 @@ button.linkish:hover {
    same rule separates anything else that leaves rather than changes. */
 .menu__item.is-destructive,
 .menu__item.is-separated {
-  margin-top: 0.375rem;
+  margin-top: 0.25rem;
   border-top: 1px solid var(--border);
   border-radius: 0 0 0.5rem 0.5rem;
-  padding-top: 0.625rem;
+  padding-top: 0.375rem;
 }
 
 /* No colour: the palette is achromatic on purpose, and destructive is carried
