@@ -949,8 +949,10 @@
 
 /* --- sign in and dialogs -------------------------------------------------- */
 
+/* The sign-in form has fields of its own, so it needs the same treatment as
+   the shell — see the note on `.shell` in the layout. */
 .signin {
-  min-height: 100dvh;
+  min-height: var(--viewport-height, 100dvh);
   display: grid;
   place-items: center;
   padding: 1.5rem;
@@ -1110,6 +1112,25 @@ button.linkish:hover {
 /* The backdrop dims what is behind it, so the dialog reads as modal. */
 .modal {
   backdrop-filter: blur(2px);
+}
+
+/*
+ * The overlays follow the visible viewport too.
+ *
+ * Both are `position: fixed` with `inset: 0`, which pins them to the *layout*
+ * viewport — the one thing that does not change when the keyboard opens. Every
+ * one of them has a field in it somewhere (the search palette is nothing but a
+ * field, and the memory setting ends in one), so left alone they stay
+ * full-height behind the keys while the shell behind them has already moved.
+ *
+ * `bottom: auto` is what lets the height take effect: with `inset: 0` both
+ * edges are pinned and a height is ignored.
+ */
+.modal,
+.panel {
+  top: var(--viewport-offset, 0px);
+  bottom: auto;
+  height: var(--viewport-height, 100dvh);
 }
 
 /* --- menus ---------------------------------------------------------------- */
@@ -2131,7 +2152,7 @@ button.linkish:hover {
    ========================================================================== */
 
 .page {
-  height: 100dvh;
+  height: var(--viewport-height, 100dvh);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 2rem max(1.25rem, var(--safe-right)) max(2rem, var(--safe-bottom))

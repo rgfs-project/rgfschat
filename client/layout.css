@@ -42,9 +42,24 @@ body {
  * costs the width it covers while it is open, and buys a transcript whose
  * layout never depends on a piece of navigation.
  */
+/*
+ * Fixed to the visible viewport, not merely as tall as it.
+ *
+ * `position: fixed` places this against the *layout* viewport, which is the one
+ * thing that does not move when a keyboard opens — so offsetting the top by
+ * what Safari has panned the visual viewport puts the shell back over what the
+ * reader can see. `relative` could not do that: it would move with the panning
+ * it is trying to cancel.
+ *
+ * `100dvh` and a zero offset remain the fallback, so a browser without
+ * `visualViewport` behaves exactly as it did before.
+ */
 .shell {
-  position: relative;
-  height: 100dvh;
+  position: fixed;
+  top: var(--viewport-offset, 0px);
+  left: 0;
+  right: 0;
+  height: var(--viewport-height, 100dvh);
   overflow: hidden;
 }
 
@@ -223,8 +238,9 @@ body {
   overflow: hidden;
 }
 
+/* Matches the shell it fills; see the note there. */
 .main {
-  height: 100dvh;
+  height: var(--viewport-height, 100dvh);
 }
 
 .main__header {

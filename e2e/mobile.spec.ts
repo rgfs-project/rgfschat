@@ -136,10 +136,17 @@ test.describe('phone (390x844)', () => {
     await expect(composerField(page)).toBeVisible();
 
     /*
-     * The keyboard, as the browser presents it under
+     * The keyboard as *Chromium* presents it under
      * `interactive-widget=resizes-content`: the layout viewport itself gets
-     * shorter. Emulating it as a shorter viewport is therefore not an
-     * approximation — it is the same thing the phone does.
+     * shorter, so emulating it as a shorter viewport is the same thing that
+     * browser does.
+     *
+     * It is not what Safari does. Safari has never implemented
+     * `interactive-widget`, keeps the layout viewport at full height and
+     * shrinks only the visual one — which this emulation cannot reproduce and
+     * which is why this test stayed green while a real iPhone put the composer
+     * under the keys. That case is handled by `useViewportHeight`, and covered
+     * by its own test.
      */
     const keyboardHeight = 336;
     await page.setViewportSize({ width: PHONE.width, height: PHONE.height - keyboardHeight });

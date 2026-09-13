@@ -7,6 +7,7 @@ import { logout, onAuthExpired, setCsrfToken } from './api.ts';
 import { createQueryClient, keys, useConversations, useModels, useSession } from './queries.ts';
 import { AppRoutes } from './routes/AppRoutes.tsx';
 import { SessionContext, type SessionValue } from './routes/session.ts';
+import { useViewportHeight } from './useViewportHeight.ts';
 
 /**
  * The application shell.
@@ -53,6 +54,13 @@ export function AppRoot(): React.JSX.Element {
   // One client for the lifetime of the app; a new one per render would discard
   // the cache on every state change.
   const [client] = useState(createQueryClient);
+
+  /*
+   * Above the router, because every screen is full-height: the chat shell, the
+   * sign-in form and the error page all size themselves from what this
+   * publishes, and a keyboard can be open on any of them.
+   */
+  useViewportHeight();
 
   return (
     <QueryClientProvider client={client}>
