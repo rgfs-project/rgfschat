@@ -5,6 +5,9 @@ on:
     branches: [main]
     tags: ['phase-*', 'v*']
   pull_request:
+  # Lets you run the build → smoke-test → publish from the Actions tab on
+  # demand, without a push — useful for a first run or a manual re-publish.
+  workflow_dispatch:
 
 concurrency:
   group: docker-${{ github.ref }}

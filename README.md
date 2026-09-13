@@ -194,47 +194,81 @@ people, put scanning in front of `data/` yourself.
 
 A multi-stage image builds the client and server, prunes to production
 dependencies (keeping argon2's compiled binary), and runs as a non-root user
-with `/data` as a persistent volume.
+with `/data` as a persistent volume. Verified end to end on both Docker and
+rootless Podman.
+
+### Run it with Podman Compose
 
 ```bash
-docker compose up --build            # build and start on :3001
-docker compose run --rm -i app \
-  create-admin --username alice --admin   # first admin, password read from stdin
+# 1. Build and start the server on http://localhost:3001
+podman-compose up -d
+
+# 2. Create the first admin. A fresh volume has no accounts and registration
+#    is closed by default, so this is the way in. The password is read from
+#    stdin — never an argument — so it stays out of shell history and `ps`.
+#    Use `podman run -i`, not `podman-compose run`: podman-compose does not
+#    attach stdin the same way and the prompt will hang.
+printf 'your-strong-password\n' | podman run -i --rm \
+  -v workspace_chatui-data:/data localhost/workspace_app:latest \
+  create-admin --username admin --admin
+
+# 3. Sign in at http://localhost:3001 as `admin`. Stop with:
+podman-compose down          # add -v to also delete the data volume
 ```
 
-> **Podman.** The image and compose file work under Podman too, with two
-> differences. Build with `--format docker` if you want the `HEALTHCHECK` to be
-> honoured — Podman's default OCI format ignores it (Docker does not). And create
-> the first admin with `podman run -i` rather than `podman-compose run`, which
-> does not attach stdin the same way:
->
-> ```bash
-> podman-compose up -d
-> printf 'your-password\n' | podman run -i --rm \
->   -v workspace_chatui-data:/data localhost/workspace_app:latest \
->   create-admin --username you --admin
-> ```
+The volume is named `workspace_chatui-data` (the compose project prefix +
+`chatui-data`); confirm with `podman volume ls`. Point `LLAMA_BASE_URL` at a
+reachable provider in `docker-compose.yml` or the environment — keep that hop
+`https://` or on a private network ([`SECURITY.md`](SECURITY.md)).
+
+> **Podman vs Docker.** Two differences. Podman's default OCI image format
+> ignores `HEALTHCHECK`; build with `podman build --format docker` to keep it
+> (Docker honours it as written). And the stdin note in step 2 above is
+> Podman-specific — under Docker, `docker compose run --rm -i app create-admin
+--username admin --admin` works directly.
+
+### Run it with Docker
+
+```bash
+docker compose up -d --build
+docker compose run --rm -i app create-admin --username admin --admin
+```
 
 Or without compose:
 
 ```bash
 docker build -t chatui .
 docker volume create chatui-data
-docker run -i --rm -v chatui-data:/data chatui create-admin --username alice --admin
+docker run -i --rm -v chatui-data:/data chatui create-admin --username admin --admin
 docker run -d -p 3001:3001 -v chatui-data:/data \
   -e LLAMA_BASE_URL=https://your-llama-host:8080 chatui
 ```
 
-The container creates the first admin the same way the CLI does — password on
-stdin, never in an argument — because a fresh volume has no accounts and
-registration is closed by default. Point `LLAMA_BASE_URL` at a reachable
-provider; keep that hop `https://` or on a private network (see
-[`SECURITY.md`](SECURITY.md)). For TLS, mount a cert and key and set
-`TLS_CERT_FILE` / `TLS_KEY_FILE`, or terminate TLS at a proxy in front.
+For TLS, mount a cert and key and set `TLS_CERT_FILE` / `TLS_KEY_FILE`, or
+terminate TLS at a proxy in front. `/data` is the entire persistent state; back
+up the volume (it holds secrets — see SECURITY.md). `docker stop` /
+`podman stop` triggers the server's graceful shutdown via `dumb-init`.
 
-`/data` is the entire persistent state; back up the volume (it holds secrets —
-see SECURITY.md). `docker stop` triggers the server's graceful shutdown via
-`dumb-init`.
+### Building the image in CI
+
+[`.github/workflows/docker.yml`](.github/workflows/docker.yml) builds the image
+on every push to `main` and on version tags, **smoke-tests that it is
+self-contained** (creates an admin, boots, checks `/api/health`, and confirms
+the API — not just a static server — answers with the canonical `401`), and
+**publishes to GHCR** at `ghcr.io/<owner>/<repo>` when the push is on the
+canonical repository. Nothing is published from a fork's pull request.
+
+To run it on demand — a first publish, or a manual re-build — open the repo's
+**Actions** tab, choose **Docker**, and click **Run workflow** (the
+`workflow_dispatch` trigger). Then pull the published image:
+
+```bash
+docker pull ghcr.io/<owner>/<repo>:latest
+```
+
+The workflow needs no secrets you have to set — it authenticates to GHCR with
+the built-in `GITHUB_TOKEN`. Its smoke-test credentials are throwaway, on a
+temporary volume, passed on stdin, and never printed.
 
 ## First run
 
