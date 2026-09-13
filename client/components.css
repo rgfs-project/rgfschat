@@ -1130,7 +1130,9 @@ button.linkish:hover {
   background: var(--raised);
   border: 1px solid var(--border);
   border-radius: 0.75rem;
-  box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
+  box-shadow:
+    0 12px 32px rgb(0 0 0 / 18%),
+    0 0 0 1px var(--border-strong);
   animation: scale-in var(--motion-fast) var(--ease-out);
 }
 
