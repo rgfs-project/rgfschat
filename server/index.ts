@@ -1,3 +1,6 @@
+import { createServer as createHttpServer } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './app.ts';
@@ -209,10 +212,44 @@ async function main(): Promise<void> {
     })
   );
 
-  const server = app.listen(config.port, () => {
+  /*
+   * HTTPS when a cert and key are configured, plain HTTP otherwise.
+   *
+   * Native TLS is here so an operator does not *need* a reverse proxy to avoid
+   * serving the session cookie and every message in cleartext — the single
+   * biggest exposure to anyone on the network. A proxy is still supported and
+   * is the better choice at scale (it terminates TLS, and this can stay HTTP on
+   * the loopback behind it); this is for the common self-hosted case where
+   * there is no proxy and the alternative is plaintext.
+   *
+   * The files are read at boot and a failure is fatal: a server told to run
+   * HTTPS must not fall back to HTTP on the same port, which would be plaintext
+   * on a port the operator now trusts.
+   */
+  const server =
+    config.tls === null
+      ? createHttpServer(app)
+      : createHttpsServer(
+          { cert: readFileSync(config.tls.certFile), key: readFileSync(config.tls.keyFile) },
+          app
+        );
+
+  server.listen(config.port, () => {
     const address = server.address();
     const port = typeof address === 'object' && address !== null ? address.port : config.port;
-    logger.info('Server listening', { port, nodeEnv: config.nodeEnv });
+    logger.info('Server listening', {
+      port,
+      nodeEnv: config.nodeEnv,
+      transport: config.tls === null ? 'http' : 'https',
+    });
+    if (config.tls === null && config.isProduction) {
+      // Not fatal — a reverse proxy may be terminating TLS — but the operator
+      // who has neither is serving cleartext, and should hear so.
+      logger.warn(
+        'Serving plain HTTP in production. Terminate TLS at a proxy, or set TLS_CERT_FILE and TLS_KEY_FILE.',
+        {}
+      );
+    }
   });
 
   server.on('error', (err) => {

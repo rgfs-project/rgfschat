@@ -70,6 +70,12 @@ const envSchema = z.object({
   // Provider (Phase 2). A single llama.cpp endpoint; multi-provider is Phase 5.
   LLAMA_BASE_URL: z.url().default('http://127.0.0.1:8080'),
   LLAMA_API_KEY: z.string().min(1).optional(),
+
+  // Native TLS. Both or neither — a cert with no key, or the reverse, is a
+  // misconfiguration that should stop the boot, not silently fall back to
+  // plaintext on a port the operator believes is encrypted.
+  TLS_CERT_FILE: z.string().min(1).optional(),
+  TLS_KEY_FILE: z.string().min(1).optional(),
   PROVIDER_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(600_000).default(120_000),
   DEFAULT_CONTEXT_TOKENS: z.coerce.number().int().min(512).max(2_000_000).default(8_192),
   MAX_OUTPUT_TOKENS: z.coerce.number().int().min(16).max(1_000_000).default(2_048),
@@ -117,6 +123,24 @@ const envSchema = z.object({
   ATTACHMENT_MAX_INLINE_CHARS: z.coerce.number().int().min(1_000).max(2_000_000).default(100_000),
 });
 
+/**
+ * Resolves the TLS pair, or throws if only one half is set.
+ *
+ * Failing the boot on a half-configuration is deliberate: the dangerous
+ * outcome is a server that was meant to be HTTPS quietly coming up on plain
+ * HTTP because one variable was mistyped, on a port the operator now trusts.
+ */
+function resolveTls(
+  certFile: string | undefined,
+  keyFile: string | undefined
+): { certFile: string; keyFile: string } | null {
+  if (certFile === undefined && keyFile === undefined) return null;
+  if (certFile === undefined || keyFile === undefined) {
+    throw new Error('TLS requires both TLS_CERT_FILE and TLS_KEY_FILE, or neither.');
+  }
+  return { certFile, keyFile };
+}
+
 export interface Config {
   nodeEnv: 'development' | 'test' | 'production';
   port: number;
@@ -124,6 +148,8 @@ export interface Config {
   dataDir: string;
   logLevel: LogLevel;
   isProduction: boolean;
+  /** Present only when both cert and key are configured; server runs HTTPS. */
+  tls: { certFile: string; keyFile: string } | null;
   /** Canonical lowercase UUID. Used only by `user:create --adopt-local-data`. */
   localUserId: string;
   auth: AuthConfig;
@@ -209,6 +235,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     PROVIDER_HOST_ALLOWLIST,
     LLAMA_BASE_URL,
     LLAMA_API_KEY,
+    TLS_CERT_FILE,
+    TLS_KEY_FILE,
     PROVIDER_TIMEOUT_MS,
     DEFAULT_CONTEXT_TOKENS,
     MAX_OUTPUT_TOKENS,
@@ -225,6 +253,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dataDir: resolve(DATA_DIR),
     logLevel: LOG_LEVEL,
     isProduction: NODE_ENV === 'production',
+    tls: resolveTls(TLS_CERT_FILE, TLS_KEY_FILE),
     localUserId: LOCAL_USER_ID,
     auth: {
       registrationMode: REGISTRATION_MODE,

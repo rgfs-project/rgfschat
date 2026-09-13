@@ -213,6 +213,64 @@ such a constructor would be caught by the validation test instead.
 
 ---
 
+## The network
+
+Everything above concerns an attacker who speaks to the application. A different attacker sits
+on the **wire** — a shared LAN, a compromised switch or access point, a hop between the app and
+the model. Against that attacker, one question decides everything: **is the hop encrypted?**
+Nothing the application does at layer 7 matters on a hop carried in cleartext.
+
+There are two hops, and they fail independently.
+
+### Browser ↔ server
+
+Carries the session cookie and every message. A tap here that finds plaintext gets both: the
+cookie is a bearer token bound to nothing — not the IP, not the device — so a captured one
+replays from anywhere until it expires. Demonstrated in the Phase 12 network review.
+
+The server can now terminate TLS itself: set `TLS_CERT_FILE` and `TLS_KEY_FILE` and it serves
+HTTPS directly (`server/index.ts`; both-or-neither, verified in `config.test.ts`). A reverse
+proxy terminating TLS is equally fine and better at scale — then the app may stay HTTP on the
+loopback behind it. What is **not** fine is neither: in production with no TLS and no proxy the
+server logs a warning, because it is serving cleartext. The `Secure` cookie flag and HSTS both
+switch on once the transport is TLS.
+
+### Server ↔ provider
+
+The overlooked one, and the review's sharpest finding. Even with a TLS'd browser hop, the
+server → llama.cpp request is frequently plain HTTP on a LAN — and it carries **the provider
+API key** (`Authorization: Bearer …`) **and the full prompt and completion**. A tap there was
+made to capture exactly that:
+
+```
+GET /v1/models HTTP/1.1
+Authorization: Bearer sk-CORP-SECRET-abcdef123456      ← key, in the clear
+```
+
+This is the operator's hop to secure: point `LLAMA_BASE_URL` at an `https://` endpoint, or keep
+the provider on the same host (loopback, which never touches a wire) or a private link. The
+app cannot encrypt a hop it was told is `http://`; SSRF validation (INV-19) governs _where_ it
+may connect, not whether that path is encrypted. Recorded as **E-6** below.
+
+### At rest
+
+Out of the network model but adjacent: `data/` — `providers.json` especially — holds secrets in
+cleartext on disk, and so does any backup of it. Covered under Backups.
+
+### E-6 · The provider hop is only as private as `LLAMA_BASE_URL`
+
+**Requirement:** provider credentials and message content never exposed on the network.
+**Why unresolved:** the app connects where it is configured to; it cannot upgrade an `http://`
+provider URL to TLS on the operator's behalf.
+**Risk:** a network tap on a plaintext provider hop captures the API key and all message
+content.
+**Compensating control:** the default `LLAMA_BASE_URL` is loopback (`127.0.0.1`), which never
+crosses a wire; SSRF validation blocks redirection to another host.
+**Remediation:** use an `https://` provider endpoint, or keep the provider on the same host or
+a private network.
+
+---
+
 ## Backups
 
 `data/` is the **complete** persistent state. Nothing outside it needs backing up; nothing

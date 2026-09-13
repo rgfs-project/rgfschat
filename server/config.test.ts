@@ -56,4 +56,25 @@ describe('config', () => {
       })
     );
   });
+
+  describe('TLS', () => {
+    it('is off by default', () => {
+      expect(loadConfig({}).tls).toBeNull();
+    });
+
+    it('is configured when both cert and key are given', () => {
+      const config = loadConfig({
+        TLS_CERT_FILE: '/etc/tls/cert.pem',
+        TLS_KEY_FILE: '/etc/tls/key.pem',
+      });
+      expect(config.tls).toEqual({ certFile: '/etc/tls/cert.pem', keyFile: '/etc/tls/key.pem' });
+    });
+
+    it('refuses a half-configuration, both ways', () => {
+      // The dangerous case: a server meant to be HTTPS coming up on plain HTTP
+      // because one variable was mistyped. It must stop the boot instead.
+      expect(() => loadConfig({ TLS_CERT_FILE: '/etc/tls/cert.pem' })).toThrow(/both/i);
+      expect(() => loadConfig({ TLS_KEY_FILE: '/etc/tls/key.pem' })).toThrow(/both/i);
+    });
+  });
 });
