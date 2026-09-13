@@ -189,6 +189,39 @@ Which models can see or listen is discovered from the provider, not configured.
 whose images and files are gone. There is no virus scanning — if you host this for other
 people, put scanning in front of `data/` yourself.
 
+## Docker
+
+A multi-stage image builds the client and server, prunes to production
+dependencies (keeping argon2's compiled binary), and runs as a non-root user
+with `/data` as a persistent volume.
+
+```bash
+docker compose up --build            # build and start on :3001
+docker compose run --rm -i app \
+  create-admin --username alice --admin   # first admin, password read from stdin
+```
+
+Or without compose:
+
+```bash
+docker build -t chatui .
+docker volume create chatui-data
+docker run -i --rm -v chatui-data:/data chatui create-admin --username alice --admin
+docker run -d -p 3001:3001 -v chatui-data:/data \
+  -e LLAMA_BASE_URL=https://your-llama-host:8080 chatui
+```
+
+The container creates the first admin the same way the CLI does — password on
+stdin, never in an argument — because a fresh volume has no accounts and
+registration is closed by default. Point `LLAMA_BASE_URL` at a reachable
+provider; keep that hop `https://` or on a private network (see
+[`SECURITY.md`](SECURITY.md)). For TLS, mount a cert and key and set
+`TLS_CERT_FILE` / `TLS_KEY_FILE`, or terminate TLS at a proxy in front.
+
+`/data` is the entire persistent state; back up the volume (it holds secrets —
+see SECURITY.md). `docker stop` triggers the server's graceful shutdown via
+`dumb-init`.
+
 ## First run
 
 There are no accounts to begin with, and registration is closed by default, so create the

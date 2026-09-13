@@ -1,0 +1,30 @@
+# A complete, runnable deployment. `docker compose up` builds and starts the
+# app with a persistent named volume for its data.
+#
+# The first admin is created once, against the same volume, before first use:
+#   docker compose run --rm -i app create-admin --username alice --admin
+#
+# TLS: mount a cert and key and set the two variables, or terminate TLS at a
+# proxy in front and leave them unset (see SECURITY.md).
+services:
+  app:
+    build: .
+    ports:
+      - '3001:3001'
+    volumes:
+      - chatui-data:/data
+      # - ./tls:/tls:ro
+    environment:
+      NODE_ENV: production
+      PORT: '3001'
+      DATA_DIR: /data
+      # The provider. Point at a reachable llama.cpp; keep it https:// or on a
+      # private network — a plaintext hop leaks the key and every message.
+      LLAMA_BASE_URL: ${LLAMA_BASE_URL:-http://host.docker.internal:8080}
+      # LLAMA_API_KEY: ${LLAMA_API_KEY:-}
+      # TLS_CERT_FILE: /tls/cert.pem
+      # TLS_KEY_FILE: /tls/key.pem
+    restart: unless-stopped
+
+volumes:
+  chatui-data:

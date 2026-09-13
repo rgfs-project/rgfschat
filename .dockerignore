@@ -1,0 +1,21 @@
+# Everything the image builds for itself or must never contain.
+node_modules
+dist
+data
+coverage
+test-results
+playwright-report
+.git
+.github
+.Phases
+phases
+*.log
+.env
+.env.*
+!.env.example
+.vscode
+.idea
+*.tmp
+e2e
+**/*.test.ts
+**/*.test.tsx
