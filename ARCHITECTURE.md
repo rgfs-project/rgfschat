@@ -5,7 +5,7 @@ maintained **outside this repository** alongside the phase prompts that drive th
 This document records what is **actually built** and where each invariant is enforced.
 If this file and the contract disagree, the contract wins and the discrepancy is a bug.
 
-Current state: **Phase 12 complete.**
+Current state: **Phase 14 complete.**
 
 ## 1. Process shape
 
@@ -598,6 +598,15 @@ makes the on-screen keyboard shorten the layout viewport, so `100dvh` resolves t
 above the keys and the composer follows it with no measurement. `env(safe-area-inset-*)` holds
 content clear of the cutout and the home indicator. `visualViewport` is listened to in exactly
 one place (see below) and is never measured.
+
+### Accessibility (Phase 14)
+
+Automated axe scans run on every screen in both themes (`e2e/a11y.spec.ts`) and report zero
+violations. What axe cannot see is covered directly: a single polite live region
+(`GenerationAnnouncer`) narrates a generation to a screen reader — "Assistant is responding"
+once at the start, the outcome at the end, and deliberately nothing per token, since a region
+that changed on every token would talk over the reply it announces. It renders only off-screen
+text and never moves focus or touches scroll pinning.
 
 ### Scroll intent
 

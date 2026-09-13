@@ -88,13 +88,19 @@ async function main() {
   const cleanup = () => {
     try {
       server?.kill('SIGTERM');
-    } catch {}
+    } catch {
+      /* already gone */
+    }
     try {
       provider.close();
-    } catch {}
+    } catch {
+      /* already closed */
+    }
     try {
       rmSync(dataDir, { recursive: true, force: true });
-    } catch {}
+    } catch {
+      /* best effort */
+    }
   };
 
   try {
@@ -115,7 +121,9 @@ async function main() {
       if (server.exitCode !== null) fail(`server exited early: ${server.exitCode}`);
       try {
         if ((await fetch(`${base}/api/health`)).ok) break;
-      } catch {}
+      } catch {
+        /* not up yet */
+      }
       if (Date.now() > deadline) fail('server never became healthy');
       await new Promise((r) => setTimeout(r, 200));
     }

@@ -4,15 +4,16 @@ A self-hosted chat workspace. Conversations are plain Markdown files on disk, ge
 owned by the server, and the model provider is replaceable.
 
 This repository is built in phases against a project contract kept outside the repository.
-**Phase 12** is complete: the foundation and HTTP conventions, canonical Markdown persistence
+**Phase 14** is complete: the foundation and HTTP conventions, canonical Markdown persistence
 with a rebuildable index, accounts with sessions and CSRF protection, multiple model providers
 with SSRF-protected discovery, reconnectable streaming that survives a reload, a dropped
 connection, or a restart, the chat interface and its conversation navigation, a resilient
 client data layer, an admin surface with server-enforced authorization, per-user settings, a
 layout that is responsive by design from a 390px phone to a wide desktop, and image and text
 attachments with sniffed types, quotas, and per-model capability checks, and a security
-hardening pass with rate limiting, a strict content security policy, and a documented and
-tested backup procedure.
+hardening pass with rate limiting, a strict content security policy, a documented and
+tested backup procedure, and a visual-polish and accessibility pass (WCAG 2.2 AA, axe-clean in
+both themes, with a screen-reader live region for streaming).
 
 Security controls, the exception register, and how to back up and restore are in
 [`SECURITY.md`](SECURITY.md).

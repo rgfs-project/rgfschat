@@ -26,6 +26,7 @@ import {
   useSendMessage,
 } from './queries.ts';
 import { useGeneration } from './useGeneration.ts';
+import { GenerationAnnouncer } from './GenerationAnnouncer.tsx';
 import { useNarrowViewport } from './useNarrowViewport.ts';
 import { useScrollPin } from './useScrollPin.ts';
 import { useAttachments } from './useAttachments.ts';
@@ -673,6 +674,8 @@ export function App({
         is the half the focus trap cannot do — the trap keeps focus in, and this
         takes the page behind out of reach of everything else.
       */}
+      <GenerationAnnouncer state={live.state} />
+
       <main className="main" inert={narrow && sidebarOpen}>
         <header className="main__header">
           {/*
