@@ -69,9 +69,42 @@ async function readPipedPassword(): Promise<string | null> {
 
 async function promptPassword(): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
+
+  // Enable raw mode to hide password input
+  const stdin = process.stdin;
+  const origModeRaw = stdin.isRaw;
+
+  async function readHiddenInput(prompt: string): Promise<string> {
+    process.stdout.write(prompt);
+    stdin.setRawMode?.(true);
+
+    let password = '';
+    return new Promise((resolve) => {
+      const handler = (chunk: Buffer) => {
+        const char = chunk.toString();
+
+        if (char === '\n' || char === '\r') {
+          stdin.removeListener('data', handler);
+          stdin.setRawMode?.(origModeRaw ?? false);
+          process.stdout.write('\n');
+          resolve(password);
+        } else if (char === '') {
+          // Ctrl+C
+          process.exit(0);
+        } else if (char === '') {
+          // Backspace
+          password = password.slice(0, -1);
+        } else if (char >= ' ') {
+          password += char;
+        }
+      };
+      stdin.on('data', handler);
+    });
+  }
+
   try {
-    const first = await rl.question('Password: ');
-    const second = await rl.question('Confirm password: ');
+    const first = await readHiddenInput('Password: ');
+    const second = await readHiddenInput('Confirm password: ');
     if (first !== second) throw new Error('Passwords did not match.');
     return first;
   } finally {
