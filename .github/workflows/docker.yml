@@ -25,6 +25,13 @@ jobs:
       # Only what a publish needs; nothing here can write to the repo.
       packages: write
 
+    env:
+      # Publish from the canonical repository on a push to main or a tag, and on
+      # a manual run from the Actions tab — but never for a pull request, whose
+      # token cannot write packages and whose code is not trusted to be tagged
+      # `latest`. Computed once so the login and push steps cannot drift apart.
+      PUBLISH: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.repository_owner == 'rgfs-project' }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -81,10 +88,8 @@ jobs:
           docker volume rm ci-data >/dev/null
           echo "image is self-contained and serves"
 
-      # Publish only from the canonical repo on main or a tag — never from a
-      # fork's pull request, which cannot be given package-write anyway.
       - name: Log in to GHCR
-        if: github.event_name == 'push' && github.repository_owner == 'rgfs-project'
+        if: env.PUBLISH == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -92,7 +97,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push
-        if: github.event_name == 'push' && github.repository_owner == 'rgfs-project'
+        if: env.PUBLISH == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
