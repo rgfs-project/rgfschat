@@ -242,6 +242,10 @@ const LEGACY_LANGUAGES: Readonly<Record<string, ArtifactMediaType>> = {
   html: 'text/html',
   markdown: 'text/markdown',
   md: 'text/markdown',
+  txt: 'text/plain',
+  text: 'text/plain',
+  mermaid: 'text/mermaid',
+  mmd: 'text/mermaid',
 };
 
 function legacyMediaType(type: string | undefined, language: string): ArtifactMediaType {
@@ -249,7 +253,7 @@ function legacyMediaType(type: string | undefined, language: string): ArtifactMe
   if (type === 'application/vnd.ant.html') return 'text/html';
   if (type === 'application/vnd.ant.markdown') return 'text/markdown';
   if (type === 'application/vnd.ant.svg') return 'image/svg+xml';
-  if (type === 'application/vnd.ant.mermaid') return 'text/plain';
+  if (type === 'application/vnd.ant.mermaid') return 'text/mermaid';
 
   return LEGACY_LANGUAGES[language.toLowerCase()] ?? artifactMediaTypeFor(`x.${language}`);
 }

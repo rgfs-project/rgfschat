@@ -1130,7 +1130,9 @@ button.linkish:hover {
   background: var(--raised);
   border: 1px solid var(--border);
   border-radius: 0.75rem;
-  box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
+  box-shadow:
+    0 12px 32px rgb(0 0 0 / 18%),
+    0 0 0 1px var(--border-strong);
   animation: scale-in var(--motion-fast) var(--ease-out);
 }
 
@@ -2023,6 +2025,11 @@ button.linkish:hover {
   .composer__send {
     width: 2.75rem;
     height: 2.75rem;
+  }
+
+  /* Increase gap proportionally with larger button size on mobile. */
+  .msg__actions {
+    gap: 0.42rem;
   }
 
   /* Rows: height only. They are already the full width of their container, and
