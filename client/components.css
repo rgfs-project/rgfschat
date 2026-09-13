@@ -2025,6 +2025,11 @@ button.linkish:hover {
     height: 2.75rem;
   }
 
+  /* Increase gap proportionally with larger button size on mobile. */
+  .msg__actions {
+    gap: 0.42rem;
+  }
+
   /* Rows: height only. They are already the full width of their container, and
      widening them is what would push a scroll container into overflowing. */
   .conversation__open,
