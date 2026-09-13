@@ -173,7 +173,7 @@ export function Message({
                 setEditing(true);
               }}
             >
-              <Pencil size={14} />
+              <Pencil size={16} />
             </button>
           )}
           {message.type === 'assistant' && isLast && (
@@ -184,7 +184,7 @@ export function Message({
               title="Regenerate"
               onClick={onRegenerate}
             >
-              <RefreshCw size={14} />
+              <RefreshCw size={16} />
             </button>
           )}
 
@@ -200,7 +200,7 @@ export function Message({
             title={copied ? 'Copied' : 'Copy'}
             onClick={copy}
           >
-            {copied ? <Check size={14} /> : <Copy size={14} />}
+            {copied ? <Check size={16} /> : <Copy size={16} />}
           </button>
           <button
             type="button"
@@ -209,7 +209,7 @@ export function Message({
             title="Delete this message and its reply"
             onClick={() => onDelete(message.id)}
           >
-            <Trash2 size={14} />
+            <Trash2 size={16} />
           </button>
         </div>
       )}

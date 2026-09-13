@@ -243,39 +243,39 @@
  * of them then reads as a gap rather than as the seam in a band. The radius
  * stays the one every other button in the app carries — rounding these to a
  * circle sets them apart from the rest of the chrome for no reason, and a disc
- * behind a 14px glyph is a heavier mark than a row of quiet controls wants.
+ * behind the glyph is a heavier mark than a row of quiet controls wants.
  *
- * 1.5rem around a 14px glyph is as tight as the fill goes before it stops
- * reading as a button and starts reading as a box drawn around the glyph. The
- * row is chrome: it should be findable under the message it belongs to without
- * competing with it, and at this size three controls and a time take up less
- * width than the shortest message above them.
+ * 1.625rem around a 16px glyph, which with the row's gap puts 30px between one
+ * control's centre and the next. The glyph carries the size here and the fill
+ * is only the target around it: at a smaller glyph the row stops being three
+ * recognisable marks and becomes texture under the message — legible at a
+ * glance is the whole job of an icon this far from its label.
  *
  * The coarse-pointer block near the end of this file overrides both axes back
  * to 44px, so this is a desktop-only tightening.
  */
 .msg__actions .icon-button {
-  width: 1.5rem;
-  height: 1.5rem;
+  width: 1.625rem;
+  height: 1.625rem;
 }
 
 /*
  * When the message was sent, leading its own controls.
  *
- * A step below the app's 0.8125rem secondary text, and muted: this is chrome
- * inside chrome, an answer to a question the reader may not have asked, and at
- * the same size as the rest of the small print it pulls the eye down off the
- * message. Small enough that the whole row reads as one quiet line.
+ * 0.8125rem is the size every other piece of secondary text in the app is set
+ * at, and muted against the message it belongs to: it is an answer to a
+ * question the reader may not have asked, so it should be findable without
+ * being the thing the eye lands on.
  *
- * A little more air after it than the row's own gap. The controls are three of
- * a kind and the time is not one of them, so an equal gap would read as a
- * four-item row whose first item happens to be words.
+ * No extra air after it. It sits on the row's own gap like everything else,
+ * which puts the first glyph as far from the last word as the glyphs are from
+ * each other — the row then reads as one line rather than as a label with a
+ * cluster of controls parked beside it.
  */
 .msg__time {
   display: inline-flex;
   align-items: center;
-  padding-inline-end: 0.25rem;
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   color: var(--muted);
   /* "1 week ago" wrapping to two lines would double the height of a row that
      has to fit in the gap between two turns. */
