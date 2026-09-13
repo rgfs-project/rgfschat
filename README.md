@@ -202,6 +202,19 @@ docker compose run --rm -i app \
   create-admin --username alice --admin   # first admin, password read from stdin
 ```
 
+> **Podman.** The image and compose file work under Podman too, with two
+> differences. Build with `--format docker` if you want the `HEALTHCHECK` to be
+> honoured — Podman's default OCI format ignores it (Docker does not). And create
+> the first admin with `podman run -i` rather than `podman-compose run`, which
+> does not attach stdin the same way:
+>
+> ```bash
+> podman-compose up -d
+> printf 'your-password\n' | podman run -i --rm \
+>   -v workspace_chatui-data:/data localhost/workspace_app:latest \
+>   create-admin --username you --admin
+> ```
+
 Or without compose:
 
 ```bash

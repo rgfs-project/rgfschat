@@ -62,7 +62,8 @@ ENV PORT=3001
 EXPOSE 3001
 
 # Answers on the health route the app already serves. `start-period` covers the
-# generation-recovery pass that runs before the listener opens.
+# generation-recovery pass that runs before the listener opens. Honoured by
+# Docker; Podman ignores it unless the image is built with `--format docker`.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
