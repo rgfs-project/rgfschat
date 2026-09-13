@@ -1789,8 +1789,6 @@ button.linkish:hover {
   .panel__card {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
-    width: 100%;
-    height: 100%;
   }
 
   /*
@@ -1994,6 +1992,30 @@ button.linkish:hover {
 
 @media (pointer: coarse) {
   /*
+   * A larger type scale, because a phone is read at arm's length.
+   *
+   * The desktop sizes are set for a screen two feet away that the reader can
+   * lean into. On a phone the same numbers put the conversation a size below
+   * what the device's own interface uses around it — Safari's toolbar and the
+   * status bar are both larger than the message they are framing, which is what
+   * makes the app look scaled down rather than merely compact.
+   *
+   * Only the text that is *read* moves, and only where it was actually behind:
+   * the message and the conversation's name. The controls already grew for the
+   * finger in the rules below, the timestamps were measured and are already the
+   * right size, and the small print — hints, labels, the model name — stays
+   * where it is, so raising the body does not flatten the hierarchy it sits at
+   * the top of.
+   */
+  .msg {
+    font-size: 1.125rem;
+  }
+
+  .main__title {
+    font-size: 1.0625rem;
+  }
+
+  /*
    * Nothing a finger can type into may be smaller than 16px.
    *
    * This is not a legibility preference, it is what stops iOS Safari zooming.
@@ -2079,7 +2101,21 @@ button.linkish:hover {
    what to do without any.
    ========================================================================== */
 
-@media (max-width: 56rem) {
+/*
+ * Sheets are for thumbs, not for narrow windows.
+ *
+ * Width alone was the wrong question. A bottom sheet is a *touch* idiom — it
+ * exists because a thumb reaches the bottom of a phone and because a trigger
+ * near the bottom edge would otherwise open its menu off-screen. Half a desktop
+ * display is under this breakpoint too, and there the same rules turned an
+ * anchored popup into a bar across the foot of the window: a menu that had left
+ * the row it belonged to, for a pointer that could have reached it anywhere.
+ *
+ * So these ask for both, as the Touch section above argues every device rule
+ * should. A phone still gets sheets; a narrow window with a mouse keeps the
+ * popup anchored to what it was opened from.
+ */
+@media (max-width: 56rem) and (pointer: coarse) {
   /*
    * Menus become sheets at the bottom of the screen.
    *
@@ -2130,14 +2166,23 @@ button.linkish:hover {
     max-width: none;
     margin-bottom: max(0.5rem, var(--safe-bottom));
   }
+}
 
-  /* Panels are full-screen: they are a place, not an overlay, at this width. */
+/*
+ * Panels fill the width they are given: they are a place, not an overlay, at
+ * this size. Width alone, unlike the sheets above — a settings pane taking a
+ * narrow window is as right with a mouse as with a thumb.
+ *
+ * The corners stay. They were squared off when this filled the screen edge to
+ * edge, and the sheet is inset now — square corners inside a margin read as a
+ * card that failed to fit rather than as a sheet that meant to be there.
+ */
+@media (max-width: 56rem) {
   .panel__card {
     width: 100%;
     max-width: none;
     height: 100%;
     max-height: none;
-    border-radius: 0;
     padding-bottom: var(--safe-bottom);
   }
 }
