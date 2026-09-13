@@ -22,7 +22,7 @@ const envSchema = z.object({
     .default('0a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d'),
 
   // Auth (Phase 4).
-  REGISTRATION_MODE: z.enum(['closed', 'open']).default('closed'),
+  REGISTRATION_MODE: z.enum(['closed', 'open']).default('open'),
   SESSION_ABSOLUTE_TTL_MS: z.coerce
     .number()
     .int()
