@@ -150,6 +150,40 @@ export class StoragePaths {
     return this.#contain(resolve(this.attachmentDir(userId, attachmentId), 'meta.json'));
   }
 
+  artifactsDir(userId: string): string {
+    return this.#contain(resolve(this.userDir(userId), 'artifacts'));
+  }
+
+  /**
+   * `data/<user>/artifacts/<artifact>/` — one directory per artifact.
+   *
+   * Shaped like an attachment rather than like a memory: an artifact is a file
+   * plus metadata that will not fit in a filename — the type it was written
+   * as, the conversation it came from, the description it was presented with.
+   * A directory keeps the two together, so one `rm` removes both and a
+   * half-written import is a directory with no `meta.json` rather than a stray
+   * file nothing claims.
+   *
+   * The id is a server-minted UUID and is the only thing that reaches this
+   * path. The artifact's own name never does — it comes from a tool call in
+   * somebody's export, which makes it exactly the kind of string that must not
+   * become a location (INV-28).
+   */
+  artifactDir(userId: string, artifactId: string): string {
+    const id = this.#segment(artifactId, 'artifact id');
+    return this.#contain(resolve(this.artifactsDir(userId), id));
+  }
+
+  /** The artifact's own bytes, as they were written. */
+  artifactBlob(userId: string, artifactId: string): string {
+    return this.#contain(resolve(this.artifactDir(userId, artifactId), 'blob'));
+  }
+
+  /** Canonical metadata, written last so its presence means "complete". */
+  artifactMetaFile(userId: string, artifactId: string): string {
+    return this.#contain(resolve(this.artifactDir(userId, artifactId), 'meta.json'));
+  }
+
   /** Administrative audit logs, one file per month. */
   auditDir(): string {
     return this.#contain(resolve(this.systemDir(), 'audit'));

@@ -261,6 +261,26 @@ message. The contract requires a reasoning block to be immediately followed by i
 block, at most one per assistant; as a field those rules cannot be violated by construction,
 and reasoning can never be mistaken for prompt history.
 
+### `time` on a message block
+
+A user or assistant block may carry `time="<canonical timestamp>"`, which is when the
+message was sent — the transcript shows it under each turn. It is written by the generation
+service as each block is appended; recovery uses the checkpoint's own clock rather than the
+instant of the restart, so half a reply filed days after a crash is not backdated to the
+reboot.
+
+It is **optional on purpose**, and this is the part to keep in mind when reading contracts
+§3.4: a conversation written before the attribute existed has none, and must go on parsing
+unchanged, so a message without a time is rendered without one rather than with a guess. The
+attribute is not allowed on a `system` block, nor on a `reasoning` block — reasoning and the
+assistant block that follows it are one turn and share the assistant's single instant.
+
+This does extend the frozen `formatVersion: 1` grammar by one optional attribute rather than
+bumping the version. Files this build writes are therefore readable by it and by anything
+that ignores unknown attributes, but a _strict_ older parser built to the letter of §3.4
+would reject them. Nothing else in the format moved, and the round-trip invariant (INV-09)
+covers `time` along with everything else.
+
 Two format properties worth knowing:
 
 - An **empty body** is legal and emits no body lines — contracts §4 writes one for a failed
@@ -295,6 +315,50 @@ the newest user message is never dropped, and if it alone does not fit the reque
 Token counts use the conservative estimate (≥1 token per 3 bytes) rather than the provider's
 tokenizer: per `docs/provider-notes.md`, `/tokenize` requires a `model` and triggers a model
 load on a router-mode server, so counting tokens would cost a model swap.
+
+## 7a. Artifacts
+
+What a generation produced, kept as a thing in its own right:
+`data/<user>/artifacts/<id>/{blob,meta.json}`, one directory per artifact so bytes and
+metadata are removed together, with the metadata written last so a half-finished import
+reads as nothing rather than as an artifact with no source.
+
+**They are not attachments, and the difference is the point.** An attachment is uploaded by
+a reader and belongs to the message carrying it — deleting the conversation deletes the
+files. An artifact is produced by a generation and _outlives_ its conversation:
+`conversationId` is a back-link, and a link that no longer resolves is a list entry that
+cannot offer to go back, not a file that disappears. The attachment store also refuses HTML
+and SVG on upload, by design, because HTML is a scriptable document — and essentially every
+artifact is HTML. Two stores, because one set of rules cannot be right for both.
+
+**Read as source, never as something a browser will run.** `GET /api/artifacts/:id/source`
+sends `text/plain` with `nosniff` and `Content-Security-Policy: sandbox; default-src 'none'`,
+deliberately ignoring the stored media type: that type drives how the panel presents the
+source, not how the bytes are delivered. Served under its own type from this origin, an
+artifact would be a document with script inside the reader's session, able to read their
+conversations through the API that served it.
+
+There is **no upload route**. Artifacts arrive from a generation or an import. Taking one
+from the browser would be taking arbitrary HTML into a store whose whole point is that its
+contents are not arbitrary.
+
+Rendering an artifact rather than reading it is a separate thing to build, and it does not
+begin by loosening any of the above: it needs an origin-isolated route and an
+`<iframe sandbox="allow-scripts">` without `allow-same-origin`, plus `frame-src 'self'`,
+which the application's CSP currently sets to `'none'`.
+
+### Recovering them from an export
+
+The current export splits one artifact across a **pair** of blocks: `create_file` carries the
+bytes, `present_files` carries the metadata, and `file_path` is the join key.
+`artifact_publishable` is what separates an artifact from a working file the model happened
+to write. The older single-block `artifacts` tool is read too — an archive reaches back
+further than the format does — though its `update` commands are ignored, because an export
+gives no guarantee the base revision is in the same archive.
+
+A conversation already present is skipped along with its artifacts, which is what stops a
+second import adding a duplicate of each. A conversation with nothing readable in it still
+yields its artifacts; the files are the work.
 
 ## 8. Authentication and sessions
 

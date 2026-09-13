@@ -201,6 +201,81 @@ describe('delimiter grammar', () => {
       expectMalformed(`${FRONT}<!-- cc:user id=${ID_A} attachments="${eleven}" -->\nx\n`).reason
     ).toMatch(/1-10/);
   });
+
+  it('accepts a canonical time on a user or an assistant block', () => {
+    const time = '2026-09-11T17:03:12.000Z';
+    const ok = parseOk(
+      `${FRONT}<!-- cc:user id=${ID_A} time="${time}" -->\nq\n\n<!-- cc:assistant id=${ID_B} status=complete time="${time}" -->\na\n`
+    );
+
+    expect(ok.messages).toEqual([
+      { type: 'user', id: ID_A, time, body: 'q' },
+      { type: 'assistant', id: ID_B, status: 'complete', time, body: 'a' },
+    ]);
+  });
+
+  it('leaves a message written before time existed without one', () => {
+    const ok = parseOk(`${FRONT}<!-- cc:user id=${ID_A} -->\nq\n`);
+
+    expect(ok.messages[0]).toEqual({ type: 'user', id: ID_A, body: 'q' });
+    expect(ok.messages[0]).not.toHaveProperty('time');
+  });
+
+  it('rejects a time that is not a canonical timestamp', () => {
+    for (const bad of ['2026-09-11', '2026-09-11T17:03:12Z', '2026-13-11T17:03:12.000Z', 'now']) {
+      expect(
+        expectMalformed(`${FRONT}<!-- cc:user id=${ID_A} time="${bad}" -->\nx\n`).reason
+      ).toMatch(/time/);
+    }
+  });
+
+  it('records why a reply failed, and only on a reply that did', () => {
+    const ok = parseOk(
+      `${FRONT}<!-- cc:assistant id=${ID_A} status=failed error=PROVIDER_ERROR -->\nhalf an\n`
+    );
+    expect(ok.messages[0]).toEqual({
+      type: 'assistant',
+      id: ID_A,
+      status: 'failed',
+      error: 'PROVIDER_ERROR',
+      body: 'half an',
+    });
+
+    expect(
+      expectMalformed(`${FRONT}<!-- cc:assistant id=${ID_A} status=failed error=NONSENSE -->\nx\n`)
+        .reason
+    ).toMatch(/invalid error code/);
+
+    // A reply that completed has nothing to explain.
+    expect(
+      expectMalformed(
+        `${FRONT}<!-- cc:assistant id=${ID_A} status=complete error=PROVIDER_ERROR -->\nx\n`
+      ).reason
+    ).toMatch(/complete message cannot carry an error/);
+
+    // And it belongs to a reply, not to a question.
+    expect(
+      expectMalformed(`${FRONT}<!-- cc:user id=${ID_A} error=PROVIDER_ERROR -->\nx\n`).reason
+    ).toMatch(/not allowed on "user"/);
+  });
+
+  it('leaves a failed reply stored before the reason existed without one', () => {
+    const ok = parseOk(`${FRONT}<!-- cc:assistant id=${ID_A} status=failed -->\nx\n`);
+    expect(ok.messages[0]).not.toHaveProperty('error');
+  });
+
+  it('does not allow time on a system or a reasoning block', () => {
+    const time = '2026-09-11T17:03:12.000Z';
+
+    expect(
+      expectMalformed(`${FRONT}<!-- cc:system id=${ID_A} time="${time}" -->\nx\n`).reason
+    ).toMatch(/not allowed on "system"/);
+    expect(
+      expectMalformed(
+        `${FRONT}<!-- cc:reasoning id=${ID_B} time="${time}" -->\nt\n\n<!-- cc:assistant id=${ID_B} status=complete -->\na\n`
+      ).reason
+    ).toMatch(/not allowed on "reasoning"/);
+  });
 });
 
 describe('reasoning adjacency', () => {
@@ -380,6 +455,15 @@ const bodyArb = fc.array(bodyLine, { maxLength: 6 }).map((parts) => {
 
 const uuidArb = fc.uuid({ version: 4 }).map((u) => u.toLowerCase());
 
+/** Canonical timestamps, bounded to years the ISO form renders in four digits. */
+const timeArb = fc
+  .date({
+    min: new Date('2000-01-01T00:00:00.000Z'),
+    max: new Date('2100-01-01T00:00:00.000Z'),
+    noInvalidDate: true,
+  })
+  .map((at) => at.toISOString());
+
 const messageArb = (id: string): fc.Arbitrary<Message> =>
   fc.oneof(
     bodyArb.map((body): Message => ({ type: 'system', id, body })),
@@ -389,11 +473,13 @@ const messageArb = (id: string): fc.Arbitrary<Message> =>
         attachments: fc.option(fc.array(uuidArb, { minLength: 1, maxLength: 10 }), {
           nil: undefined,
         }),
+        time: fc.option(timeArb, { nil: undefined }),
       })
-      .map(({ body, attachments }): Message => ({
+      .map(({ body, attachments, time }): Message => ({
         type: 'user',
         id,
         ...(attachments !== undefined ? { attachments } : {}),
+        ...(time !== undefined ? { time } : {}),
         body,
       })),
     fc
@@ -409,14 +495,21 @@ const messageArb = (id: string): fc.Arbitrary<Message> =>
         provider: fc.option(fc.string(), { nil: undefined }),
         model: fc.option(fc.string(), { nil: undefined }),
         reasoning: fc.option(bodyArb, { nil: undefined }),
+        time: fc.option(timeArb, { nil: undefined }),
+        error: fc.option(fc.constantFrom('PROVIDER_ERROR', 'PROVIDER_TIMEOUT', 'INTERNAL'), {
+          nil: undefined,
+        }),
       })
-      .map(({ body, status, provider, model, reasoning }): Message => ({
+      .map(({ body, status, provider, model, reasoning, time, error }): Message => ({
         type: 'assistant',
         id,
         status,
         ...(provider !== undefined ? { provider } : {}),
         ...(model !== undefined ? { model } : {}),
         ...(reasoning !== undefined ? { reasoning } : {}),
+        ...(time !== undefined ? { time } : {}),
+        // Only a reply that did not complete may carry one.
+        ...(error !== undefined && status !== 'complete' ? { error } : {}),
         body,
       }))
   );

@@ -14,6 +14,7 @@ import { SettingsStore } from './admin/settings.ts';
 import { ConversationStore } from './storage/conversations.ts';
 import { ChatIndex } from './storage/index.ts';
 import { PreferencesStore } from './storage/preferences.ts';
+import { ArtifactStore } from './storage/artifacts.ts';
 import { MemoryStore } from './storage/memories.ts';
 import { AttachmentStore } from './attachments/store.ts';
 import { reconcileAttachments } from './attachments/reconcile.ts';
@@ -59,6 +60,7 @@ async function main(): Promise<void> {
   const index = new ChatIndex({ store, logger });
   const preferences = new PreferencesStore(paths0, logger);
   const memories = new MemoryStore(paths0, logger);
+  const artifacts = new ArtifactStore(paths0, logger);
 
   /*
    * Loaded before the generation service is built, because the service asks it
@@ -123,6 +125,7 @@ async function main(): Promise<void> {
     index,
     preferences,
     memories,
+    artifacts,
     service,
     users,
     sessions,

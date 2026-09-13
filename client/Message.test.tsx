@@ -100,6 +100,28 @@ describe('Message', () => {
       expect(screen.queryByRole('button', { name: 'Regenerate response' })).toBeNull();
     });
 
+    it('shows when the message was sent, with the exact time to hand', () => {
+      const time = new Date(Date.now() - 4 * 60_000).toISOString();
+      renderMessage(userMessage({ time }));
+
+      const stamp = screen.getByText('4 minutes ago');
+      expect(stamp.getAttribute('datetime')).toBe(time);
+      // The relative form is for the glance; the title answers the follow-up.
+      expect(stamp.getAttribute('title')).toMatch(/\d{4}/);
+    });
+
+    it('shows no time for a message stored before times were recorded', () => {
+      renderMessage(userMessage());
+
+      expect(document.querySelector('.msg__time')).toBeNull();
+    });
+
+    it('hides the time along with the actions while a generation is running', () => {
+      renderMessage(userMessage({ time: new Date().toISOString() }), { busy: true });
+
+      expect(document.querySelector('.msg__time')).toBeNull();
+    });
+
     it('hides every action while a generation is running', () => {
       renderMessage(userMessage(), { busy: true });
 

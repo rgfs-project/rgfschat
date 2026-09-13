@@ -1,8 +1,9 @@
-import { memo, useState } from 'react';
+import { memo } from 'react';
 import { Check, Copy } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { safeUrl } from './safeUrl.ts';
+import { useCopy } from './useCopy.ts';
 
 /**
  * Renders assistant and user text as Markdown (INV-22).
@@ -40,17 +41,7 @@ function toText(node: React.ReactNode): string {
 }
 
 function CodeBlock({ text, language }: { text: string; language: string | null }) {
-  const [copied, setCopied] = useState(false);
-
-  const copy = (): void => {
-    void navigator.clipboard
-      .writeText(text)
-      .then(() => {
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1500);
-      })
-      .catch(() => undefined);
-  };
+  const { copied, copy } = useCopy();
 
   return (
     <div className="code-block">
@@ -59,7 +50,7 @@ function CodeBlock({ text, language }: { text: string; language: string | null }
         <button
           type="button"
           className="icon-button"
-          onClick={copy}
+          onClick={() => copy(text)}
           aria-label={copied ? 'Copied' : 'Copy code'}
           title={copied ? 'Copied' : 'Copy code'}
         >

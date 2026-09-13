@@ -404,16 +404,28 @@ export class GenerationManager {
    * output. Resolves immediately if it is already terminal, so a caller that
    * attaches late never waits forever.
    */
-  whenTerminal(id: string): Promise<{ state: TerminalState; content: string; reasoning: string }> {
+  whenTerminal(id: string): Promise<{
+    state: TerminalState;
+    content: string;
+    reasoning: string;
+    /** How the run was classified when it failed, so the record can say so. */
+    errorCode: string | undefined;
+  }> {
     const record = this.#generations.get(id);
     if (record === undefined) {
       return Promise.reject(new AppError('GENERATION_NOT_FOUND', 'Generation not found.'));
     }
 
-    const settled = (): { state: TerminalState; content: string; reasoning: string } => ({
+    const settled = (): {
+      state: TerminalState;
+      content: string;
+      reasoning: string;
+      errorCode: string | undefined;
+    } => ({
       state: record.state as TerminalState,
       content: record.content,
       reasoning: record.reasoning,
+      errorCode: record.errorCode,
     });
 
     if (isTerminal(record.state)) return Promise.resolve(settled());

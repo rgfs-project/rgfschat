@@ -1,5 +1,5 @@
 import { isTerminal } from '@shared/generation.ts';
-import type { AssistantMessage } from '@shared/conversation.ts';
+import { isCanonicalTimestamp, type AssistantMessage } from '@shared/conversation.ts';
 import type { Logger } from '../logger.ts';
 import type { ConversationStore } from '../storage/conversations.ts';
 import { entryFor, type ChatIndex } from '../storage/index.ts';
@@ -92,6 +92,12 @@ export async function recoverGenerations({
             provider: checkpoint.providerId,
             model: checkpoint.model,
             ...(checkpoint.reasoning !== '' ? { reasoning: checkpoint.reasoning } : {}),
+            // The checkpoint's own clock, not this one. Recovery runs at the
+            // next startup, which may be days after the crash, and the half a
+            // reply being filed was written when it was written. A checkpoint
+            // whose timestamp is not canonical is written without a time
+            // rather than with one the parser would then reject.
+            ...(isCanonicalTimestamp(checkpoint.updatedAt) ? { time: checkpoint.updatedAt } : {}),
             body: checkpoint.content,
           };
 

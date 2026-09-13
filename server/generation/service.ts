@@ -63,6 +63,8 @@ export interface GenerationServiceOptions {
    * that supplied its own memories would be writing another reader's context.
    */
   memories?: { prompt: (userId: string) => Promise<string | null> };
+  /** Injectable so a test can pin the instant stamped on a message. */
+  now?: () => Date;
 }
 
 export interface StartResult {
@@ -84,6 +86,7 @@ export class GenerationService {
   readonly #maxInlineChars: number;
   readonly #settings: GenerationServiceOptions['settings'];
   readonly #memories: GenerationServiceOptions['memories'];
+  readonly #now: () => Date;
 
   /** Conversations with a generation that has not yet reached a terminal state. */
   readonly #active = new Map<string, string>();
@@ -101,6 +104,7 @@ export class GenerationService {
     this.#maxOutputTokens = options.maxOutputTokens;
     this.#settings = options.settings;
     this.#memories = options.memories;
+    this.#now = options.now ?? ((): Date => new Date());
   }
 
   /**
@@ -187,6 +191,10 @@ export class GenerationService {
             id: userMessageId,
             body: content,
             ...(attached.length === 0 ? {} : { attachments: attached.map((a) => a.id) }),
+            // Stamped when the question is persisted rather than when the
+            // request arrived: the file is the record, and this is the instant
+            // the record gained it.
+            time: this.#now().toISOString(),
           },
         ],
       };
@@ -340,7 +348,7 @@ export class GenerationService {
     model: string
   ): Promise<{ generationId: string; assistantMessageId: string }> {
     const key = conversationKey(userId, conversationId);
-    const { entry, client } = await this.#hub.resolveModel(providerId, model);
+    const { entry, client, model: modelDto } = await this.#hub.resolveModel(providerId, model);
     const sampler = this.#samplerFor(providerId, model);
     // Read before the lock: it touches the filesystem, and the lock is held
     // across the whole check-and-append.
@@ -366,11 +374,32 @@ export class GenerationService {
       }
 
       const next = { ...current, messages: trimmed };
+
+      /*
+       * Resolved here as well as on the send path, and for the same reason.
+       *
+       * Without this the map is empty, every attachment in the history is
+       * skipped as unresolvable, and the question goes back to the model
+       * stripped of the picture it was asking about — so regenerating "what is
+       * in this screenshot" asked about nothing at all, and the budget was
+       * computed for a prompt that was not the one being sent.
+       */
+      const modalities = modelDto.inputModalities;
+      const resolved =
+        this.#attachments === undefined
+          ? new Map()
+          : await resolveAttachments(this.#attachments, userId, next, {
+              maxInlineChars: this.#maxInlineChars,
+              modalities,
+            });
+
       const prompt = assemblePrompt(next, {
         contextTokens:
           client.contextLength(model) ?? entry.contextTokens ?? this.#defaultContextTokens,
         maxOutputTokens: this.#maxOutputTokens,
         ...(systemPrompt === undefined ? {} : { systemPrompt }),
+        attachments: resolved,
+        modalities,
       });
 
       const written = await this.#store.writeUnderLock(userId, conversationId, next);
@@ -461,6 +490,20 @@ export class GenerationService {
           provider: providerId,
           model,
           ...(final.reasoning !== '' ? { reasoning: final.reasoning } : {}),
+          // The instant the reply was finished and filed, not the one it was
+          // asked for — a long generation is not backdated to its question.
+          time: this.#now().toISOString(),
+          /*
+           * Why it stopped, when it stopped badly.
+           *
+           * The status already says a reply did not complete; this says what
+           * went wrong, so a transcript read tomorrow answers the question the
+           * server log answered today. A run that reached a terminal state
+           * without a classification simply carries none.
+           */
+          ...(final.state !== 'completed' && final.errorCode !== undefined
+            ? { error: final.errorCode }
+            : {}),
           body: final.content,
         };
 

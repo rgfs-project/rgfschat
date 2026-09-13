@@ -152,6 +152,19 @@
   padding-left: 0.625rem;
 }
 
+/*
+ * What went wrong, under the outcome it explains.
+ *
+ * Its own line rather than a continuation of the label: "Failed" is the fact
+ * and the sentence under it is the explanation, and running them together
+ * makes a short label read as the start of a long one.
+ */
+.msg__reason {
+  display: block;
+  margin-top: 0.125rem;
+  color: var(--muted);
+}
+
 .msg__empty {
   margin: 0;
   font-style: italic;
@@ -199,14 +212,16 @@
   right: 0;
   z-index: 1;
   display: flex;
-  /* Enough that the two controls read as separate targets rather than one
-     two-glyph block, and enough below the message that they are not touching
-     the text they belong to. */
-  gap: 0.375rem;
+  /* Measured between the hover fills below, not between the glyphs: the fills
+     carry their own padding, so the gap only has to keep them from meeting.
+     This is what sets the row's density — wide enough and three controls stop
+     reading as one group belonging to the message above them. */
+  gap: 0.25rem;
   /* Close under the text they belong to. The row is chrome attached to a
      message, not a band between two messages, so it sits nearer its own
-     message than to the next one. */
-  margin-top: 0.0625rem;
+     message than to the next one — but far enough that the fill around the
+     first glyph is not resting on the last line of the message. */
+  margin-top: 0.125rem;
   opacity: 0;
   pointer-events: none;
   /* Appears at once, but lingers on the way out — a pointer that strays a few
@@ -227,25 +242,57 @@
 }
 
 /*
- * Smaller than a standalone icon button, and wider than tall.
+ * Round, and one size down from a standalone icon button.
  *
- * These have to fit in the gap between two turns. At the full 2rem the row
- * stood 42px tall against a 28px gap, so the bottom of every control hung over
- * the next message — unreachable, since the strip that overlapped could not
- * trigger the hover that makes them live.
+ * These have to fit in the gap between two turns, so they are trimmed from
+ * 2rem — but on both axes together. Trimming the height alone left a 28x22
+ * hover fill, and a fill wider than it is tall reads as a rectangle ruled
+ * around the glyph rather than as the button the glyph sits in; three of them
+ * a few pixels apart then read as one banded block rather than as three
+ * targets.
  *
- * The height is trimmed further than the width because a square button puts as
- * much empty space above and below the glyph as beside it, which on a row
- * hanging under a message reads as a gap the message has grown rather than as
- * its own controls. Trimming one axis keeps the glyphs the same size and the
- * targets comfortably apart sideways.
+ * Squaring it fixes both: equal space on every side of the glyph is what makes
+ * a small control look deliberate rather than cropped, and the gap between two
+ * of them then reads as a gap rather than as the seam in a band. The radius
+ * stays the one every other button in the app carries — rounding these to a
+ * circle sets them apart from the rest of the chrome for no reason, and a disc
+ * behind the glyph is a heavier mark than a row of quiet controls wants.
+ *
+ * 1.625rem around a 16px glyph, which with the row's gap puts 30px between one
+ * control's centre and the next. The glyph carries the size here and the fill
+ * is only the target around it: at a smaller glyph the row stops being three
+ * recognisable marks and becomes texture under the message — legible at a
+ * glance is the whole job of an icon this far from its label.
  *
  * The coarse-pointer block near the end of this file overrides both axes back
  * to 44px, so this is a desktop-only tightening.
  */
 .msg__actions .icon-button {
-  width: 1.75rem;
-  height: 1.375rem;
+  width: 1.625rem;
+  height: 1.625rem;
+}
+
+/*
+ * When the message was sent, leading its own controls.
+ *
+ * 0.8125rem is the size every other piece of secondary text in the app is set
+ * at, and muted against the message it belongs to: it is an answer to a
+ * question the reader may not have asked, so it should be findable without
+ * being the thing the eye lands on.
+ *
+ * No extra air after it. It sits on the row's own gap like everything else,
+ * which puts the first glyph as far from the last word as the glyphs are from
+ * each other — the row then reads as one line rather than as a label with a
+ * cluster of controls parked beside it.
+ */
+.msg__time {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  /* "1 week ago" wrapping to two lines would double the height of a row that
+     has to fit in the gap between two turns. */
+  white-space: nowrap;
 }
 
 @media (hover: none) {
@@ -1698,9 +1745,31 @@ button.linkish:hover {
    128px band where the sidebar had already become a drawer while the panel
    still laid itself out as though a desktop were behind it. */
 @media (max-width: 56rem) {
+  /*
+   * A sheet that uses the phone, rather than a card floating in it.
+   *
+   * The desktop shape is a dialog: 52x34rem centred in 2rem of dimmed page,
+   * which is right when the page around it is what you are coming back to. On a
+   * 402x714 viewport those same numbers leave a 338px card capped at 544px tall
+   * — four fifths of the screen given to a backdrop, with the settings squeezed
+   * into the rest and scrolling inside their own little window. Nothing is
+   * clipped, but everything reads a size too small for the device.
+   *
+   * So on a phone it fills what it is given, minus enough margin to still read
+   * as a layer over the page. The insets are `max(…)` against the safe areas so
+   * the sheet clears the cutout and the home indicator rather than tucking
+   * under them.
+   */
+  .panel {
+    padding: max(1rem, var(--safe-top)) max(1rem, var(--safe-right)) max(1rem, var(--safe-bottom))
+      max(1rem, var(--safe-left));
+  }
+
   .panel__card {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
+    width: 100%;
+    height: 100%;
   }
 
   /*
@@ -1903,6 +1972,35 @@ button.linkish:hover {
    ========================================================================== */
 
 @media (pointer: coarse) {
+  /*
+   * Nothing a finger can type into may be smaller than 16px.
+   *
+   * This is not a legibility preference, it is what stops iOS Safari zooming.
+   * Focus a field whose computed size is under 16px and Safari scales the whole
+   * page up to make it readable — and it does not scale back afterwards, so the
+   * layout is left cropped: the sidebar off one edge, a panel that no longer
+   * fits the screen, everything apparently the wrong size. Every text control
+   * here was between 13px and 15px, so every one of them did it.
+   *
+   * `1rem` rather than `16px` so a reader who has enlarged their browser's
+   * default text keeps the margin rather than being pinned at the threshold.
+   *
+   * Bare element selectors and `!important` on purpose. Each of these controls
+   * sets its own size through a class, which outranks an element selector, and
+   * listing the classes instead would mean the next field someone adds is the
+   * one that zooms — a regression that only appears on a phone, which is the
+   * worst place to discover it. This is a property of the input device, like
+   * the reduced-motion override at the top of the theme, and it has to win.
+   *
+   * Ranges and checkboxes are left out: they have no text to size, and they do
+   * not trigger the zoom.
+   */
+  input:not([type='range']):not([type='checkbox']):not([type='radio']),
+  textarea,
+  select {
+    font-size: 1rem !important;
+  }
+
   /*
    * The controls are grown, rather than given an invisible pad that is larger
    * than they are.
@@ -2298,4 +2396,198 @@ button.linkish:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* --- artifacts ----------------------------------------------------------- */
+
+/*
+ * The panel's own header.
+ *
+ * Its height matches the main header's so the two line up across the seam: the
+ * artifact's name sits on the same line as the conversation's title, and the
+ * panel reads as a second column of the same page rather than as a thing
+ * dropped on top of it.
+ */
+.artifact-panel__head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: var(--safe-top) max(var(--gutter), var(--safe-right)) 0.75rem var(--gutter);
+  padding-top: calc(var(--safe-top) + 0.75rem);
+  border-bottom: 1px solid var(--border);
+}
+
+.artifact-panel__title {
+  flex: 1;
+  min-width: 0;
+}
+
+.artifact-panel__title h2 {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1.4;
+  /* A generated name can be long; it elides rather than wrapping the header
+     into two lines that push the source down. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* What kind of file it is, under its name — the one thing a reader needs to
+   know before reading a line of it. */
+.artifact-panel__lang {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.artifact-panel__actions {
+  flex: none;
+  display: flex;
+  gap: 0.25rem;
+}
+
+.artifact-panel__description {
+  flex: none;
+  margin: 0;
+  padding: 0.75rem var(--gutter);
+  font-size: 0.8125rem;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+
+/* The body scrolls, so the header stays put while the source moves under it. */
+.artifact-panel__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--gutter);
+}
+
+/*
+ * The source, as written.
+ *
+ * `pre` rather than a rendering, and the only thing in the application that
+ * shows a whole file at once — so it keeps its own horizontal scroll rather
+ * than wrapping: a wrapped line of code is a line that has stopped saying
+ * where its indentation is.
+ */
+.artifact-panel__source {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 2;
+}
+
+/* --- the artifacts list --------------------------------------------------- */
+
+/* A heading where the search palette has its field: this list is not searched. */
+.palette__field--plain {
+  justify-content: space-between;
+}
+
+.palette__heading {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 500;
+}
+
+/*
+ * A row is two controls, not one.
+ *
+ * Opening and deleting are different enough that one target for both would be
+ * a row you cannot delete without opening. The row carries the hover state so
+ * the pair still reads as a single line.
+ */
+.artifact-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding-right: 0.5rem;
+}
+
+.artifact-row__open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  text-align: left;
+}
+
+.artifact-row__icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.375rem;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+/*
+ * The name and its subtitle take the room; the date does not.
+ *
+ * Without this the row sizes itself to its text, so the date lands at a
+ * different place on every line and the column of them reads as ragged
+ * nothing. Growing the text block pins the date to one edge instead.
+ */
+.artifact-row .palette__text {
+  flex: 1;
+}
+
+/*
+ * One line for the subtitle here, unlike in search.
+ *
+ * A search snippet is the thing being looked for and is worth two lines; an
+ * artifact's description is a label on a row that already has a name, and
+ * letting it wrap makes one row taller than its neighbours, which is what
+ * turns a list into a stack of cards.
+ */
+.artifact-row .palette__snippet {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Right-aligned and quiet: it is how you tell two similar names apart, not
+   something to read on the way past. */
+.artifact-row__when {
+  flex: none;
+  padding-left: 0.75rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.artifact-row__confirm {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  font-size: 0.8125rem;
+}
+
+/*
+ * No colour, as everywhere else: the palette is achromatic on purpose and
+ * destructive is carried by weight and by what sits beside it — here, the
+ * Cancel it is paired with, which leads for the same reason it leads in the
+ * dialogs.
+ */
+.linkish.is-destructive {
+  font-weight: 500;
+  color: var(--text);
 }

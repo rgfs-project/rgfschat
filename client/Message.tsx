@@ -2,6 +2,9 @@ import { useState } from 'react';
 import { Check, ChevronRight, Copy, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import type { Message as MessageModel, MessageStatus } from '@shared/conversation.ts';
 import { Markdown } from './Markdown.tsx';
+import { failureMessage } from './failureMessage.ts';
+import { useCopy } from './useCopy.ts';
+import { exactTime, relativeTime } from './relativeTime.ts';
 import { MessageAttachments } from './MessageAttachments.tsx';
 
 /**
@@ -51,21 +54,35 @@ export function Message({
 }: MessageProps): React.JSX.Element {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.body);
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopy();
 
-  /** Copies the message as it was written, not as it was rendered. */
-  const copy = (): void => {
-    void navigator.clipboard
-      .writeText(message.body)
-      .then(() => {
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1500);
-      })
-      .catch(() => undefined);
-  };
+  /*
+   * Computed as the row renders rather than kept ticking on a timer.
+   *
+   * A timer would have to re-render every message in the transcript once a
+   * minute to keep "4 minutes ago" honest, and the row it would be correcting
+   * is only on screen while the pointer is on the message — by which time any
+   * of the things a reader does (send, scroll into a new query, switch chats)
+   * has re-rendered it anyway. The `title` carries the exact time for when the
+   * relative one is not precise enough to settle a question.
+   */
+  const sentAt = message.type === 'system' ? undefined : message.time;
+  const sentLabel = relativeTime(sentAt);
 
   const status = message.type === 'assistant' ? message.status : undefined;
   const statusLabel = status === undefined ? undefined : STATUS_LABEL[status];
+  /*
+   * The outcome, and under it what went wrong.
+   *
+   * The label alone says a reply did not finish; the reason says whether that
+   * is worth retrying. A reply stored before the reason was recorded, or one
+   * whose failure the server could not classify, keeps the label on its own
+   * rather than gaining a sentence that explains nothing.
+   */
+  const reason =
+    message.type === 'assistant' && message.error !== undefined
+      ? failureMessage(message.error)
+      : undefined;
   const reasoning = message.type === 'assistant' ? message.reasoning : undefined;
 
   const save = (): void => {
@@ -134,21 +151,24 @@ export function Message({
 
       {message.type === 'user' && <MessageAttachments ids={message.attachments ?? []} />}
 
-      {statusLabel !== undefined && <p className="msg__status">{statusLabel}</p>}
+      {statusLabel !== undefined && (
+        <p className="msg__status">
+          {statusLabel}
+          {reason !== undefined && <span className="msg__reason">{reason}</span>}
+        </p>
+      )}
 
       {!busy && (
         <div className="msg__actions">
-          {/* On both sides: wanting a copy of what you asked is as ordinary as
-              wanting a copy of the answer. */}
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={copied ? 'Copied' : 'Copy message'}
-            title={copied ? 'Copied' : 'Copy'}
-            onClick={copy}
-          >
-            {copied ? <Check size={14} /> : <Copy size={14} />}
-          </button>
+          {/* Leads the row: it says something about the message, where the rest
+              of the row acts on it, and a reader following the column of times
+              down a conversation should not have to find them at a different
+              offset under every message. */}
+          {sentAt !== undefined && sentLabel !== undefined && (
+            <time className="msg__time" dateTime={sentAt} title={exactTime(sentAt)}>
+              {sentLabel}
+            </time>
+          )}
 
           {message.type === 'user' && (
             <button
@@ -161,7 +181,7 @@ export function Message({
                 setEditing(true);
               }}
             >
-              <Pencil size={14} />
+              <Pencil size={16} />
             </button>
           )}
           {message.type === 'assistant' && isLast && (
@@ -172,9 +192,24 @@ export function Message({
               title="Regenerate"
               onClick={onRegenerate}
             >
-              <RefreshCw size={14} />
+              <RefreshCw size={16} />
             </button>
           )}
+
+          {/* On both sides: wanting a copy of what you asked is as ordinary as
+              wanting a copy of the answer. It sits second on both, so the one
+              control that differs between a question and an answer is the one
+              in the position that differs — and copy and delete stay where the
+              hand left them when the eye moves down the transcript. */}
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={copied ? 'Copied' : 'Copy message'}
+            title={copied ? 'Copied' : 'Copy'}
+            onClick={() => copy(message.body)}
+          >
+            {copied ? <Check size={16} /> : <Copy size={16} />}
+          </button>
           <button
             type="button"
             className="icon-button"
@@ -182,7 +217,7 @@ export function Message({
             title="Delete this message and its reply"
             onClick={() => onDelete(message.id)}
           >
-            <Trash2 size={14} />
+            <Trash2 size={16} />
           </button>
         </div>
       )}

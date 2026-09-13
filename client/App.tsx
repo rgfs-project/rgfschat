@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, PanelLeft } from 'lucide-react';
+import type { ArtifactDto } from '@shared/artifact.ts';
 import type { UserDto } from '@shared/auth.ts';
 import { ApiError, cancelGeneration, downloadConversation } from './api.ts';
+import { ArtifactPanel } from './ArtifactPanel.tsx';
+import { ArtifactsDialog } from './ArtifactsDialog.tsx';
 import { Composer } from './Composer.tsx';
 import { Dialog } from './Dialog.tsx';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
+import { failureMessage } from './failureMessage.ts';
 import { Message, StreamingMessage } from './Message.tsx';
 import type { ModelSelection } from './ModelPicker.tsx';
 import { SearchDialog } from './SearchDialog.tsx';
@@ -169,6 +173,15 @@ export function App({
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<PendingDialog | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [artifactsOpen, setArtifactsOpen] = useState(false);
+  /*
+   * The artifact open beside the transcript.
+   *
+   * Held here rather than in the dialog because it outlives it: choosing one
+   * closes the list and leaves the panel open against the conversation, which
+   * is the whole point of a panel rather than a second dialog.
+   */
+  const [artifact, setArtifact] = useState<ArtifactDto | null>(null);
   /** A message arrived at from search, to scroll to and mark once it renders. */
   const [focusMessageId, setFocusMessageId] = useState<string | null>(null);
 
@@ -362,7 +375,7 @@ export function App({
       setError(
         live.state === 'timed_out'
           ? 'The model provider timed out.'
-          : 'The generation failed. Check the server logs.'
+          : failureMessage(live.errorCode)
       );
     }
 
@@ -373,7 +386,9 @@ export function App({
     if (currentId !== null) {
       void client.invalidateQueries({ queryKey: keys.conversation(currentId) });
     }
-  }, [live.state, generationId, currentId, client]);
+    // `errorCode` arrives in the same event as the terminal state; the ref
+    // above is what keeps this to once per generation, not the dependencies.
+  }, [live.state, live.errorCode, generationId, currentId, client]);
 
   const onSelectModel = useCallback(
     (next: ModelSelection) => {
@@ -653,6 +668,7 @@ export function App({
               dismissIfDrawer();
             }}
             onSearch={() => setSearchOpen(true)}
+            onOpenArtifacts={() => setArtifactsOpen(true)}
             onRename={(id, currentTitle) => setDialog({ kind: 'rename', id, title: currentTitle })}
             onDelete={(id) => setDialog({ kind: 'delete-conversation', id })}
             onPin={onPinConversation}
@@ -676,7 +692,10 @@ export function App({
       */}
       <GenerationAnnouncer state={live.state} />
 
-      <main className="main" inert={narrow && sidebarOpen}>
+      <main
+        className={`main${artifact !== null ? ' main--with-artifact' : ''}`}
+        inert={narrow && sidebarOpen}
+      >
         <header className="main__header">
           {/*
             On a narrow window this stays put whether the drawer is open or
@@ -809,8 +828,20 @@ export function App({
         </div>
       </main>
 
+      {artifact !== null && <ArtifactPanel artifact={artifact} onClose={() => setArtifact(null)} />}
+
       {searchOpen && (
         <SearchDialog recent={list} onOpen={onOpenResult} onClose={() => setSearchOpen(false)} />
+      )}
+
+      {artifactsOpen && (
+        <ArtifactsDialog
+          onOpen={(chosen) => {
+            setArtifact(chosen);
+            setArtifactsOpen(false);
+          }}
+          onClose={() => setArtifactsOpen(false)}
+        />
       )}
 
       {/* Settings and Admin are routes now, rendered over this screen by

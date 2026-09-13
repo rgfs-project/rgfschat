@@ -29,6 +29,14 @@ export interface UserMessage {
   id: string;
   /** 1–10 canonical UUIDs. Parsed and validated from Phase 3; used from Phase 11. */
   attachments?: string[];
+  /**
+   * When the message was sent, as a canonical timestamp.
+   *
+   * Optional because conversations written before it existed have no such
+   * attribute, and a file that parsed yesterday has to parse today. A message
+   * without one is shown without a time rather than with a guessed one.
+   */
+  time?: string;
   body: string;
 }
 
@@ -48,6 +56,18 @@ export interface AssistantMessage {
    * never be mistaken for a message to send back to the model (contracts §4).
    */
   reasoning?: string;
+  /** When the reply was written, as a canonical timestamp. Optional, as on a user message. */
+  time?: string;
+  /**
+   * Why this reply did not complete, as an error code from the contract's table.
+   *
+   * Only meaningful alongside a non-`complete` status, and optional even then:
+   * every reply written before this existed has none, and a run can fail for a
+   * reason the server could not classify. Without it a failed reply reads as
+   * "Failed" forever — the server classifies the failure and logs it, but the
+   * person looking at the transcript is not the one who can read the log.
+   */
+  error?: string;
   body: string;
 }
 
