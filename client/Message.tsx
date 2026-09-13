@@ -3,6 +3,7 @@ import { Check, ChevronRight, Copy, Pencil, RefreshCw, Trash2 } from 'lucide-rea
 import type { Message as MessageModel, MessageStatus } from '@shared/conversation.ts';
 import { Markdown } from './Markdown.tsx';
 import { failureMessage } from './failureMessage.ts';
+import { useCopy } from './useCopy.ts';
 import { exactTime, relativeTime } from './relativeTime.ts';
 import { MessageAttachments } from './MessageAttachments.tsx';
 
@@ -53,18 +54,7 @@ export function Message({
 }: MessageProps): React.JSX.Element {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.body);
-  const [copied, setCopied] = useState(false);
-
-  /** Copies the message as it was written, not as it was rendered. */
-  const copy = (): void => {
-    void navigator.clipboard
-      .writeText(message.body)
-      .then(() => {
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1500);
-      })
-      .catch(() => undefined);
-  };
+  const { copied, copy } = useCopy();
 
   /*
    * Computed as the row renders rather than kept ticking on a timer.
@@ -216,7 +206,7 @@ export function Message({
             className="icon-button"
             aria-label={copied ? 'Copied' : 'Copy message'}
             title={copied ? 'Copied' : 'Copy'}
-            onClick={copy}
+            onClick={() => copy(message.body)}
           >
             {copied ? <Check size={16} /> : <Copy size={16} />}
           </button>

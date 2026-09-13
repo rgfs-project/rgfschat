@@ -316,6 +316,50 @@ Token counts use the conservative estimate (≥1 token per 3 bytes) rather than 
 tokenizer: per `docs/provider-notes.md`, `/tokenize` requires a `model` and triggers a model
 load on a router-mode server, so counting tokens would cost a model swap.
 
+## 7a. Artifacts
+
+What a generation produced, kept as a thing in its own right:
+`data/<user>/artifacts/<id>/{blob,meta.json}`, one directory per artifact so bytes and
+metadata are removed together, with the metadata written last so a half-finished import
+reads as nothing rather than as an artifact with no source.
+
+**They are not attachments, and the difference is the point.** An attachment is uploaded by
+a reader and belongs to the message carrying it — deleting the conversation deletes the
+files. An artifact is produced by a generation and _outlives_ its conversation:
+`conversationId` is a back-link, and a link that no longer resolves is a list entry that
+cannot offer to go back, not a file that disappears. The attachment store also refuses HTML
+and SVG on upload, by design, because HTML is a scriptable document — and essentially every
+artifact is HTML. Two stores, because one set of rules cannot be right for both.
+
+**Read as source, never as something a browser will run.** `GET /api/artifacts/:id/source`
+sends `text/plain` with `nosniff` and `Content-Security-Policy: sandbox; default-src 'none'`,
+deliberately ignoring the stored media type: that type drives how the panel presents the
+source, not how the bytes are delivered. Served under its own type from this origin, an
+artifact would be a document with script inside the reader's session, able to read their
+conversations through the API that served it.
+
+There is **no upload route**. Artifacts arrive from a generation or an import. Taking one
+from the browser would be taking arbitrary HTML into a store whose whole point is that its
+contents are not arbitrary.
+
+Rendering an artifact rather than reading it is a separate thing to build, and it does not
+begin by loosening any of the above: it needs an origin-isolated route and an
+`<iframe sandbox="allow-scripts">` without `allow-same-origin`, plus `frame-src 'self'`,
+which the application's CSP currently sets to `'none'`.
+
+### Recovering them from an export
+
+The current export splits one artifact across a **pair** of blocks: `create_file` carries the
+bytes, `present_files` carries the metadata, and `file_path` is the join key.
+`artifact_publishable` is what separates an artifact from a working file the model happened
+to write. The older single-block `artifacts` tool is read too — an archive reaches back
+further than the format does — though its `update` commands are ignored, because an export
+gives no guarantee the base revision is in the same archive.
+
+A conversation already present is skipped along with its artifacts, which is what stops a
+second import adding a duplicate of each. A conversation with nothing readable in it still
+yields its artifacts; the files are the work.
+
 ## 8. Authentication and sessions
 
 `data/<user-uuid>/user.json` is the canonical account record;

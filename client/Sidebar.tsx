@@ -12,6 +12,7 @@ import {
   Plus,
   Search,
   Settings as SettingsIcon,
+  Shapes,
   Shield,
   Sun,
   Trash2,
@@ -42,6 +43,7 @@ export interface SidebarProps {
   onOpen: (id: string) => void;
   /** Opens the search palette; the sidebar itself no longer filters. */
   onSearch: () => void;
+  onOpenArtifacts: () => void;
   onRename: (id: string, currentTitle: string) => void;
   onDelete: (id: string) => void;
   onPin: (id: string, pinned: boolean) => void;
@@ -93,6 +95,7 @@ export function Sidebar({
   onCreate,
   onOpen,
   onSearch,
+  onOpenArtifacts,
   onRename,
   onDelete,
   onPin,
@@ -173,6 +176,14 @@ export function Sidebar({
         <button type="button" className="nav-button" onClick={onSearch}>
           <Search size={15} />
           Search
+        </button>
+
+        {/* Artifacts outlive the conversations that made them, so they need a
+            way in that is not a conversation. It sits with the other ways out
+            of this pane rather than in the list below, which is chats. */}
+        <button type="button" className="nav-button" onClick={onOpenArtifacts}>
+          <Shapes size={15} />
+          Artifacts
         </button>
       </div>
 

@@ -2346,3 +2346,197 @@ button.linkish:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* --- artifacts ----------------------------------------------------------- */
+
+/*
+ * The panel's own header.
+ *
+ * Its height matches the main header's so the two line up across the seam: the
+ * artifact's name sits on the same line as the conversation's title, and the
+ * panel reads as a second column of the same page rather than as a thing
+ * dropped on top of it.
+ */
+.artifact-panel__head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: var(--safe-top) max(var(--gutter), var(--safe-right)) 0.75rem var(--gutter);
+  padding-top: calc(var(--safe-top) + 0.75rem);
+  border-bottom: 1px solid var(--border);
+}
+
+.artifact-panel__title {
+  flex: 1;
+  min-width: 0;
+}
+
+.artifact-panel__title h2 {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1.4;
+  /* A generated name can be long; it elides rather than wrapping the header
+     into two lines that push the source down. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* What kind of file it is, under its name — the one thing a reader needs to
+   know before reading a line of it. */
+.artifact-panel__lang {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.artifact-panel__actions {
+  flex: none;
+  display: flex;
+  gap: 0.25rem;
+}
+
+.artifact-panel__description {
+  flex: none;
+  margin: 0;
+  padding: 0.75rem var(--gutter);
+  font-size: 0.8125rem;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+
+/* The body scrolls, so the header stays put while the source moves under it. */
+.artifact-panel__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--gutter);
+}
+
+/*
+ * The source, as written.
+ *
+ * `pre` rather than a rendering, and the only thing in the application that
+ * shows a whole file at once — so it keeps its own horizontal scroll rather
+ * than wrapping: a wrapped line of code is a line that has stopped saying
+ * where its indentation is.
+ */
+.artifact-panel__source {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre;
+  tab-size: 2;
+}
+
+/* --- the artifacts list --------------------------------------------------- */
+
+/* A heading where the search palette has its field: this list is not searched. */
+.palette__field--plain {
+  justify-content: space-between;
+}
+
+.palette__heading {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 500;
+}
+
+/*
+ * A row is two controls, not one.
+ *
+ * Opening and deleting are different enough that one target for both would be
+ * a row you cannot delete without opening. The row carries the hover state so
+ * the pair still reads as a single line.
+ */
+.artifact-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding-right: 0.5rem;
+}
+
+.artifact-row__open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  text-align: left;
+}
+
+.artifact-row__icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 0.375rem;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+/*
+ * The name and its subtitle take the room; the date does not.
+ *
+ * Without this the row sizes itself to its text, so the date lands at a
+ * different place on every line and the column of them reads as ragged
+ * nothing. Growing the text block pins the date to one edge instead.
+ */
+.artifact-row .palette__text {
+  flex: 1;
+}
+
+/*
+ * One line for the subtitle here, unlike in search.
+ *
+ * A search snippet is the thing being looked for and is worth two lines; an
+ * artifact's description is a label on a row that already has a name, and
+ * letting it wrap makes one row taller than its neighbours, which is what
+ * turns a list into a stack of cards.
+ */
+.artifact-row .palette__snippet {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Right-aligned and quiet: it is how you tell two similar names apart, not
+   something to read on the way past. */
+.artifact-row__when {
+  flex: none;
+  padding-left: 0.75rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.artifact-row__confirm {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  font-size: 0.8125rem;
+}
+
+/*
+ * No colour, as everywhere else: the palette is achromatic on purpose and
+ * destructive is carried by weight and by what sits beside it — here, the
+ * Cancel it is paired with, which leads for the same reason it leads in the
+ * dialogs.
+ */
+.linkish.is-destructive {
+  font-weight: 500;
+  color: var(--text);
+}
