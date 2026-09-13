@@ -2,6 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { unzipSync } from 'fflate';
 import { z } from 'zod';
 import {
+  artifactMediaTypeFor,
+  isArtifactMediaType,
+  type ArtifactMediaType,
+} from '@shared/artifact.ts';
+import {
   AUTO_TITLE_MAX_LENGTH,
   FORMAT_VERSION,
   isCanonicalUuid,
@@ -19,11 +24,53 @@ import {
  * they go.
  */
 
+/**
+ * The blocks an artifact arrives in.
+ *
+ * The current export splits one artifact across a *pair*: `create_file` in a
+ * `tool_use` carries the bytes, and `present_files` in the matching
+ * `tool_result` carries the metadata that makes it an artifact rather than a
+ * scratch file. `file_path` is the join key.
+ *
+ * The older export used a single `tool_use` named `artifacts` carrying
+ * everything at once. Both are read, because a reader's archive can reach back
+ * further than the format does — an account with artifacts from before the
+ * change would otherwise import as nothing at all.
+ */
 const contentBlockSchema = z
   .object({
     type: z.string(),
     text: z.string().optional(),
     thinking: z.string().optional(),
+    name: z.string().optional(),
+    input: z
+      .object({
+        // create_file
+        path: z.string().optional(),
+        file_text: z.string().optional(),
+        description: z.string().optional(),
+        // the legacy `artifacts` tool
+        command: z.string().optional(),
+        title: z.string().optional(),
+        content: z.string().optional(),
+        type: z.string().optional(),
+        language: z.string().optional(),
+      })
+      .passthrough()
+      .optional(),
+    content: z
+      .array(
+        z
+          .object({
+            type: z.string().optional(),
+            file_path: z.string().optional(),
+            name: z.string().optional(),
+            mime_type: z.string().optional(),
+            artifact_publishable: z.boolean().optional(),
+          })
+          .passthrough()
+      )
+      .optional(),
   })
   .passthrough();
 
@@ -72,6 +119,141 @@ export interface Dropped {
   attachments: number;
 }
 
+/** One artifact recovered from a conversation, ready for the store. */
+export interface ImportedArtifact {
+  name: string;
+  mediaType: ArtifactMediaType;
+  content: string;
+  description?: string | undefined;
+  createdAt?: string | undefined;
+}
+
+/**
+ * The artifacts one message produced.
+ *
+ * Written as a pass over a single message because that is the unit the pairing
+ * holds in: a `create_file` and the `present_files` naming it are blocks of the
+ * same assistant turn. Collecting across the whole conversation would work too,
+ * and would also let a path written in one turn be claimed by a presentation
+ * three turns later, which is not a thing that happens and not a thing worth
+ * being right about.
+ *
+ * A file that was written but never presented is deliberately skipped: the
+ * model writes working files as well as artifacts, and `present_files` is the
+ * line between them.
+ */
+function artifactsIn(message: z.infer<typeof messageSchema>): ImportedArtifact[] {
+  const written = new Map<string, { content: string; description?: string | undefined }>();
+  const presented = new Map<string, { name: string; mediaType?: string | undefined }>();
+  const legacy: ImportedArtifact[] = [];
+
+  for (const block of message.content ?? []) {
+    if (block.type === 'tool_use' && block.name === 'create_file') {
+      const path = block.input?.path;
+      const text = block.input?.file_text;
+      if (typeof path === 'string' && typeof text === 'string' && text !== '') {
+        written.set(path, { content: text, description: block.input?.description });
+      }
+      continue;
+    }
+
+    /*
+     * The legacy shape: one block carrying the lot. `update` commands are
+     * ignored rather than applied — an export gives no guarantee that the
+     * original is in the same archive, and a patch applied to the wrong base
+     * is worse than an artifact that is one revision old.
+     */
+    if (block.type === 'tool_use' && block.name === 'artifacts') {
+      const command = block.input?.command;
+      const content = block.input?.content;
+      if (command === 'create' && typeof content === 'string' && content !== '') {
+        // `id` is outside the schema and arrives as `unknown` from the
+        // passthrough, so it is only used when it really is a string.
+        const fallbackId = block.input?.['id'];
+        const title =
+          block.input?.title ?? (typeof fallbackId === 'string' ? fallbackId : 'artifact');
+        const language = block.input?.language ?? '';
+        legacy.push({
+          name: title,
+          mediaType: legacyMediaType(block.input?.type, language),
+          content,
+          createdAt: messageTime(message.created_at),
+        });
+      }
+      continue;
+    }
+
+    if (block.type === 'tool_result' && block.name === 'present_files') {
+      for (const resource of block.content ?? []) {
+        // `artifact_publishable` is the export's own word for "this is an
+        // artifact". A resource presented without it is a file being shown.
+        if (resource.type !== 'local_resource' || resource.artifact_publishable !== true) continue;
+        if (typeof resource.file_path !== 'string') continue;
+        presented.set(resource.file_path, {
+          name: resource.name ?? resource.file_path,
+          mediaType: resource.mime_type,
+        });
+      }
+    }
+  }
+
+  const paired: ImportedArtifact[] = [];
+  for (const [path, meta] of presented) {
+    const file = written.get(path);
+    if (file === undefined) continue;
+
+    // The export's declared type when we recognise it, else the path's
+    // extension: a presented type we have no way to render is not better than
+    // a guess we can.
+    const declared = meta.mediaType ?? '';
+    paired.push({
+      name: meta.name,
+      mediaType: isArtifactMediaType(declared) ? declared : artifactMediaTypeFor(path),
+      content: file.content,
+      description: file.description,
+      createdAt: messageTime(message.created_at),
+    });
+  }
+
+  return [...paired, ...legacy];
+}
+
+/**
+ * The legacy tool's own vocabulary.
+ *
+ * It named a type, and for code it named `application/vnd.ant.code` with the
+ * real language beside it — as a language *name*, not a file extension, which
+ * is why this cannot just hand the string to the path-based guess.
+ */
+const LEGACY_LANGUAGES: Readonly<Record<string, ArtifactMediaType>> = {
+  python: 'text/x-python',
+  py: 'text/x-python',
+  javascript: 'application/javascript',
+  js: 'application/javascript',
+  jsx: 'application/javascript',
+  typescript: 'text/x-typescript',
+  ts: 'text/x-typescript',
+  tsx: 'text/x-typescript',
+  json: 'application/json',
+  sql: 'text/x-sql',
+  yaml: 'text/x-yaml',
+  yml: 'text/x-yaml',
+  css: 'text/css',
+  html: 'text/html',
+  markdown: 'text/markdown',
+  md: 'text/markdown',
+};
+
+function legacyMediaType(type: string | undefined, language: string): ArtifactMediaType {
+  if (type !== undefined && isArtifactMediaType(type)) return type;
+  if (type === 'application/vnd.ant.html') return 'text/html';
+  if (type === 'application/vnd.ant.markdown') return 'text/markdown';
+  if (type === 'application/vnd.ant.svg') return 'image/svg+xml';
+  if (type === 'application/vnd.ant.mermaid') return 'text/plain';
+
+  return LEGACY_LANGUAGES[language.toLowerCase()] ?? artifactMediaTypeFor(`x.${language}`);
+}
+
 /**
  * The text of one message, and its reasoning if it carried any.
  *
@@ -92,7 +274,12 @@ function bodyOf(
     if (block.type === 'text' && typeof block.text === 'string') texts.push(block.text);
     else if (block.type === 'thinking' && typeof block.thinking === 'string')
       thoughts.push(block.thinking);
-    else if (block.type === 'tool_use' || block.type === 'tool_result') dropped.toolBlocks += 1;
+    else if (block.type === 'tool_use' || block.type === 'tool_result') {
+      // Counted as dropped only when nothing was kept from it. An artifact is
+      // no longer a block thrown away, so reporting it as one would tell the
+      // reader their work was lost at the moment it was saved.
+      if (!KEPT_TOOLS.has(block.name ?? '')) dropped.toolBlocks += 1;
+    }
   }
 
   // An attachment is a file this application cannot store yet (Phase 11), but
@@ -109,6 +296,9 @@ function bodyOf(
   const body = (texts.length > 0 ? texts.join('\n\n') : (message.text ?? '')).trim();
   return { body, reasoning: thoughts.join('\n\n').trim() };
 }
+
+/** Tool blocks that are read rather than discarded, and so are not "dropped". */
+const KEPT_TOOLS = new Set(['create_file', 'present_files', 'artifacts']);
 
 /** A title for a conversation the export left unnamed. */
 function titleFrom(name: string | undefined, messages: Message[]): string {
@@ -143,6 +333,8 @@ export interface Converted {
   id: string;
   conversation: Conversation;
   dropped: Dropped;
+  /** What the conversation produced, to be stored beside it rather than in it. */
+  artifacts: ImportedArtifact[];
   /** It had messages, and none of them survived conversion. */
   emptied: boolean;
 }
@@ -150,8 +342,10 @@ export interface Converted {
 export function convertConversation(source: z.infer<typeof conversationSchema>): Converted {
   const dropped: Dropped = { toolBlocks: 0, attachments: 0 };
   const messages: Message[] = [];
+  const artifacts: ImportedArtifact[] = [];
 
   for (const message of source.chat_messages) {
+    artifacts.push(...artifactsIn(message));
     const { body, reasoning } = bodyOf(message, dropped);
     // A message with nothing in it cannot be represented: the format requires a
     // body, and an empty one would be a message that says nothing happened.
@@ -190,6 +384,9 @@ export function convertConversation(source: z.infer<typeof conversationSchema>):
     id: isCanonicalUuid(source.uuid) ? source.uuid : randomUUID(),
     conversation,
     dropped,
+    artifacts,
+    // A conversation whose only content was tool calls is empty as a
+    // *transcript*, but it may still have produced artifacts worth keeping.
     emptied: source.chat_messages.length > 0 && messages.length === 0,
   };
 }

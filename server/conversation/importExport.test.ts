@@ -1,6 +1,6 @@
 import { strFromU8, zipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
-import { memoryBody, readExport } from './importExport.ts';
+import { convertConversation, memoryBody, readExport } from './importExport.ts';
 
 /**
  * Reading a Claude data export.
@@ -119,6 +119,209 @@ describe('readExport', () => {
     );
 
     expect(found.memories).toHaveLength(1);
+  });
+});
+
+/**
+ * Recovering artifacts.
+ *
+ * The current export splits one artifact across a pair of blocks and joins
+ * them on `file_path`; the older one carried the lot in a single block. Both
+ * shapes are here because a reader's archive reaches back further than the
+ * format does.
+ */
+describe('artifacts', () => {
+  function chat(content: unknown[]) {
+    return {
+      uuid: '0b7e1f2a-3c4d-4e5f-8a9b-0c1d2e3f4a5b',
+      name: 'Creating a test artifact',
+      created_at: '2026-09-12T08:26:00.000Z',
+      chat_messages: [
+        {
+          uuid: '01a094b9-1111-4222-8333-444455556666',
+          sender: 'assistant',
+          created_at: '2026-09-12T08:26:54.560Z',
+          content,
+        },
+      ],
+    };
+  }
+
+  const createFile = (path: string, text: string, description?: string) => ({
+    type: 'tool_use',
+    name: 'create_file',
+    input: { path, file_text: text, ...(description === undefined ? {} : { description }) },
+  });
+
+  const presentFiles = (resources: unknown[]) => ({
+    type: 'tool_result',
+    name: 'present_files',
+    content: resources,
+  });
+
+  const resource = (path: string, name: string, publishable = true) => ({
+    type: 'local_resource',
+    file_path: path,
+    name,
+    mime_type: 'text/html',
+    artifact_publishable: publishable,
+  });
+
+  it('joins the payload to its presentation on the file path', () => {
+    const { artifacts } = convertConversation(
+      chat([
+        createFile('/mnt/user-data/outputs/test.html', '<!DOCTYPE html>', 'A counter'),
+        presentFiles([resource('/mnt/user-data/outputs/test.html', 'test-artifact')]),
+      ]) as never
+    );
+
+    expect(artifacts).toEqual([
+      {
+        name: 'test-artifact',
+        mediaType: 'text/html',
+        content: '<!DOCTYPE html>',
+        description: 'A counter',
+        createdAt: '2026-09-12T08:26:54.560Z',
+      },
+    ]);
+  });
+
+  it('keeps a working file out of the list', () => {
+    // The model writes scratch files too. `present_files` is the line between
+    // one of those and an artifact.
+    const { artifacts } = convertConversation(
+      chat([createFile('/mnt/user-data/outputs/scratch.html', '<p>x</p>')]) as never
+    );
+
+    expect(artifacts).toEqual([]);
+  });
+
+  it('keeps a file presented without the publishable flag out of the list', () => {
+    const { artifacts } = convertConversation(
+      chat([
+        createFile('/mnt/user-data/outputs/a.html', '<p>x</p>'),
+        presentFiles([resource('/mnt/user-data/outputs/a.html', 'a', false)]),
+      ]) as never
+    );
+
+    expect(artifacts).toEqual([]);
+  });
+
+  it('ignores a presentation with no payload to go with it', () => {
+    const { artifacts } = convertConversation(
+      chat([presentFiles([resource('/mnt/user-data/outputs/gone.html', 'gone')])]) as never
+    );
+
+    expect(artifacts).toEqual([]);
+  });
+
+  it('recovers every artifact from one presentation of many', () => {
+    const { artifacts } = convertConversation(
+      chat([
+        createFile('/mnt/user-data/outputs/a.html', '<p>a</p>'),
+        createFile('/mnt/user-data/outputs/b.py', 'print(1)'),
+        presentFiles([
+          resource('/mnt/user-data/outputs/a.html', 'a'),
+          { ...resource('/mnt/user-data/outputs/b.py', 'b'), mime_type: 'text/x-python' },
+        ]),
+      ]) as never
+    );
+
+    expect(artifacts.map((a) => [a.name, a.mediaType])).toEqual([
+      ['a', 'text/html'],
+      ['b', 'text/x-python'],
+    ]);
+  });
+
+  it('falls back to the path when the declared type is not one we can present', () => {
+    const { artifacts } = convertConversation(
+      chat([
+        createFile('/mnt/user-data/outputs/script.py', 'print(1)'),
+        presentFiles([
+          {
+            ...resource('/mnt/user-data/outputs/script.py', 'script'),
+            mime_type: 'application/x-weird',
+          },
+        ]),
+      ]) as never
+    );
+
+    expect(artifacts[0]?.mediaType).toBe('text/x-python');
+  });
+
+  it('reads the older single-block shape too', () => {
+    const { artifacts } = convertConversation(
+      chat([
+        {
+          type: 'tool_use',
+          name: 'artifacts',
+          input: {
+            command: 'create',
+            id: 'login-page',
+            title: 'Login page',
+            type: 'text/html',
+            content: '<form></form>',
+          },
+        },
+      ]) as never
+    );
+
+    expect(artifacts).toEqual([
+      {
+        name: 'Login page',
+        mediaType: 'text/html',
+        content: '<form></form>',
+        createdAt: '2026-09-12T08:26:54.560Z',
+      },
+    ]);
+  });
+
+  it('takes the language from the older shape when its type is a code wrapper', () => {
+    const { artifacts } = convertConversation(
+      chat([
+        {
+          type: 'tool_use',
+          name: 'artifacts',
+          input: {
+            command: 'create',
+            title: 'run_agent',
+            type: 'application/vnd.ant.code',
+            language: 'python',
+            content: 'print(1)',
+          },
+        },
+      ]) as never
+    );
+
+    expect(artifacts[0]?.mediaType).toBe('text/x-python');
+  });
+
+  it('ignores an update, which has no guaranteed base in the archive', () => {
+    const { artifacts } = convertConversation(
+      chat([
+        {
+          type: 'tool_use',
+          name: 'artifacts',
+          input: { command: 'update', id: 'login-page', content: 'patch' },
+        },
+      ]) as never
+    );
+
+    expect(artifacts).toEqual([]);
+  });
+
+  it('stops counting a recovered artifact as a dropped tool block', () => {
+    const { dropped, artifacts } = convertConversation(
+      chat([
+        createFile('/mnt/user-data/outputs/a.html', '<p>a</p>'),
+        presentFiles([resource('/mnt/user-data/outputs/a.html', 'a')]),
+        { type: 'tool_use', name: 'memory_write', input: {} },
+      ]) as never
+    );
+
+    expect(artifacts).toHaveLength(1);
+    // Only the memory write, which really is discarded.
+    expect(dropped.toolBlocks).toBe(1);
   });
 });
 

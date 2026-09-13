@@ -10,6 +10,7 @@ import {
   readExport,
 } from '../conversation/importExport.ts';
 import { MEMORY_MAX_BYTES, type MemoryStore } from '../storage/memories.ts';
+import type { ArtifactStore } from '../storage/artifacts.ts';
 import { isMemoryName, MEMORY_NAME_MAX_LENGTH } from '../storage/paths.ts';
 import type { PreferencesStore } from '../storage/preferences.ts';
 import type { ConversationStore } from '../storage/conversations.ts';
@@ -67,6 +68,8 @@ export interface MeRoutesOptions {
   manager: GenerationManager;
   preferences: PreferencesStore;
   memories: MemoryStore;
+  /** Absent in tests that do not exercise importing artifacts. */
+  artifacts?: ArtifactStore;
   users: UserStore;
   sessions: SessionManager;
 }
@@ -130,6 +133,7 @@ export function meRouter({
   manager,
   preferences,
   memories,
+  artifacts,
   users,
   sessions,
 }: MeRoutesOptions): Router {
@@ -225,26 +229,58 @@ export function meRouter({
       skippedEmpty: 0,
       memories: 0,
       memoriesSkipped: 0,
+      artifacts: 0,
+      artifactsSkipped: 0,
       toolBlocks: 0,
       attachments: 0,
     };
 
     for (const source of found.conversations) {
-      const { id, conversation, dropped } = convertConversation(source);
+      const { id, conversation, dropped, artifacts: produced } = convertConversation(source);
       report.toolBlocks += dropped.toolBlocks;
       report.attachments += dropped.attachments;
 
-      if (conversation.messages.length === 0) {
-        report.skippedEmpty += 1;
-        continue;
-      }
+      /*
+       * A conversation already here takes its artifacts with it.
+       *
+       * The check has to come first, and it has to cover both: importing the
+       * same archive twice would otherwise add a second copy of every artifact
+       * to a list that has no way to tell them apart.
+       */
       if (await store.exists(userId, id)) {
         report.skippedExisting += 1;
         continue;
       }
 
-      await store.writeImported(userId, id, conversation);
-      report.imported += 1;
+      const empty = conversation.messages.length === 0;
+      if (empty) {
+        report.skippedEmpty += 1;
+      } else {
+        await store.writeImported(userId, id, conversation);
+        report.imported += 1;
+      }
+
+      /*
+       * Stored even when the transcript was empty. A conversation whose only
+       * content was tool calls has nothing to read, but the files it produced
+       * are the work — throwing them away because the talking around them did
+       * not survive would be losing the wrong half. It just has no
+       * conversation to link back to.
+       */
+      for (const artifact of produced) {
+        if (artifacts === undefined) break;
+        try {
+          await artifacts.create(userId, {
+            ...artifact,
+            ...(empty ? {} : { conversationId: id }),
+          });
+          report.artifacts += 1;
+        } catch {
+          // One artifact too large, or empty, is not a reason to abandon the
+          // rest of somebody's export.
+          report.artifactsSkipped += 1;
+        }
+      }
     }
 
     /*

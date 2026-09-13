@@ -13,6 +13,7 @@ import { UserStore } from '../auth/users.ts';
 import { ConversationStore } from '../storage/conversations.ts';
 import { ChatIndex } from '../storage/index.ts';
 import { MEMORY_NAME_MAX_LENGTH, StoragePaths } from '../storage/paths.ts';
+import { ArtifactStore } from '../storage/artifacts.ts';
 import { MemoryStore } from '../storage/memories.ts';
 import { pathExists } from '../storage/atomic.ts';
 
@@ -113,6 +114,7 @@ async function main(): Promise<void> {
   const store = new ConversationStore({ paths, logger });
   const index = new ChatIndex({ store, logger });
   const memoryStore = new MemoryStore(paths, logger);
+  const artifactStore = new ArtifactStore(paths, logger);
   await store.init(account.id);
 
   const report = {
@@ -121,21 +123,16 @@ async function main(): Promise<void> {
     skippedEmpty: 0,
     toolBlocks: 0,
     attachments: 0,
+    artifacts: 0,
   };
 
   for (const source of conversations) {
-    const { id, conversation, dropped, emptied } = convertConversation(source);
+    const { id, conversation, dropped, emptied, artifacts } = convertConversation(source);
     report.toolBlocks += dropped.toolBlocks;
     report.attachments += dropped.attachments;
 
-    if (conversation.messages.length === 0) {
-      report.skippedEmpty += 1;
-      process.stdout.write(
-        `  skipped  ${conversation.title}${emptied ? ' (nothing importable in it)' : ' (no messages)'}\n`
-      );
-      continue;
-    }
-
+    // Checked before anything is written, and it covers the artifacts too: a
+    // second run of the same archive must not add a second copy of each.
     const file = paths.conversationFile(account.id, id);
     if (await pathExists(file)) {
       report.skippedExisting += 1;
@@ -143,12 +140,41 @@ async function main(): Promise<void> {
       continue;
     }
 
-    if (!options.dryRun) await store.writeImported(account.id, id, conversation);
+    const empty = conversation.messages.length === 0;
+    if (empty) {
+      report.skippedEmpty += 1;
+      process.stdout.write(
+        `  skipped  ${conversation.title}${emptied ? ' (nothing importable in it)' : ' (no messages)'}\n`
+      );
+    } else {
+      if (!options.dryRun) await store.writeImported(account.id, id, conversation);
+      report.imported += 1;
+      process.stdout.write(
+        `  ${options.dryRun ? 'would  ' : 'ok     '}  ${conversation.title} (${conversation.messages.length} messages)\n`
+      );
+    }
 
-    report.imported += 1;
-    process.stdout.write(
-      `  ${options.dryRun ? 'would  ' : 'ok     '}  ${conversation.title} (${conversation.messages.length} messages)\n`
-    );
+    // Kept even from a conversation with nothing to read: the files are the
+    // work, and they simply have no transcript to link back to.
+    for (const artifact of artifacts) {
+      if (!options.dryRun) {
+        try {
+          await artifactStore.create(account.id, {
+            ...artifact,
+            ...(empty ? {} : { conversationId: id }),
+          });
+        } catch (err) {
+          process.stdout.write(
+            `    skip     artifact ${artifact.name} (${err instanceof Error ? err.message : 'unusable'})\n`
+          );
+          continue;
+        }
+      }
+      report.artifacts += 1;
+      process.stdout.write(
+        `    ${options.dryRun ? 'would  ' : 'ok     '}  artifact ${artifact.name} (${artifact.mediaType})\n`
+      );
+    }
   }
 
   if (!options.dryRun && report.imported > 0) await index.rebuild(account.id);
@@ -191,7 +217,8 @@ async function main(): Promise<void> {
   process.stdout.write(
     `\n${options.dryRun ? 'Dry run. ' : ''}${report.imported} conversation(s) imported, ` +
       `${report.skippedExisting} already present, ${report.skippedEmpty} empty. ` +
-      `${remembered} memory/memories imported, ${skippedMemories} already present.\n` +
+      `${remembered} memory/memories imported, ${skippedMemories} already present. ` +
+      `${report.artifacts} artifact(s).\n` +
       (report.toolBlocks > 0 ? `${report.toolBlocks} tool block(s) left out.\n` : '') +
       (report.attachments > 0
         ? `${report.attachments} attachment(s): the text read out of them was kept, the files were not.\n`

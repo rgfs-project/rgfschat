@@ -10,6 +10,8 @@ import { generationRouter } from './routes/generations.ts';
 import { healthRouter } from './routes/health.ts';
 import { conversationRouter } from './routes/conversations.ts';
 import type { PreferencesStore } from './storage/preferences.ts';
+import type { ArtifactStore } from './storage/artifacts.ts';
+import { artifactRoutes } from './routes/artifacts.ts';
 import type { MemoryStore } from './storage/memories.ts';
 import { meRouter } from './routes/me.ts';
 import { authRouter } from './routes/auth.ts';
@@ -46,6 +48,7 @@ export interface AppOptions {
   /** Per-reader state that belongs in neither the file nor the index. */
   preferences?: PreferencesStore;
   memories?: MemoryStore;
+  artifacts?: ArtifactStore;
   service?: GenerationService;
   users?: UserStore;
   sessions?: SessionManager;
@@ -75,6 +78,7 @@ export function createApp({
   index,
   preferences,
   memories,
+  artifacts,
   service,
   users,
   sessions,
@@ -169,7 +173,19 @@ export function createApp({
     users !== undefined &&
     sessions !== undefined
   ) {
-    app.use('/api', meRouter({ store, index, manager, preferences, memories, users, sessions }));
+    app.use(
+      '/api',
+      meRouter({
+        store,
+        index,
+        manager,
+        preferences,
+        memories,
+        ...(artifacts === undefined ? {} : { artifacts }),
+        users,
+        sessions,
+      })
+    );
   }
 
   /*
@@ -200,6 +216,11 @@ export function createApp({
       })
     );
     app.use('/api', createAttachmentsRouter(attachments));
+  }
+
+  if (artifacts !== undefined) {
+    // Read-only from the browser's side: nothing here accepts bytes.
+    app.use('/api', artifactRoutes(artifacts));
   }
 
   if (hub !== undefined && manager !== undefined && service !== undefined) {
