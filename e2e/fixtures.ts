@@ -14,11 +14,21 @@ import { test as base, type Page } from '@playwright/test';
  * provider whose stream the test controls. Nothing here talks to a real model:
  * the point is to exercise reconnection and cancellation deterministically, and
  * a real provider would make the timing a matter of luck.
+ *
+ * Setting `E2E_CONTAINER_IMAGE` runs the same suite against a container image
+ * instead of `dist/` on the host — the whole point being that the specs do not
+ * change, so a pass means the packaged image behaves like the tree it was built
+ * from. See `startContainer` for the two things that mode has to arrange.
  */
 
 export const ADMIN_USERNAME = 'e2e';
 export const ADMIN_PASSWORD = 'correct horse battery';
 const PROVIDER_KEY = 'e2e-provider-key';
+
+/** Image to test instead of the host build, when running in container mode. */
+const CONTAINER_IMAGE = process.env['E2E_CONTAINER_IMAGE'] ?? '';
+/** `podman` and `docker` are interchangeable for everything used here. */
+const CONTAINER_ENGINE = process.env['E2E_CONTAINER_ENGINE'] ?? 'podman';
 
 /** Emits chunks only when the test asks for them. */
 export interface MockProviderHandle {
@@ -155,10 +165,134 @@ export interface AppFixture {
   provider: MockProviderHandle;
 }
 
-async function waitForHealth(baseUrl: string, child: ChildProcess): Promise<void> {
-  const deadline = Date.now() + 30_000;
+/**
+ * A running server, however it was started.
+ *
+ * `died` lets the health wait fail immediately with the reason instead of
+ * spending its whole timeout polling something that has already crashed —
+ * without it, a container that exits on a bad mount looks identical to one that
+ * is merely slow.
+ */
+interface ServerHandle {
+  died: () => Promise<string | null>;
+  logs: () => Promise<string>;
+  stop: () => Promise<void>;
+}
+
+type ServerEnv = Record<string, string>;
+
+function engine(args: string[], input?: string): string {
+  const result = spawnSync(CONTAINER_ENGINE, args, {
+    encoding: 'utf8',
+    ...(input === undefined ? {} : { input }),
+  });
+  if (result.status !== 0) {
+    throw new Error(
+      `${CONTAINER_ENGINE} ${args.slice(0, 2).join(' ')} failed: ${result.stderr || result.stdout}`
+    );
+  }
+  return result.stdout.trim();
+}
+
+/** The host build: what every run did before container mode existed. */
+function startHostServer(env: ServerEnv): ServerHandle {
+  spawnSync(
+    'npx',
+    ['tsx', 'server/scripts/createUser.ts', '--username', ADMIN_USERNAME, '--admin'],
+    {
+      input: `${ADMIN_PASSWORD}\n`,
+      env,
+      encoding: 'utf8',
+    }
+  );
+
+  const child: ChildProcess = spawn(process.execPath, ['dist/server/index.js'], {
+    env,
+    stdio: 'ignore',
+  });
+
+  return {
+    died: () => Promise.resolve(child.exitCode === null ? null : `exit ${child.exitCode}`),
+    logs: () => Promise.resolve('(host server runs with stdio ignored)'),
+    stop: async () => {
+      child.kill('SIGTERM');
+      await new Promise<void>((resolve) => child.once('exit', () => resolve()));
+    },
+  };
+}
+
+/**
+ * The packaged image, driven so that the specs cannot tell the difference.
+ *
+ * Two things have to be arranged for that to hold:
+ *
+ * `--userns=keep-id` maps this user to the same uid inside the container, which
+ * is the image's unprivileged `node` user. Without it a rootless bind mount is
+ * written as a subordinate uid and the fixtures that seed conversations by
+ * writing files — and read them back — would be looking at a directory they
+ * cannot touch.
+ *
+ * `--network=host` because the mock provider listens on the host's loopback.
+ * The container has to reach it, and the server has to be reachable on the port
+ * the test picked; sharing the namespace is the one arrangement that needs no
+ * address rewriting on either side, and the provider URL stays literally what
+ * the host build is given.
+ */
+function startContainer(env: ServerEnv, dataDir: string): ServerHandle {
+  const name = `chatui-e2e-${randomUUID().slice(0, 8)}`;
+  // Only the variables the image does not already set; DATA_DIR stays /data.
+  const passthrough = ['PORT', 'LOG_LEVEL', 'LLAMA_BASE_URL', 'LLAMA_API_KEY', 'SSE_REPLAY_EVENTS'];
+  const envArgs = passthrough.flatMap((key) => ['-e', `${key}=${env[key] ?? ''}`]);
+  const mount = ['--userns=keep-id', '--network=host', '-v', `${dataDir}:/data`];
+
+  engine(
+    [
+      'run',
+      '-i',
+      '--rm',
+      ...mount,
+      CONTAINER_IMAGE,
+      'create-admin',
+      '--username',
+      ADMIN_USERNAME,
+      '--admin',
+    ],
+    `${ADMIN_PASSWORD}\n`
+  );
+
+  engine(['run', '-d', '--name', name, ...mount, ...envArgs, CONTAINER_IMAGE]);
+
+  return {
+    died: () => {
+      const state = spawnSync(CONTAINER_ENGINE, ['inspect', '-f', '{{.State.Running}}', name], {
+        encoding: 'utf8',
+      });
+      if (state.status !== 0) return Promise.resolve('container is gone');
+      return Promise.resolve(state.stdout.trim() === 'true' ? null : 'container is not running');
+    },
+    logs: () =>
+      Promise.resolve(
+        spawnSync(CONTAINER_ENGINE, ['logs', '--tail', '40', name], { encoding: 'utf8' }).stdout ??
+          ''
+      ),
+    stop: () => {
+      spawnSync(CONTAINER_ENGINE, ['rm', '-f', name], { encoding: 'utf8' });
+      return Promise.resolve();
+    },
+  };
+}
+
+async function waitForHealth(baseUrl: string, server: ServerHandle): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  let polls = 0;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`server exited: ${child.exitCode}`);
+    // Checking liveness costs a subprocess in container mode, so do it every
+    // second rather than every attempt.
+    if (polls % 10 === 0) {
+      const dead = await server.died();
+      if (dead !== null) throw new Error(`server ${dead}\n${await server.logs()}`);
+    }
+    polls += 1;
     try {
       if ((await fetch(`${baseUrl}/api/health`)).ok) return;
     } catch {
@@ -166,7 +300,7 @@ async function waitForHealth(baseUrl: string, child: ChildProcess): Promise<void
     }
     await new Promise((r) => setTimeout(r, 100));
   }
-  throw new Error('server never became healthy');
+  throw new Error(`server never became healthy\n${await server.logs()}`);
 }
 
 export const test = base.extend<{ app: AppFixture }>({
@@ -187,28 +321,22 @@ export const test = base.extend<{ app: AppFixture }>({
       LLAMA_API_KEY: PROVIDER_KEY,
       // A tiny replay window would hide replay bugs behind resyncs.
       SSE_REPLAY_EVENTS: '2000',
-    };
+    } as ServerEnv;
 
-    // The account must exist before the UI is opened.
-    spawnSync(
-      'npx',
-      ['tsx', 'server/scripts/createUser.ts', '--username', ADMIN_USERNAME, '--admin'],
-      {
-        input: `${ADMIN_PASSWORD}\n`,
-        env,
-        encoding: 'utf8',
-      }
-    );
+    // Creating the account is part of starting a server: it must exist before
+    // the UI is opened, and in container mode it is the image's own CLI that
+    // has to do it.
+    const server = CONTAINER_IMAGE === '' ? startHostServer(env) : startContainer(env, dataDir);
 
-    const child = spawn(process.execPath, ['dist/server/index.js'], { env, stdio: 'ignore' });
-    await waitForHealth(baseUrl, child);
-
-    await use({ baseUrl, dataDir, provider });
-
-    child.kill('SIGTERM');
-    await new Promise<void>((resolve) => child.once('exit', () => resolve()));
-    await provider.close();
-    await rm(dataDir, { recursive: true, force: true });
+    try {
+      await waitForHealth(baseUrl, server);
+      await use({ baseUrl, dataDir, provider });
+    } finally {
+      // A failed start must still not leak a container or a temp directory.
+      await server.stop();
+      await provider.close();
+      await rm(dataDir, { recursive: true, force: true });
+    }
   },
 });
 

@@ -72,6 +72,20 @@ npm run test:e2e
 mid-generation, losing the network and reconnecting, and cancelling. Install the browser once
 with `npx playwright install chromium`.
 
+`test:e2e:container` runs that **same suite, unchanged, against the container image** — so a
+pass means the packaged image behaves like the tree it was built from, not merely that it
+boots. It needs no `npm run build`, because the image carries its own:
+
+```bash
+npm run test:e2e:container                                   # ghcr.io/rgfs-project/rgfschat:latest
+E2E_CONTAINER_IMAGE=localhost/chatui:dev npm run test:e2e:container
+```
+
+`E2E_CONTAINER_ENGINE` switches `podman` to `docker`. The fixture runs the image with
+`--userns=keep-id`, so the bind-mounted `DATA_DIR` is owned by your uid and the tests that
+seed conversations by writing files can still read them back, and with `--network=host`, so
+the container reaches the mock provider on the host's loopback without any address rewriting.
+
 `verify` is the one that matters most: it builds, boots the **real** server on a free port
 with a throwaway `DATA_DIR`, and checks the health DTO, the canonical 404, and clean
 shutdown on `SIGTERM`. Nothing is mocked.
