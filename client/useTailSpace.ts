@@ -68,14 +68,13 @@ export function useTailSpace({ port, content, anchorId, adjustBy }: TailSpaceOpt
   const [tail, setTail] = useState(0);
 
   /**
-   * Where the anchor was on screen last time, and where the view was.
+   * Where the anchor was on screen last time.
    *
-   * Both, because the question being asked is "did this move without anyone
-   * scrolling": the anchor moving while `scrollTop` is unchanged is layout
-   * shifting above it, and is the only case worth correcting. The anchor moving
-   * because the reader scrolled is the reader scrolling.
+   * The question being asked next pass is whether it moved down, which is
+   * layout above it having changed height. Whether the *reader* moved it is a
+   * question only the scroll pin can answer, so `adjustBy` answers it.
    */
-  const previous = useRef<{ id: string; top: number; scrollTop: number } | null>(null);
+  const previous = useRef<{ id: string; top: number } | null>(null);
 
   /*
    * A resize changes `clientHeight` without changing anything React renders, so
@@ -133,22 +132,18 @@ export function useTailSpace({ port, content, anchorId, adjustBy }: TailSpaceOpt
     /*
      * Put the question back where it was, if it moved on its own.
      *
-     * Only when `scrollTop` is exactly what it was: then nothing scrolled and
-     * the movement is content above the anchor having changed height — a table
-     * in an earlier answer re-laying out, an image finishing, the previous
-     * turn's reasoning block opening. Taking the difference back out of
+     * Content above the anchor changing height is what moves it: a table in an
+     * earlier answer re-laying out, an image finishing, the composer growing
+     * and taking height from the transcript. Taking the difference back out of
      * `scrollTop` leaves the question where the reader was reading it.
      *
      * Downwards only, because up is what a long answer legitimately does to it.
+     * And never once the reader has scrolled somewhere themselves — `adjustBy`
+     * refuses then, because from that point the position is theirs.
      */
     const top = anchor.getBoundingClientRect().top;
     const before = previous.current;
-    if (
-      before !== null &&
-      before.id === anchorId &&
-      before.scrollTop === scroller.scrollTop &&
-      adjustBy !== undefined
-    ) {
+    if (before !== null && before.id === anchorId && adjustBy !== undefined) {
       const moved = top - before.top;
       if (moved > EPSILON_PX) adjustBy(moved);
     }
@@ -162,11 +157,7 @@ export function useTailSpace({ port, content, anchorId, adjustBy }: TailSpaceOpt
 
     // Recorded after any correction, so the next pass compares against where
     // the question actually ended up.
-    previous.current = {
-      id: anchorId as string,
-      top: anchor.getBoundingClientRect().top,
-      scrollTop: scroller.scrollTop,
-    };
+    previous.current = { id: anchorId as string, top: anchor.getBoundingClientRect().top };
 
     if (Math.abs(next - tail) > EPSILON_PX) setTail(next);
   });

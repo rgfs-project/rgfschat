@@ -303,6 +303,45 @@ async function waitForHealth(baseUrl: string, server: ServerHandle): Promise<voi
   throw new Error(`server never became healthy\n${await server.logs()}`);
 }
 
+/**
+ * Writes the provider the test's mock is serving, where the server reads it.
+ *
+ * `LLAMA_BASE_URL` used to be bootstrapped into a provider on first boot and no
+ * longer is: providers come from `_system/providers.json` and nothing else
+ * creates one. The variable is still set below because the container passes it
+ * through, but this file is what actually gives the server a model — without
+ * it every test here opens a UI that says "No models are configured" and a
+ * disabled Send button, which reads as a mysteriously silent provider.
+ *
+ * Written before the server starts, so there is no window in which it boots
+ * with none.
+ */
+async function writeProviderFile(dataDir: string, baseUrl: string): Promise<void> {
+  const systemDir = join(dataDir, '_system');
+  await mkdir(systemDir, { recursive: true, mode: 0o700 });
+  await writeFile(
+    join(systemDir, 'providers.json'),
+    `${JSON.stringify(
+      {
+        version: 1,
+        providers: [
+          {
+            id: 'local',
+            name: 'Local',
+            kind: 'openai-compatible',
+            baseUrl,
+            apiKey: PROVIDER_KEY,
+            timeoutMs: 30_000,
+          },
+        ],
+      },
+      null,
+      2
+    )}\n`,
+    { mode: 0o600 }
+  );
+}
+
 export const test = base.extend<{ app: AppFixture }>({
   // eslint-disable-next-line no-empty-pattern -- Playwright's fixture signature
   app: async ({}, use) => {
@@ -322,6 +361,11 @@ export const test = base.extend<{ app: AppFixture }>({
       // A tiny replay window would hide replay bugs behind resyncs.
       SSE_REPLAY_EVENTS: '2000',
     } as ServerEnv;
+
+    // The provider the mock is serving, in the file the server reads on boot.
+    // In container mode the same directory is mounted at /data, so one write
+    // covers both.
+    await writeProviderFile(dataDir, provider.url);
 
     // Creating the account is part of starting a server: it must exist before
     // the UI is opened, and in container mode it is the image's own CLI that
@@ -361,7 +405,18 @@ export async function signIn(page: Page, baseUrl: string): Promise<void> {
 
 /** Creates a conversation and sends one message, leaving it mid-stream. */
 export async function startGeneration(page: Page, text: string): Promise<void> {
-  await page.getByRole('button', { name: 'New chat' }).click();
+  /*
+   * On a narrow viewport the sidebar is a drawer, and New chat is inside it —
+   * so a test that only set a phone-sized viewport would time out clicking a
+   * control that is off screen, which reads as the app being broken rather
+   * than the test not having opened the drawer.
+   */
+  const newChat = page.getByRole('button', { name: 'New chat' });
+  if (!(await newChat.isVisible())) {
+    await page.getByRole('button', { name: 'Expand sidebar' }).click();
+    await newChat.waitFor({ state: 'visible' });
+  }
+  await newChat.click();
   const composer = composerField(page);
   // The composer is disabled until a conversation exists and a model is chosen.
   await expectEnabled(composer);

@@ -107,6 +107,18 @@ export function useScrollPin(): ScrollPin {
   const pinnedRef = useRef(true);
 
   /**
+   * Whether the *reader* took the view somewhere, as opposed to us letting go
+   * of the bottom.
+   *
+   * `release` and a deliberate scroll both leave the transcript unpinned, and
+   * they are not the same thing at all: after `release` nothing is following
+   * the bottom but the view is still ours to hold steady, while after a scroll
+   * the position belongs to the reader and must not be touched by anything —
+   * which is what `adjustBy` checks before it moves anything.
+   */
+  const userScrolled = useRef(false);
+
+  /**
    * Where our own instant scroll landed, so its event can be recognised.
    *
    * An instant `scrollTo` moves `scrollTop` synchronously but dispatches the
@@ -195,6 +207,8 @@ export function useScrollPin(): ScrollPin {
 
       const atBottom = isAtBottom(element);
       pinnedRef.current = atBottom;
+      // Scrolling back to the bottom is the reader handing the view back.
+      userScrolled.current = !atBottom;
       setPinned(atBottom);
       measureScrollable(element);
     };
@@ -276,6 +290,10 @@ export function useScrollPin(): ScrollPin {
   const adjustBy = useCallback((delta: number): void => {
     const element = ref.current;
     if (element === null || !Number.isFinite(delta) || Math.abs(delta) < 0.5) return;
+    // Once the reader has taken the view somewhere, it is theirs: content
+    // growing under them is not a reason to move it, which is the whole of
+    // "streaming while scrolled up does not move the viewport".
+    if (userScrolled.current) return;
 
     const limit = Math.max(0, element.scrollHeight - element.clientHeight);
     const next = Math.max(0, Math.min(limit, element.scrollTop + delta));
@@ -297,12 +315,15 @@ export function useScrollPin(): ScrollPin {
   const release = useCallback((): void => {
     pinnedRef.current = false;
     setPinned(false);
+    // Deliberately *not* `userScrolled`: nobody scrolled, we stopped following.
+    // The view is still ours to hold steady against layout moving under it.
   }, []);
 
   /** Asking a question means wanting to see it, wherever the view had got to. */
   const pin = useCallback((): void => {
     const element = ref.current;
     pinnedRef.current = true;
+    userScrolled.current = false;
     setPinned(true);
     programmaticTop.current = null;
     if (element !== null) scrollToBottom(element, false);
@@ -328,6 +349,7 @@ export function useScrollPin(): ScrollPin {
     programmaticTop.current = null;
 
     pinnedRef.current = true;
+    userScrolled.current = false;
     setPinned(true);
     setScrollable(false);
 
@@ -347,6 +369,7 @@ export function useScrollPin(): ScrollPin {
     scrollToBottom(element, true);
     programmaticTop.current = null;
     pinnedRef.current = true;
+    userScrolled.current = false;
     setPinned(true);
   }, [scrollToBottom]);
 

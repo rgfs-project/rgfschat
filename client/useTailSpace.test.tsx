@@ -120,6 +120,14 @@ describe('holding the question still while content above it changes', () => {
 
   interface View {
     scrollTop: number;
+    /**
+     * Whether the reader has taken the view somewhere themselves.
+     *
+     * The real `adjustBy` refuses while this is set — that is where the rule
+     * lives, in the one place that can tell its own scrolls from theirs — so
+     * the stand-in here refuses on the same condition.
+     */
+    userScrolled?: boolean;
   }
 
   /** The anchor's viewport coordinate, the thing that must not move down. */
@@ -141,6 +149,7 @@ describe('holding the question still while content above it changes', () => {
 
     /* The scroll pin's `adjustBy`: move the view, clamped as a browser would. */
     const adjustBy = (delta: number): void => {
+      if (view.userScrolled === true) return;
       const limit = Math.max(0, history + answerHeight + tail - PORT);
       view.scrollTop = Math.max(0, Math.min(limit, view.scrollTop + delta));
     };
@@ -237,8 +246,10 @@ describe('holding the question still while content above it changes', () => {
       <DriftHarness history={START_HISTORY} answerHeight={LONG_ANSWER} view={view} />
     );
 
-    // The reader scrolls up into the history themselves.
+    // The reader scrolls up into the history themselves, which is what the pin
+    // records; from here the position is theirs.
     view.scrollTop -= 500;
+    view.userScrolled = true;
     const chosen = view.scrollTop;
     rerender(<DriftHarness history={START_HISTORY} answerHeight={LONG_ANSWER} view={view} />);
 

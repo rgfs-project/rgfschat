@@ -79,8 +79,13 @@ test('ordinary words are not broken inside a cell', async ({ app, page }) => {
     const range = document.createRange();
     for (const cell of table.querySelectorAll('th, td')) {
       const text = cell.textContent ?? '';
-      // A single word must occupy a single line box.
-      for (const word of text.split(/\s+/).filter((part) => part.length > 2)) {
+      /*
+       * Ordinary words only. A 48-character hash genuinely cannot fit a line of
+       * its own at any sensible column width, and breaking *that* is what the
+       * `overflow-wrap: break-word` fallback is for — the rule being checked
+       * here is that a word a reader would recognise is never broken.
+       */
+      for (const word of text.split(/\s+/).filter((part) => /^[A-Za-z-]{3,20}$/.test(part))) {
         const index = text.indexOf(word);
         const node = cell.firstChild;
         if (node === null || node.nodeType !== Node.TEXT_NODE) continue;

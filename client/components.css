@@ -2397,6 +2397,21 @@ button.linkish:hover {
   }
 }
 
+/*
+ * The same floor by width, not only by pointer.
+ *
+ * The rule above asks for a coarse pointer, which a phone has and a narrow
+ * window on a laptop does not — and a narrow window is where the composer is
+ * hardest to hit for everyone, thumbs or not. Duplicated rather than merged
+ * into one query because the two ask different questions: that one is about
+ * fingers, this one is about a cramped layout.
+ */
+@media (max-width: 30rem) {
+  .composer textarea {
+    min-height: 2.75rem;
+  }
+}
+
 /* ==========================================================================
    Narrow windows
    ==========================================================================
