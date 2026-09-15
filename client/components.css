@@ -553,7 +553,7 @@
   background: none;
   outline: none;
   resize: none;
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
   line-height: 1.6;
   /* Holds the box at the reference's resting height before any text is typed. */
   padding: 0.25rem 0.5rem;
@@ -1964,7 +1964,8 @@ button.linkish:hover {
  * reports `hover: hover`, so it keeps the desktop sizes.
  */
 @media (max-width: 767px) and (hover: none) and (pointer: coarse) {
-  .msg {
+  .msg,
+  .composer__input {
     font-size: 1.0625rem;
   }
 
