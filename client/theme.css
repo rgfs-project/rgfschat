@@ -51,9 +51,17 @@
   /* The admin rail's close control and section buttons share one height. */
   --panel-control-height: 2.125rem;
 
-  /* One size for every button, so a row of them lines up. */
-  --button-font-size: 0.8125rem;
-  --button-padding: 0.4375rem 0.75rem;
+  /*
+   * One size for every button, so a row of them lines up.
+   *
+   * A step below the body text rather than level with it. A control's label is
+   * not prose — it names an action, is read once, and is found by position as
+   * much as by reading. At 13px against 13px body text the buttons competed
+   * with the settings they belonged to, which is what made a pane of rows read
+   * as a pane of buttons.
+   */
+  --button-font-size: 0.75rem;
+  --button-padding: 0.3125rem 0.625rem;
 
   --motion-fast: 120ms;
   --motion: 180ms;

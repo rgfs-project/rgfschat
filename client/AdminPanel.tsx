@@ -578,7 +578,10 @@ function ModelsSection(): React.JSX.Element {
   });
 
   return (
-    <>
+    // `panel__models` is what gives this pane's row buttons a shared width:
+    // Refresh sits above one Visible/Hidden per model, and a column of them
+    // needs one right-hand edge. No other pane stacks buttons that way.
+    <div className="panel__models">
       <Problem message={error} />
 
       <Row label="Discovery" description="Re-read the model list from every provider now.">
@@ -618,7 +621,7 @@ function ModelsSection(): React.JSX.Element {
           );
         })
       )}
-    </>
+    </div>
   );
 }
 

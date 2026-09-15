@@ -1623,8 +1623,10 @@ button.linkish:hover {
 .select {
   display: inline-flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 0.75rem;
+  /* Kept equal to the side padding above, per the rule this comment opens
+     with — so both move together when the shared token does. */
+  gap: 0.625rem;
+  padding: var(--button-padding);
   background: var(--raised);
   color: var(--text);
   border: 1px solid var(--border-strong);
@@ -1713,15 +1715,22 @@ button.linkish:hover {
 }
 
 /*
- * One width down the right-hand edge of the rows.
+ * One width down the right-hand edge of the rows — in the one pane that has a
+ * column of them.
  *
  * These labels differ in length — Refresh, Visible, Hidden — so left to
  * themselves each button is a different size and the column of them has a
  * ragged edge. A floor on the width lines them up, and the label stays centred
  * inside it.
+ *
+ * Scoped, because that argument is about a *column*. Unscoped it also caught
+ * the lone Edit on a provider row, which has nothing to line up against: a
+ * four-letter quiet action came out 112px wide, wider than the ten-letter
+ * primary button below it, which is the opposite of the ranking those two are
+ * supposed to have.
  */
-.panel__row-control button:not(.icon-button):not(.select) {
-  min-width: 7rem;
+.panel__models .panel__row-control button:not(.icon-button):not(.select) {
+  min-width: 6rem;
 }
 
 /* A row of actions that belong to the pane rather than to one of its rows. */
