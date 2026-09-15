@@ -230,8 +230,10 @@ body {
   display: flex;
   align-items: center;
   /* The control and the title are two elements in one bar; the gutter is what
-     holds the bar off the edge, not what separates them. */
-  gap: 0.5rem;
+     holds the bar off the edge, not what separates them. 11px against the
+     control's 32px box puts the title's first letter 58 from the edge, where
+     the reference's 12px against a 30px box puts its own. */
+  gap: 0.6875rem;
   /* Grown by the status bar exactly as the sidebar's own header is, so the two
      stay one line across the seam on a notched phone as well as on a desktop. */
   padding: var(--safe-top) max(var(--gutter), var(--safe-right)) 0
@@ -325,7 +327,8 @@ body {
      their height as well as the gap — otherwise they sit against the composer. */
   /* The side insets matter in landscape, where the cutout is beside the text
      rather than above it and an unpadded first character sits under it. */
-  padding: 2.5rem max(1.25rem, var(--safe-right)) 4.5rem max(1.25rem, var(--safe-left));
+  padding: 2.5rem max(var(--column-inset), var(--safe-right)) 4.5rem
+    max(var(--column-inset), var(--safe-left));
   display: flex;
   flex-direction: column;
   /* Fills the scroll port even when nearly empty, so the empty state's
@@ -337,11 +340,11 @@ body {
    * them clearly, but not so much that a one-word reply floats away from the
    * question it answers.
    *
-   * It also has to clear the hover controls, which hang out of flow below their
-   * message: too small and their lower edge lands on the next turn, where it
-   * cannot be clicked at all.
+   * The spacing itself is each message's own bottom margin rather than a gap
+   * on this column, because the two sides carry different amounts: a question
+   * sits closer to the answer it gets than an answer does to the next question.
    */
-  gap: 2.5rem;
+  gap: 0;
 }
 
 /*
@@ -356,8 +359,17 @@ body {
  */
 .composer-region {
   flex: none;
-  padding: 0 max(1.25rem, var(--safe-right)) max(0.875rem, var(--safe-bottom))
-    max(1.25rem, var(--safe-left));
+  padding: 0 max(var(--column-inset), var(--safe-right)) max(1.25rem, var(--safe-bottom))
+    max(var(--column-inset), var(--safe-left));
+}
+
+/* A phone-width window gives the column its edges back — 768px, the width the
+   reference tightens this at, and unlike the type scale it applies to a shrunk
+   desktop window too: the room really is gone either way. */
+@media (max-width: 767px) {
+  :root {
+    --column-inset: 1rem;
+  }
 }
 
 /* Positioning context for the jump-to-latest control above it. */

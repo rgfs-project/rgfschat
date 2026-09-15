@@ -147,17 +147,28 @@ export function Message({
         </details>
       )}
 
-      <div className="msg__body">
-        {message.body === '' && statusLabel !== undefined ? (
-          <p className="muted msg__empty">No output was produced.</p>
-        ) : (
-          <ArtifactOpenContext.Provider value={openArtifact}>
-            <Markdown>{message.body}</Markdown>
-          </ArtifactOpenContext.Provider>
-        )}
-      </div>
-
-      {message.type === 'user' && <MessageAttachments ids={message.attachments ?? []} />}
+      {/* The bubble is the user's turn alone: what they said and what they
+          carried with it. The controls below sit outside it, on the page. */}
+      {message.type === 'user' ? (
+        <div className="msg__bubble">
+          <MessageAttachments ids={message.attachments ?? []} />
+          <div className="msg__body">
+            <ArtifactOpenContext.Provider value={openArtifact}>
+              <Markdown>{message.body}</Markdown>
+            </ArtifactOpenContext.Provider>
+          </div>
+        </div>
+      ) : (
+        <div className="msg__body">
+          {message.body === '' && statusLabel !== undefined ? (
+            <p className="muted msg__empty">No output was produced.</p>
+          ) : (
+            <ArtifactOpenContext.Provider value={openArtifact}>
+              <Markdown>{message.body}</Markdown>
+            </ArtifactOpenContext.Provider>
+          )}
+        </div>
+      )}
 
       {statusLabel !== undefined && <p className="msg__status">{statusLabel}</p>}
 
@@ -180,7 +191,7 @@ export function Message({
                 setEditing(true);
               }}
             >
-              <Pencil size={14} />
+              <Pencil size={15} />
             </button>
           )}
           {message.type === 'assistant' && isLast && (
@@ -191,7 +202,7 @@ export function Message({
               title="Regenerate"
               onClick={onRegenerate}
             >
-              <RefreshCw size={14} />
+              <RefreshCw size={15} />
             </button>
           )}
 
@@ -204,7 +215,7 @@ export function Message({
             title={copied ? 'Copied' : 'Copy'}
             onClick={copy}
           >
-            {copied ? <Check size={14} /> : <Copy size={14} />}
+            {copied ? <Check size={15} /> : <Copy size={15} />}
           </button>
 
           <button
@@ -214,7 +225,7 @@ export function Message({
             title="Delete this message and its reply"
             onClick={() => onDelete(message.id)}
           >
-            <Trash2 size={14} />
+            <Trash2 size={15} />
           </button>
         </div>
       )}

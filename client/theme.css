@@ -79,16 +79,22 @@
      seam; the extra 12px it had were empty on both. */
   --header-height: 3.5rem;
   /*
-   * What a header holds its *boxes* off the edge by. Every glyph then lands 15
-   * from that edge: an icon button carries 7 of its own around what it draws,
-   * and the title is given the same 7 so it starts on the same column.
+   * What a header holds its *boxes* off the edge by. An icon button carries 7
+   * of its own around what it draws, so at 15 every glyph lands 22 from the
+   * edge — the reference's own column, where a 30px control sits 16 in.
    *
    * Stated this way because the control moves between the two headers. Insetting
-   * the box by 15 instead put the title right when the sidebar was open and the
-   * control 7px adrift the moment it closed.
+   * the box by 22 instead put the title right when the sidebar was open and the
+   * control adrift the moment it closed.
    */
-  --gutter: 0.5rem;
+  --gutter: 0.9375rem;
   --radius: 0.75rem;
+
+  /* How far the conversation column and the composer under it stand off the
+     window's edges. One value for both, so the composer sits directly beneath
+     the text rather than a few pixels wider or narrower than it. Tightened on
+     a phone, where the screen has none of that room to give away. */
+  --column-inset: 1.5rem;
 
   /*
    * Where the sidebar stops being a column and becomes a drawer.

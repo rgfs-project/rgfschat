@@ -120,6 +120,23 @@
   scroll-margin-top: 1.5rem;
 }
 
+/*
+ * The user's turn is a column, not the bubble itself: the bubble holds what
+ * was said, and the controls sit under it on the page. Wrapping both in the
+ * bubble's own background put the timestamp and the icons inside the bubble.
+ *
+ * Turns are spaced by their own bottom margin rather than by a gap on the
+ * column, because the two sides are spaced differently: 32px under a question,
+ * 40px under an answer, as the reference has them.
+ */
+.msg--user {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  margin-bottom: 2rem;
+}
+
 /* The user speaks in a bubble; the assistant answers as a document. Only one
    side needs a container for the alternation to be legible.
 
@@ -128,8 +145,7 @@
    turned down to 6px — the corner nearest the side the message came from,
    which points the bubble at its author the way a tail does without drawing
    one. A one-word message comes out 66 x 45, as it does there. */
-.msg--user {
-  align-self: flex-end;
+.msg__bubble {
   max-width: 85%;
   background: var(--hover);
   border-radius: 1rem 1rem 0.375rem 1rem;
@@ -143,6 +159,14 @@
 
 .msg--assistant {
   align-self: stretch;
+  margin-bottom: 2.5rem;
+}
+
+/* The answer reads a half-step larger and a touch looser than the question:
+   it is the part that gets read at length. */
+.msg--assistant .msg__body {
+  font-size: 0.96875rem;
+  line-height: 1.7;
 }
 
 .msg__status {
@@ -159,46 +183,16 @@
 }
 
 /*
- * A hover bridge across the gap the controls live in.
+ * In flow, and always there.
  *
- * The controls sit *below* their message and are `pointer-events: none` until
- * the message is hovered — so leaving the bubble to reach them ended the hover,
- * which turned them off, which meant the pointer passed straight through them.
- * There was no path in at any speed.
- *
- * This is a child of the message, so the pointer crossing it keeps
- * `.msg:hover` true all the way down to the controls. It covers only the gap
- * between turns, which belongs to neither message, and sits below the controls
- * in paint order so it never swallows their clicks.
- */
-.msg::after {
-  content: '';
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  height: 2.5rem;
-  pointer-events: none;
-}
-
-.msg:hover::after {
-  pointer-events: auto;
-}
-
-/*
- * Taken out of flow on purpose.
- *
- * In flow and merely `opacity: 0`, the controls still occupy their full height
- * inside the message — which padded every user bubble out to nearly twice the
- * height of the line it contained, as though the bubble had enormous padding.
- * Absolute keeps the bubble hugging its text; the controls only ever appear on
- * hover, so briefly overlapping the gap below costs nothing.
+ * Revealing this row on hover meant it had to be taken out of flow — otherwise
+ * the space it reserved read as enormous bubble padding — and out of flow it
+ * then overlapped whatever came next on a touch screen, where it is always
+ * shown because there is no hover. The reference simply keeps it in the
+ * document at every width, which is both simpler and steadier: nothing moves
+ * or appears as the pointer crosses the transcript.
  */
 .msg__actions {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  z-index: 1;
   display: flex;
   align-items: center;
   gap: 0.25rem;
@@ -206,65 +200,49 @@
      message, not a band between two messages, so it sits nearer its own
      message than to the next one. */
   margin-top: 0.5rem;
-  opacity: 0;
-  pointer-events: none;
-  /* Appears at once, but lingers on the way out — a pointer that strays a few
-     pixels off the message should not have to start again. */
-  transition: opacity var(--motion-fast) var(--ease-out) 400ms;
+  color: var(--faint);
+  font-size: 0.78125rem;
+  /* Hidden, not removed, while the answer is still arriving: the row keeps its
+     space so the transcript does not jump when generation ends. */
+  transition: opacity var(--motion-fast) var(--ease-out);
 }
 
-.msg--assistant .msg__actions {
-  right: auto;
-  left: 0;
-}
-
-.msg:hover .msg__actions,
-.msg:focus-within .msg__actions {
-  opacity: 1;
-  pointer-events: auto;
-  transition-delay: 0s;
-}
-
-/*
- * Smaller than a standalone icon button, and wider than tall.
- *
- * These have to fit in the gap between two turns. At the full 2rem the row
- * stood 42px tall against a 28px gap, so the bottom of every control hung over
- * the next message — unreachable, since the strip that overlapped could not
- * trigger the hover that makes them live.
- *
- * The height is trimmed further than the width because a square button puts as
- * much empty space above and below the glyph as beside it, which on a row
- * hanging under a message reads as a gap the message has grown rather than as
- * its own controls. Trimming one axis keeps the glyphs the same size and the
- * targets comfortably apart sideways.
- *
- * The coarse-pointer block near the end of this file overrides both axes back
- * to 44px, so this is a desktop-only tightening.
- */
+/* 15px glyph in 4px of padding, the size the reference draws them at. The
+   button's own padding is dropped and the glyph pinned: inherited, it left 11px
+   of content box for a 15px icon, which a flex child answers by shrinking — so
+   the glyphs came out at 9px, two thirds of the size they are asked for. */
 .msg__actions .icon-button {
-  width: 1.375rem;
-  height: 1.375rem;
+  width: 1.4375rem;
+  height: 1.4375rem;
+  padding: 0;
+  border-radius: 0.25rem;
+  color: inherit;
+}
+
+.msg__actions .icon-button svg {
+  flex: none;
 }
 
 /* Colour only, never a fill: these sit right under the text they belong to,
    and a hover background there reads as highlighting the message itself. */
 .msg__actions .icon-button:hover:not(:disabled) {
   background: none;
+  color: var(--text);
 }
 
-/* When it was sent, read at a glance rather than by opening the file — muted,
-   the same caption scale used for a fact stated rather than acted on
-   elsewhere in the app. */
+/* When it was sent, read at a glance rather than by opening the file — the
+   same caption scale used for a fact stated rather than acted on elsewhere in
+   the app. Tabular figures so the row does not twitch as the minutes tick. */
 .msg__time {
   margin-right: 0.25rem;
-  color: var(--muted);
-  font-size: 0.78125rem;
+  font-size: inherit;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
+/* The conversation row's controls are still hover-revealed, and there is no
+   hover here to reveal them. */
 @media (hover: none) {
-  .msg__actions,
   .conversation__actions {
     opacity: 1;
   }
@@ -285,10 +263,23 @@
   animation: found-fade 2s var(--ease-out) forwards;
 }
 
-/* The user bubble already has a shape and the outline follows it; the
-   assistant's turn has none, so the ring is given one. */
+/* The assistant's turn has no shape of its own, so the ring is given one. */
 .msg--assistant.is-found {
   border-radius: 1.625rem;
+}
+
+/* The user's turn is a full-width column holding a bubble, so the ring goes
+   round the bubble — round the column it would span the whole measure to mark
+   a few words. */
+.msg--user.is-found {
+  outline: none;
+  animation: none;
+}
+
+.msg--user.is-found .msg__bubble {
+  outline: 2px solid var(--border-strong);
+  outline-offset: 0.5rem;
+  animation: found-fade 2s var(--ease-out) forwards;
 }
 
 @keyframes found-fade {
@@ -775,9 +766,12 @@
 
 .markdown p,
 .markdown ul,
-.markdown ol,
+.markdown ol {
+  margin: 0.875rem 0;
+}
+
 .markdown blockquote {
-  margin: 0 0 1rem;
+  margin: 1rem 0;
 }
 
 .markdown h1,
@@ -788,19 +782,22 @@
   line-height: 1.35;
 }
 
+/* Descending, which they were not: an h2 set larger than the h1 above it
+   inverted the outline of any answer that used both. */
 .markdown h1 {
-  font-size: 1.0625rem;
-}
-.markdown h2 {
   font-size: 1.1875rem;
 }
-.markdown h3 {
+.markdown h2 {
   font-size: 1.0625rem;
+}
+.markdown h3 {
+  font-size: 0.96875rem;
+  margin: 1.25rem 0 0.5rem;
 }
 
 .markdown ul,
 .markdown ol {
-  padding-left: 1.5rem;
+  padding-left: 1.25rem;
 }
 
 .markdown li {
@@ -808,7 +805,7 @@
 }
 
 .markdown blockquote {
-  border-left: 3px solid var(--border);
+  border-left: 2px solid var(--border-strong);
   padding-left: 1rem;
   color: var(--muted);
 }
@@ -1969,7 +1966,11 @@ button.linkish:hover {
     font-size: 1.0625rem;
   }
 
-  .msg__time,
+  .msg--assistant .msg__body {
+    font-size: 1.09375rem;
+  }
+
+  .msg__actions,
   .reasoning summary,
   .reasoning__body {
     font-size: 0.90625rem;
@@ -1981,15 +1982,6 @@ button.linkish:hover {
 
   .empty-state h2 {
     font-size: 1.875rem;
-  }
-
-  /* Always visible here (never hover-revealed — there is no hover), so it
-     has to sit in normal document flow instead of floating over whatever
-     comes next: absolutely positioned and permanently on, it overlapped the
-     following message instead of pushing it down. */
-  .msg__actions {
-    position: static;
-    margin-top: 0.5rem;
   }
 }
 
@@ -2011,10 +2003,25 @@ button.linkish:hover {
    * and shows a press for 120ms. 56px headers and 65px footers already have the
    * room.
    */
-  .icon-button,
-  .msg__actions .icon-button,
+  /*
+   * The message-actions row is the exception: grown to 44px its four controls
+   * became a band as tall as a line of the message, spaced far wider apart
+   * than the row they belong to, and it read as chrome rather than as the
+   * message's own footnote. It keeps the size it has everywhere else.
+   */
+  .icon-button:not(.msg__actions .icon-button, .main__header .icon-button),
   .composer__send {
     width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  /*
+   * The header's own control is the other exception, for the same reason from
+   * the other direction: grown, it pushed the title 12px right of where the
+   * reference sets it, and the two headers stopped agreeing across the seam.
+   * The bar is 56px tall, so the target it loses is width alone.
+   */
+  .main__header .icon-button {
     height: 2.75rem;
   }
 
@@ -2293,9 +2300,12 @@ button.linkish:hover {
   gap: 0.5rem;
 }
 
-/* A user message is a right-aligned bubble; what it carried aligns with it. */
+/* A user message is a right-aligned bubble; what it carried aligns with it.
+   Inside the bubble it sits above the text rather than under it, so the margin
+   moves to the other side. */
 .msg--user .attachments {
   justify-content: flex-end;
+  margin: 0 0 0.375rem;
 }
 
 .attachment {
