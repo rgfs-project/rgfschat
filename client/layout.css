@@ -229,11 +229,13 @@ body {
   flex: none;
   display: flex;
   align-items: center;
-  /* The control and the title are two elements in one bar; the gutter is what
-     holds the bar off the edge, not what separates them. 11px against the
-     control's 32px box puts the title's first letter 58 from the edge, where
-     the reference's 12px against a 30px box puts its own. */
-  gap: 0.6875rem;
+  /*
+   * The same gutter that holds the bar off the edge also separates its two
+   * elements — which is what makes the two visible margins equal: the control
+   * carries 7px of its own on each side, so a gutter of 15 puts 22 between the
+   * edge and the glyph and the same 22 between the glyph and the title.
+   */
+  gap: var(--gutter);
   /* Grown by the status bar exactly as the sidebar's own header is, so the two
      stay one line across the seam on a notched phone as well as on a desktop. */
   padding: var(--safe-top) max(var(--gutter), var(--safe-right)) 0
