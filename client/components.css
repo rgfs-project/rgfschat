@@ -1361,6 +1361,79 @@ button.linkish:hover {
   background: var(--bg);
 }
 
+.booting__status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+}
+
+/*
+ * A turning ring.
+ *
+ * The contrast sits on one arc rather than the whole circle, because a ring of
+ * even weight rotating is indistinguishable from a ring standing still — the
+ * asymmetry is the entire reason it reads as motion. Track and arc are
+ * `--border` and `--text`, so it stays achromatic like the rest of the app and
+ * inverts correctly in the dark theme without a second rule.
+ *
+ * Linear, not eased: an easing curve makes a spinner appear to stall at the
+ * ends of each turn, which reads as the app hanging rather than working.
+ */
+.spinner {
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: none;
+  border: 2px solid var(--border);
+  border-top-color: var(--text);
+  border-radius: 999px;
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* Carried for a screen reader while the ring is doing the talking for everyone
+   else. Revealed below when the ring is not allowed to move. */
+.booting__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/*
+ * With motion suppressed the words come back and the ring goes away.
+ *
+ * `animation: none` would be the usual move, and it is wrong here: a stopped
+ * spinner is not a calmer spinner, it is a circle with one darker edge sitting
+ * on the screen looking like something that has failed. The sentence says the
+ * same thing and says it without moving.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    display: none;
+  }
+
+  .booting__label {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip-path: none;
+    color: var(--muted);
+    font-size: 0.8125rem;
+  }
+}
+
 /*
  * A boundary replaces only its own region, so it is sized to sit inside a pane
  * rather than taking over the viewport.
