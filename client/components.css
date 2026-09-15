@@ -100,8 +100,9 @@
 .empty-state h2 {
   font-size: 1.75rem;
   font-weight: 400;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   margin: 0 0 0.75rem;
+  color: var(--text);
 }
 
 .empty-state p {
@@ -1130,7 +1131,7 @@ button.linkish:hover {
   background: var(--raised);
   border: 1px solid var(--border);
   border-radius: 0.75rem;
-  box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 8%);
   animation: scale-in var(--motion-fast) var(--ease-out);
 }
 
@@ -1503,6 +1504,7 @@ button.linkish:hover {
   margin: 0 0 0.875rem;
   font-size: 1.0625rem;
   font-weight: 500;
+  color: var(--text);
 }
 
 /* The row is the unit the whole pane is built from: label and optional
@@ -1522,6 +1524,7 @@ button.linkish:hover {
 
 .panel__row-label {
   font-size: 0.8125rem;
+  color: var(--text);
 }
 
 .panel__row-desc {
@@ -1830,8 +1833,9 @@ button.linkish:hover {
 /* A subheading under the pane's own title, so it sits a step below it. */
 .sampler__title {
   margin: 0;
-  font-size: 1.0625rem;
+  font-size: 0.8125rem;
   font-weight: 500;
+  color: var(--text);
 }
 
 .sampler__note {
@@ -1872,7 +1876,7 @@ button.linkish:hover {
 
 /* Sentence case, at the size the admin rows use for their own labels. */
 .sampler__label {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   color: var(--muted);
   cursor: help;
 }
