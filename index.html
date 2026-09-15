@@ -13,10 +13,20 @@
       what lets the composer stay above the keys in CSS alone — `100dvh` simply
       becomes the smaller number — rather than by measuring `visualViewport`
       and writing positions from JavaScript on every resize.
+
+      `maximum-scale=1, user-scalable=no` holds the page at its own scale. This
+      is a real trade: it is also how a reader with low vision would have
+      enlarged the text, and they no longer can. It is here because the layout
+      is an application rather than a document — a fixed header, a composer
+      pinned to the bottom, a drawer over the side — and iOS zooms such a
+      layout on gestures that were meant for it: a two-finger scroll, a second
+      tap that lands too soon, focusing the message field. The type scale grows
+      on a phone instead (see the touch block in `components.css`), and the
+      browser's own page-zoom and text-size settings still apply.
     -->
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content"
     />
     <title>ChatUI</title>
 

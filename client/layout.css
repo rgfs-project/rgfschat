@@ -31,6 +31,28 @@ body,
 html,
 body {
   overflow: hidden;
+
+  /*
+   * Panning, and nothing else.
+   *
+   * `pan-x pan-y` rather than `none`: the document itself never scrolls, but
+   * everything inside it does, and touch-action is resolved up the tree — the
+   * nearest ancestor that forbids a gesture forbids it for every descendant,
+   * which no `touch-action: auto` further down can hand back. `none` here
+   * would have frozen the transcript, the conversation list, every code block
+   * and the panel rail's own sideways strip along with the page.
+   *
+   * What it does suppress is pinch and double-tap zoom, and with them the
+   * gestures iOS reads out of an ordinary two-finger scroll or a quick second
+   * tap on a message — an app that answers a tap by zooming into it does not
+   * read as an application.
+   */
+  touch-action: pan-x pan-y;
+
+  /* Landscape on iOS otherwise reflows body copy a size larger on its own,
+     which moves every line of a conversation for a rotation. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 /*

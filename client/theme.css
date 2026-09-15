@@ -337,10 +337,25 @@ body {
 
 .msg__body,
 input,
-textarea {
+textarea,
+[contenteditable='true'] {
   -webkit-touch-callout: default;
   -webkit-user-select: text;
   user-select: text;
+}
+
+/*
+ * No tap flash.
+ *
+ * iOS paints a grey rectangle over whatever was tapped, drawn to the element's
+ * box and ignoring its rounding — so a round control flashed square, and a row
+ * flashed a shade that belongs to no palette here. Every control already
+ * answers a press with its own fill or scale.
+ */
+button,
+a,
+[role='button'] {
+  -webkit-tap-highlight-color: transparent;
 }
 
 button:focus-visible,
