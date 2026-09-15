@@ -35,6 +35,8 @@
   --text-soft: #333333;
   --muted: #737373;
   --faint: #a3a3a3;
+  --hover: #ececec;
+  --active: #e0e0e0;
   --focus: #b5b5b5;
   --danger: #9a3f36;
   --danger-bg: #f9eeec;
@@ -152,6 +154,8 @@
   --text-soft: #d8d8d8;
   --muted: #9a9a9a;
   --faint: #6b6b6b;
+  --hover: #1a1a1a;
+  --active: #262626;
   --focus: #4a4a4a;
   --danger: #e0837c;
   --danger-bg: #170d0c;
