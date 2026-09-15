@@ -343,8 +343,16 @@ select:focus-visible,
     transform var(--motion-fast) var(--ease-out);
 }
 
+/*
+ * Colour, not a fill.
+ *
+ * A filled hover puts a box behind a glyph that is mostly holes, and at these
+ * sizes the box is the thing that registers rather than the icon inside it —
+ * most of them sit on a surface that is already a panel or an already-filled
+ * row, so what appeared was a darker patch rather than a lit control. Going
+ * from muted to full text colour says the same thing without drawing anything.
+ */
 .icon-button:hover:not(:disabled) {
-  background: var(--surface-2);
   color: var(--text);
 }
 

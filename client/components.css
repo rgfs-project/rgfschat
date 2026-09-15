@@ -89,6 +89,23 @@
   opacity: 1;
 }
 
+/*
+ * 15px glyph in 4px of padding, as in the message-actions row, and starting
+ * from --faint: it is the quietest thing in a row whose title is what is meant
+ * to be read.
+ */
+.conversation__actions .icon-button {
+  width: 1.4375rem;
+  height: 1.4375rem;
+  padding: 0;
+  border-radius: 0.25rem;
+  color: var(--faint);
+}
+
+.conversation__actions .icon-button svg {
+  flex: none;
+}
+
 /* --- transcript ---------------------------------------------------------- */
 
 /* Centred in the transcript, vertically and horizontally. */
@@ -221,13 +238,6 @@
 
 .msg__actions .icon-button svg {
   flex: none;
-}
-
-/* Colour only, never a fill: these sit right under the text they belong to,
-   and a hover background there reads as highlighting the message itself. */
-.msg__actions .icon-button:hover:not(:disabled) {
-  background: none;
-  color: var(--text);
 }
 
 /* When it was sent, read at a glance rather than by opening the file — the
@@ -1172,6 +1182,8 @@ button.linkish:hover {
   transition: transform var(--motion-fast) var(--ease-out);
 }
 
+/* Down at rest and up once the menu is open — it points at where the menu
+   will be, then at the row it came from. */
 .account__chevron.is-open {
   transform: rotate(180deg);
 }

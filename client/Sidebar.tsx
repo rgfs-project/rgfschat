@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import {
-  ChevronUp,
+  ChevronDown,
   Code2,
   Download,
   LogOut,
@@ -307,7 +307,7 @@ function ConversationMenu({
         title="More"
         onClick={() => setOpen((current) => !current)}
       >
-        <MoreHorizontal size={16} />
+        <MoreHorizontal size={15} />
       </button>
 
       {open && triggerRef.current !== null && (
@@ -359,7 +359,7 @@ function AccountMenu({
       >
         <span className="avatar">{user.username.slice(0, 1).toUpperCase()}</span>
         <span className="sidebar__username">{user.username}</span>
-        <ChevronUp size={16} className={`account__chevron${open ? ' is-open' : ''}`} />
+        <ChevronDown size={15} className={`account__chevron${open ? ' is-open' : ''}`} />
       </button>
 
       {open && triggerRef.current !== null && (
