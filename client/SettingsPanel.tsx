@@ -26,6 +26,7 @@ import { Dialog } from './Dialog.tsx';
 import { ModelSelect, type ModelChoice } from './ModelSelect.tsx';
 import { Select } from './Select.tsx';
 import { keys, useModels, useMyMemories, useMyPreferences } from './queries.ts';
+import { Spinner } from './Spinner.tsx';
 
 /**
  * A reader's own settings.
@@ -386,7 +387,7 @@ function Memory(): React.JSX.Element {
           {error}
         </p>
       )}
-      {memories.isPending && <p className="muted">Loading…</p>}
+      {memories.isPending && <Spinner small label="Loading memories…" />}
 
       <ul className="memories">
         {list.map((memory) => (

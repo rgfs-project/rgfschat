@@ -21,6 +21,7 @@ import { Menu } from './Menu.tsx';
 import { useFocusTrap } from './useFocusTrap.ts';
 import type { UserDto } from '@shared/auth';
 import type { ConversationSummary } from './api.ts';
+import { Spinner } from './Spinner.tsx';
 
 /**
  * Conversation navigation.
@@ -188,7 +189,11 @@ export function Sidebar({
       </div>
 
       <nav className="sidebar__list" aria-label="Conversations">
-        {loading && conversations.length === 0 && <p className="sidebar__empty muted">Loading…</p>}
+        {loading && conversations.length === 0 && (
+          <p className="sidebar__empty">
+            <Spinner small label="Loading conversations…" />
+          </p>
+        )}
         {!loading && conversations.length === 0 && (
           <p className="sidebar__empty muted">No conversations yet.</p>
         )}

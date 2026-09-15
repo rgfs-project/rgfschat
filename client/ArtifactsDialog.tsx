@@ -4,6 +4,7 @@ import { Code2, FileText, Image, Table2, Trash2, X } from 'lucide-react';
 import { ARTIFACT_LANGUAGE, type ArtifactDto, type ArtifactMediaType } from '@shared/artifact';
 import { useArtifacts, useDeleteArtifact } from './queries.ts';
 import { relativeTime } from './relativeTime.ts';
+import { Spinner } from './Spinner.tsx';
 
 /**
  * Everything this reader has made, in one list.
@@ -98,7 +99,11 @@ export function ArtifactsDialog({ onOpen, onClose }: ArtifactsDialogProps): Reac
         </div>
 
         <div className="palette__list" ref={listRef}>
-          {artifacts.isPending && <p className="palette__empty muted">Loading…</p>}
+          {artifacts.isPending && (
+            <p className="palette__empty">
+              <Spinner small label="Loading artifacts…" />
+            </p>
+          )}
           {artifacts.isError && (
             <p className="palette__empty muted">Your artifacts could not be loaded.</p>
           )}

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { FileText, ImageOff } from 'lucide-react';
 import { formatSize } from '@shared/attachment';
 import { ApiError, attachmentContentUrl, getAttachment } from './api.ts';
+import { Spinner } from './Spinner.tsx';
 
 /**
  * What a message carried, shown under it.
@@ -45,7 +46,11 @@ function AttachmentItem({ id }: { id: string }): React.JSX.Element {
   });
 
   if (attachment.isPending) {
-    return <li className="attachment attachment--loading muted">Loading…</li>;
+    return (
+      <li className="attachment attachment--loading">
+        <Spinner small label="Loading attachment…" />
+      </li>
+    );
   }
 
   if (attachment.isError || attachment.data === undefined) {

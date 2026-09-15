@@ -3,6 +3,7 @@ import { Check, Copy, Download, X } from 'lucide-react';
 import { ARTIFACT_LANGUAGE, type ArtifactDto } from '@shared/artifact';
 import { useArtifactSource } from './queries.ts';
 import { useCopy } from './useCopy.ts';
+import { Spinner } from './Spinner.tsx';
 
 /**
  * One artifact, open beside the conversation.
@@ -103,7 +104,7 @@ export function ArtifactPanel({ artifact, onClose }: ArtifactPanelProps): React.
       )}
 
       <div className="artifact-panel__body">
-        {source.isPending && <p className="muted">Loading…</p>}
+        {source.isPending && <Spinner small label="Loading this file…" />}
         {source.isError && (
           <p className="muted">That artifact could not be read. It may have been deleted.</p>
         )}

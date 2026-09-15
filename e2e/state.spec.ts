@@ -57,7 +57,10 @@ test('a slow cold load shows no signed-in or signed-out flash', async ({ app, pa
   await page.goto(app.baseUrl);
 
   // Mid-flight: neither the login form nor the application chrome.
-  await expect(page.getByText('Loading…')).toBeVisible();
+  // The status role rather than its text: the word behind the spinner is there
+  // for a screen reader and is clipped to a pixel, so asserting on it would
+  // pass whether or not anything was actually drawn.
+  await expect(page.getByRole('status')).toBeVisible();
   await expect(page.getByRole('button', { name: 'New chat' })).toBeHidden();
   await expect(page.getByRole('button', { name: /^Sign in$/ })).toBeHidden();
 

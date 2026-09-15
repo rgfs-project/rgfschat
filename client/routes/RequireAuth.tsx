@@ -1,4 +1,5 @@
 import { Navigate, Outlet, useLocation } from 'react-router';
+import { Spinner } from '../Spinner.tsx';
 import { paths } from './paths.ts';
 import { useAppSession } from './session.ts';
 
@@ -23,17 +24,7 @@ export function RequireAuth(): React.JSX.Element {
   if (authState === 'unknown') {
     return (
       <main className="booting">
-        {/*
-         * `role="status"` rather than a bare graphic: a screen reader is told
-         * the app is working, and the word is what it reads out. The ring is
-         * `aria-hidden` because it says the same thing a second time, and the
-         * label is hidden visually rather than dropped — a spinner with no
-         * accessible name is a spinner that announces nothing at all.
-         */}
-        <p className="booting__status" role="status">
-          <span className="spinner" aria-hidden="true" />
-          <span className="booting__label">Loading…</span>
-        </p>
+        <Spinner />
       </main>
     );
   }

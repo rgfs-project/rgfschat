@@ -1361,11 +1361,12 @@ button.linkish:hover {
   background: var(--bg);
 }
 
-.booting__status {
-  display: flex;
+/* The ring and its label as one inline unit, so it drops into a list row, a
+   chip, or the middle of an empty page without a wrapper per site. */
+.spinner-row {
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  margin: 0;
+  gap: 0.5rem;
 }
 
 /*
@@ -1390,6 +1391,15 @@ button.linkish:hover {
   animation: spin 700ms linear infinite;
 }
 
+/* In a line of text rather than alone on a page: the border thins with the
+   ring, since 2px on a 14px circle closes most of the hole and stops it
+   reading as a ring at all. */
+.spinner--small {
+  width: 0.875rem;
+  height: 0.875rem;
+  border-width: 1.5px;
+}
+
 @keyframes spin {
   to {
     transform: rotate(1turn);
@@ -1398,7 +1408,7 @@ button.linkish:hover {
 
 /* Carried for a screen reader while the ring is doing the talking for everyone
    else. Revealed below when the ring is not allowed to move. */
-.booting__label {
+.spinner__label {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -1422,7 +1432,9 @@ button.linkish:hover {
     display: none;
   }
 
-  .booting__label {
+  /* Size is inherited rather than stated: this stands in for the ring wherever
+     it was, and a fixed size would be wrong in four of the five places. */
+  .spinner__label {
     position: static;
     width: auto;
     height: auto;
@@ -1430,7 +1442,6 @@ button.linkish:hover {
     overflow: visible;
     clip-path: none;
     color: var(--muted);
-    font-size: 0.8125rem;
   }
 }
 
