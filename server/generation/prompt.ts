@@ -290,6 +290,9 @@ export function assemblePrompt(
  * because of it would be a worse outcome than one that continues without it
  * (contracts §7).
  */
+/** What an attachment-only turn says to the provider, and nowhere else. */
+export const PROMPT_FOR_MEDIA_ONLY = 'Please look at the attached file.';
+
 function userMessage(
   body: string,
   ids: readonly string[],
@@ -320,8 +323,17 @@ function userMessage(
 
   if (media.length === 0) return { message: { role: 'user', content: text }, imageCosts: [] };
 
+  /*
+   * A neutral part when the reader wrote nothing.
+   *
+   * An attachment-only turn has an empty body, and several OpenAI-compatible
+   * servers reject a text part that is empty — or, worse, accept it and answer
+   * as though nothing was asked. This says what the turn means, in the request
+   * only: it is never persisted and never shown, so the transcript still holds
+   * exactly what the reader sent, which is the picture and no words.
+   */
   const parts: ContentPart[] = [
-    { type: 'text', text },
+    { type: 'text', text: text === '' ? PROMPT_FOR_MEDIA_ONLY : text },
     ...media.map((attachment): ContentPart =>
       attachment.kind === 'image'
         ? { type: 'image_url', image_url: { url: attachment.content } }

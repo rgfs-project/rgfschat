@@ -1,3 +1,4 @@
+import { hasSendableContent } from '@shared/conversation';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, Plus, Square } from 'lucide-react';
 import type { ProviderModelGroup } from './api.ts';
@@ -198,7 +199,7 @@ export function Composer({
               // Something must be said or attached, and nothing may still be
               // uploading — sending mid-upload would send a message referring
               // to a file the server has not finished receiving.
-              (value.trim() === '' && (attachments?.readyIds.length ?? 0) === 0) ||
+              !hasSendableContent(value, attachments?.readyIds ?? []) ||
               (attachments?.busy ?? false)
             }
             aria-label="Send message"

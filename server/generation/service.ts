@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { deriveTitle, DEFAULT_TITLE, type AssistantMessage } from '@shared/conversation.ts';
+import {
+  deriveTitle,
+  DEFAULT_TITLE,
+  hasSendableContent,
+  type AssistantMessage,
+} from '@shared/conversation.ts';
 import type {
   ChatMessage,
   GenerationState,
@@ -263,6 +268,18 @@ export class GenerationService {
     timeZone?: string
   ): Promise<StartResult> {
     const key = conversationKey(userId, conversationId);
+
+    /*
+     * Repeated here, inside the service boundary.
+     *
+     * The route's schema already refuses this, and so does the composer — but
+     * this method is the thing that writes a message, and a turn with neither
+     * text nor an attachment is not a message. Checked before the model is
+     * resolved so an empty send costs nothing.
+     */
+    if (!hasSendableContent(content, attachmentIds)) {
+      throw AppError.validation('A message must have text or at least one attachment.');
+    }
 
     // The pair is validated against the server-side catalog before anything is
     // minted or persisted (INV-18). A model valid on another provider is not
@@ -663,13 +680,25 @@ export class GenerationService {
         // *first* user message, not the one just sent — if an earlier
         // generation failed, the title still belongs to the question that
         // opened the conversation.
-        const firstUserMessage = current.messages.find((message) => message.type === 'user');
+        /*
+         * Titled from what the reader actually wrote.
+         *
+         * A message can now be an attachment and nothing else, and its body is
+         * genuinely empty — there is no placeholder text to fall back on and
+         * inventing one would put words in the reader's mouth. `deriveTitle`
+         * answers `New conversation` for an empty string, which is the honest
+         * outcome: the conversation keeps its default name until a turn with
+         * words in it arrives.
+         */
+        const firstWritten = current.messages.find(
+          (message) => message.type === 'user' && message.body.trim() !== ''
+        );
         const title =
           context.hadDefaultTitle &&
           final.state === 'completed' &&
           current.title === DEFAULT_TITLE &&
-          firstUserMessage !== undefined
-            ? deriveTitle(firstUserMessage.body)
+          firstWritten !== undefined
+            ? deriveTitle(firstWritten.body)
             : current.title;
 
         const written = await this.#store.writeUnderLock(userId, conversationId, {

@@ -2601,6 +2601,13 @@ button.linkish:hover {
   margin: 0 0 0.375rem;
 }
 
+/* An attachment sent with nothing typed beside it is the whole message, so the
+   gap that separates it from the text below would be a gap against the bottom
+   of the bubble. */
+.msg--user .attachments:last-child {
+  margin-bottom: 0;
+}
+
 .attachment {
   display: flex;
   align-items: center;

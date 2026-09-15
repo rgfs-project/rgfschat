@@ -1,7 +1,7 @@
 import { Router, type Request } from 'express';
 import { z } from 'zod';
 import type { GenerationAcceptedDto, GenerationEvent } from '@shared/generation.ts';
-import { isCanonicalUuid } from '@shared/conversation.ts';
+import { hasSendableContent, isCanonicalUuid } from '@shared/conversation.ts';
 import { AppError } from '../errors/AppError.ts';
 import { MAX_ATTACHMENTS_PER_MESSAGE } from '@shared/attachment.ts';
 import type { GenerationManager } from '../generation/manager.ts';
@@ -17,29 +17,50 @@ const SSE_HEARTBEAT_MS = 10_000;
 // history from canonical storage (contracts §4).
 // A model is identified by the pair (providerId, modelId); ids are opaque and
 // never parsed, and the pair is validated server-side (INV-18).
-const createGenerationSchema = z.strictObject({
-  conversationId: z.string().min(1).max(200),
-  /**
-   * Ids of attachments already uploaded and not yet part of any message.
+const createGenerationSchema = z
+  .strictObject({
+    conversationId: z.string().min(1).max(200),
+    /**
+     * Ids of attachments already uploaded and not yet part of any message.
+     *
+     * The format allows at most ten (contracts §3.4) and is frozen, so this is
+     * the ceiling rather than a policy — a message with eleven could not be
+     * written down.
+     */
+    attachmentIds: z.array(z.string().min(1).max(200)).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(),
+    providerId: z.string().min(1).max(64),
+    model: z.string().min(1).max(200),
+    /**
+     * What the reader typed, which may be nothing at all.
+     *
+     * Empty is allowed only alongside an attachment — see the refinement below.
+     * A picture is a message, and requiring a word beside it meant typing
+     * something meaningless that was then shown under the image and used as the
+     * conversation's title.
+     */
+    content: z.string().max(200_000),
+    /**
+     * The reader's IANA zone, for the clock placeholders in a system prompt.
+     *
+     * Optional: an older client does not send one, and a generation is not worth
+     * refusing over a cosmetic detail. Bounded and re-checked against `Intl`
+     * downstream — this is a browser-supplied string, so the length cap here is
+     * the first bound and not the only one.
+     */
+    timeZone: z.string().min(1).max(64).optional(),
+  })
+  /*
+   * The one rule the composer enables Send on, enforced here as well.
    *
-   * The format allows at most ten (contracts §3.4) and is frozen, so this is
-   * the ceiling rather than a policy — a message with eleven could not be
-   * written down.
+   * At the schema boundary rather than inside the handler so a request that
+   * carries neither is refused before anything is resolved or written, and so
+   * the refusal is the canonical validation error rather than something the
+   * service invents further in.
    */
-  attachmentIds: z.array(z.string().min(1).max(200)).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(),
-  providerId: z.string().min(1).max(64),
-  model: z.string().min(1).max(200),
-  content: z.string().min(1).max(200_000),
-  /**
-   * The reader's IANA zone, for the clock placeholders in a system prompt.
-   *
-   * Optional: an older client does not send one, and a generation is not worth
-   * refusing over a cosmetic detail. Bounded and re-checked against `Intl`
-   * downstream — this is a browser-supplied string, so the length cap here is
-   * the first bound and not the only one.
-   */
-  timeZone: z.string().min(1).max(64).optional(),
-});
+  .refine((body) => hasSendableContent(body.content, body.attachmentIds ?? []), {
+    message: 'A message must have text or at least one attachment.',
+    path: ['content'],
+  });
 
 /** Re-runs the last turn; no new user message is added. */
 const regenerateSchema = z.strictObject({

@@ -125,6 +125,23 @@ export function isValidTitle(value: string): boolean {
  * Derives a title from the first user message: truncated to 60 characters at a
  * word boundary (contracts §3.3).
  */
+/**
+ * Whether a turn has anything in it at all.
+ *
+ * The one rule, in one place, because it is checked twice: the composer decides
+ * whether Send does anything, and the route decides whether to believe the
+ * request. Two spellings of it is how a Send button came to be enabled for a
+ * message the server would refuse — and how an attachment with nothing typed
+ * beside it did nothing at all when clicked.
+ *
+ * A picture is a message. Requiring words beside it meant typing something
+ * meaningless, which was then shown under the image and used as the
+ * conversation's title.
+ */
+export function hasSendableContent(content: string, attachmentIds: readonly unknown[]): boolean {
+  return content.trim() !== '' || attachmentIds.length > 0;
+}
+
 export function deriveTitle(firstUserMessage: string): string {
   const collapsed = firstUserMessage.replace(/\s+/g, ' ').trim();
   if (collapsed === '') return DEFAULT_TITLE;

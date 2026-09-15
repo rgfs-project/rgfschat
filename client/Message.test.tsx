@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -38,8 +39,11 @@ function renderMessage(message: MessageModel, props: Partial<Parameters<typeof M
     onDelete: vi.fn(),
     onRegenerate: vi.fn(),
   };
+  /* Attachments are fetched by id, so a message carrying one needs a client. */
   const view = render(
-    <Message message={message} isLast busy={false} canResend={false} {...handlers} {...props} />
+    <QueryClientProvider client={new QueryClient()}>
+      <Message message={message} isLast busy={false} canResend={false} {...handlers} {...props} />
+    </QueryClientProvider>
   );
   return { ...handlers, view };
 }
@@ -209,6 +213,55 @@ function cleanupAndRender(message: MessageModel, isLast: boolean): void {
     />
   );
 }
+
+/**
+ * A turn can be an attachment and nothing else.
+ *
+ * The bubble then holds only what was attached. Rendering the body anyway
+ * leaves an empty paragraph under the picture, which reads as a caption that
+ * failed to load — and the fix for the send path deliberately stores no
+ * placeholder text to fill it with.
+ */
+describe('a user message with no text', () => {
+  it('renders no body element at all', () => {
+    const { view } = renderMessage(
+      userMessage({ body: '', attachments: ['11111111-1111-4111-8111-111111111111'] })
+    );
+
+    expect(view.container.querySelector('.msg__bubble')).not.toBeNull();
+    expect(view.container.querySelector('.msg__bubble .msg__body')).toBeNull();
+  });
+
+  it('renders no body for whitespace either', () => {
+    const { view } = renderMessage(
+      userMessage({ body: '   \n ', attachments: ['11111111-1111-4111-8111-111111111111'] })
+    );
+
+    expect(view.container.querySelector('.msg__bubble .msg__body')).toBeNull();
+  });
+
+  it('shows no placeholder caption in place of the missing text', () => {
+    const { view } = renderMessage(
+      userMessage({ body: '', attachments: ['11111111-1111-4111-8111-111111111111'] })
+    );
+
+    // Nothing invented stands in for the words the reader did not write. The
+    // bubble holds the attachment list and nothing else.
+    expect(screen.queryByText(/\[image\]/i)).toBeNull();
+    const bubble = view.container.querySelector('.msg__bubble');
+    expect(bubble?.children).toHaveLength(1);
+    expect(bubble?.firstElementChild?.classList.contains('attachments')).toBe(true);
+  });
+
+  it('still renders the body when there is one', () => {
+    const { view } = renderMessage(
+      userMessage({ body: 'what is this?', attachments: ['11111111-1111-4111-8111-111111111111'] })
+    );
+
+    expect(view.container.querySelector('.msg__bubble .msg__body')).not.toBeNull();
+    expect(screen.getByText('what is this?')).toBeTruthy();
+  });
+});
 
 describe('StreamingMessage', () => {
   it('shows a waiting indicator before the first token', () => {

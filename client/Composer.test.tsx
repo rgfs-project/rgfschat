@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import type { AttachmentTray } from './useAttachments.ts';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { Composer, type ComposerProps } from './Composer.tsx';
@@ -156,5 +157,78 @@ describe('Composer', () => {
   it('names the target model in the placeholder', () => {
     const { textarea } = setup();
     expect(textarea.getAttribute('placeholder')).toBe('Message model-a');
+  });
+});
+
+/**
+ * A picture is a message.
+ *
+ * Send is enabled by "text *or* an attachment" — it always was, which is how a
+ * reader came to click an enabled button that did nothing: everything behind it
+ * required text. These pin the button's half of the rule to the same predicate
+ * the route and the service now use.
+ */
+describe('sending an attachment with nothing typed', () => {
+  const tray = (overrides: Partial<AttachmentTray> = {}): AttachmentTray => ({
+    items: [],
+    readyIds: [],
+    busy: false,
+    add: vi.fn(),
+    remove: vi.fn(),
+    clear: vi.fn(),
+    remaining: 10,
+    ...overrides,
+  });
+
+  it('enables send for a ready attachment and no text', () => {
+    setup({ value: '', attachments: tray({ readyIds: ['a-1'] }) });
+
+    expect(sendButton().disabled).toBe(false);
+  });
+
+  it('enables send for whitespace and a ready attachment', () => {
+    setup({ value: '   \n ', attachments: tray({ readyIds: ['a-1'] }) });
+
+    expect(sendButton().disabled).toBe(false);
+  });
+
+  it('keeps send disabled while the upload is still going', () => {
+    setup({
+      value: '',
+      attachments: tray({
+        readyIds: [],
+        busy: true,
+        items: [
+          { status: 'uploading', localId: 'l-1', filename: 'a.png', size: 10, progress: 0.5 },
+        ],
+      }),
+    });
+
+    expect(sendButton().disabled).toBe(true);
+  });
+
+  /* A failed upload contributes no id, so there is nothing to send. */
+  it('keeps send disabled when the only attachment failed', () => {
+    setup({
+      value: '',
+      attachments: tray({
+        readyIds: [],
+        items: [{ status: 'error', localId: 'l-1', filename: 'a.png', message: 'too big' }],
+      }),
+    });
+
+    expect(sendButton().disabled).toBe(true);
+  });
+
+  it('keeps send disabled while a second upload is in flight, text or not', () => {
+    setup({ value: 'what is this?', attachments: tray({ readyIds: ['a-1'], busy: true }) });
+
+    expect(sendButton().disabled).toBe(true);
+  });
+
+  it('still refuses an empty message with nothing attached', () => {
+    setup({ value: '  ', attachments: tray() });
+
+    expect(sendButton().disabled).toBe(true);
   });
 });

@@ -146,9 +146,14 @@ export function Message({
       {message.type === 'user' ? (
         <div className="msg__bubble">
           <MessageAttachments ids={message.attachments ?? []} />
-          <div className="msg__body">
-            <Markdown>{message.body}</Markdown>
-          </div>
+          {/* A turn can be an attachment and nothing else. Rendering the body
+              anyway leaves an empty paragraph under the picture, which reads as
+              a caption that failed to load. */}
+          {message.body.trim() !== '' && (
+            <div className="msg__body">
+              <Markdown>{message.body}</Markdown>
+            </div>
+          )}
         </div>
       ) : (
         <div className="msg__body">

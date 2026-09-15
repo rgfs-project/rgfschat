@@ -11,6 +11,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, PanelLeft } from 'lucide-react';
 import type { ArtifactDto } from '@shared/artifact';
 import type { UserDto } from '@shared/auth';
+import { hasSendableContent } from '@shared/conversation';
 import { ApiError, cancelGeneration, downloadConversation, type MemoryProposalDto } from './api.ts';
 import { ArtifactPanel } from './ArtifactPanel.tsx';
 import { ArtifactsDialog } from './ArtifactsDialog.tsx';
@@ -631,7 +632,16 @@ export function App({
 
   const send = useCallback(async () => {
     const text = draft.trim();
-    if (text === '' || selection === null || busy) return;
+    /*
+     * A message is what was typed or what was attached, and either is enough.
+     *
+     * The composer has enabled Send on exactly this condition since attachments
+     * existed; this guard still required text, so clicking it with an image and
+     * nothing typed returned here and did nothing at all. The reader's only way
+     * through was to type something meaningless, which then appeared under the
+     * image and became the conversation's title.
+     */
+    if (!hasSendableContent(text, attachments.readyIds) || selection === null || busy) return;
 
     setError(null);
     onDraftChange('');
