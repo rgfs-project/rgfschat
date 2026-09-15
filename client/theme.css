@@ -317,33 +317,25 @@ button:disabled {
 }
 
 /*
- * Chrome is not text.
+ * The conversation is the only text there is.
  *
- * A stray drag across the window, a select-all, or a long press on a phone
- * highlighted the entire application — nav labels, section headings, the
- * wordmark, timestamps, even the glyphs inside buttons — none of which anyone
- * wants on the clipboard. The callout is suppressed with it: on iOS a press
- * and hold on a control raised the system's own Copy / Look Up menu over the
- * thing being pressed.
+ * Everything else is furniture — nav labels, section headings, the wordmark,
+ * timestamps, the glyphs inside buttons — and none of it is anything anyone
+ * wants on the clipboard. A stray drag across the window, a select-all, or a
+ * long press on a phone used to highlight all of it. The callout goes with it:
+ * on iOS a press and hold on a control raised the system's own Copy / Look Up
+ * menu over the control being pressed.
  *
- * Stated as the regions that are furniture rather than as a blanket rule on
- * the root, so everything not listed stays selectable: an answer, a code
- * block, a path or an id in the admin panel, an error message worth pasting
- * into a search.
+ * So: off everywhere, back on for the two things it is actually for — what was
+ * said, and what is being typed.
  */
-button,
-label,
-summary,
-.sidebar,
-.main__header,
-.msg__actions {
+body {
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
 }
 
-/* The exceptions inside those regions: a field is for typing into, and what is
-   typed can be selected. */
+.msg__body,
 input,
 textarea {
   -webkit-touch-callout: default;
