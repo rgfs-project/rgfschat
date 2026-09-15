@@ -45,6 +45,10 @@ export interface ScrollPin {
   showJumpToLatest: boolean;
   /** Scrolls to the bottom and re-pins. Safe to call from a click handler. */
   jumpToLatest: () => void;
+  /** Follows the end again from here on, and goes there now. */
+  pin: () => void;
+  /** Stops following the end, leaving the view exactly where it is. */
+  release: () => void;
   /** Call whenever rendered content changes (new token, new message). */
   onContentChange: () => void;
 }
@@ -211,6 +215,29 @@ export function useScrollPin(): ScrollPin {
     if (pinnedRef.current) scrollToBottom(element, false);
   }, [scrollToBottom]);
 
+  /*
+   * Let go of the end without moving.
+   *
+   * Used when an answer has outgrown the room reserved for it: up to that
+   * point following the bottom is what holds the question at the top of the
+   * screen, and past it the same following would drag the reader down the page
+   * a line at a time while they are still reading the top of the answer. The
+   * jump control appears in the same moment, which is the way back down.
+   */
+  const release = useCallback((): void => {
+    pinnedRef.current = false;
+    setPinned(false);
+  }, []);
+
+  /** Asking a question means wanting to see it, wherever the view had got to. */
+  const pin = useCallback((): void => {
+    const element = ref.current;
+    pinnedRef.current = true;
+    setPinned(true);
+    programmaticTop.current = null;
+    if (element !== null) scrollToBottom(element, false);
+  }, [scrollToBottom]);
+
   const jumpToLatest = useCallback((): void => {
     const element = ref.current;
     if (element === null) return;
@@ -226,6 +253,8 @@ export function useScrollPin(): ScrollPin {
     pinned,
     showJumpToLatest: !pinned,
     jumpToLatest,
+    pin,
+    release,
     onContentChange,
   };
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronRight, Copy, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import type { Message as MessageModel, MessageStatus } from '@shared/conversation.ts';
 import { artifactId, extractCodeBlocks } from '@shared/artifact.ts';
@@ -233,6 +233,9 @@ export function Message({
   );
 }
 
+/** How close to the bottom of the reasoning box still counts as following it. */
+const REASONING_PIN_PX = 32;
+
 /** The assistant turn currently streaming, before it becomes a stored message. */
 export function StreamingMessage({
   content,
@@ -243,6 +246,31 @@ export function StreamingMessage({
   reasoning: string;
   state: string;
 }): React.JSX.Element {
+  const reasoningRef = useRef<HTMLDivElement | null>(null);
+
+  /*
+   * The thinking scrolls itself.
+   *
+   * The box is a fixed height with its own scrollbar, so without this the
+   * working-out piles up below the fold and the visible part is whatever the
+   * model thought first — the least interesting end of it. The transcript
+   * itself deliberately holds still during a reply, which makes this the only
+   * thing that moves.
+   *
+   * Only while it is already at the bottom: scrolling up to reread a step is a
+   * thing to do while the rest is still arriving, and being yanked back down on
+   * the next token would make it impossible.
+   */
+  useLayoutEffect(() => {
+    const box = reasoningRef.current;
+    if (box === null) return;
+
+    const distance = box.scrollHeight - box.scrollTop - box.clientHeight;
+    if (distance > REASONING_PIN_PX) return;
+
+    box.scrollTop = box.scrollHeight;
+  }, [reasoning]);
+
   return (
     <article className="msg msg--assistant msg--streaming">
       {reasoning !== '' && (
@@ -251,7 +279,9 @@ export function StreamingMessage({
             <ChevronRight size={14} className="reasoning__chevron" />
             Reasoning
           </summary>
-          <div className="reasoning__body">{reasoning}</div>
+          <div className="reasoning__body" ref={reasoningRef}>
+            {reasoning}
+          </div>
         </details>
       )}
 

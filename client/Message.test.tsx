@@ -225,4 +225,46 @@ describe('StreamingMessage', () => {
     );
     expect(container.querySelector('strong')?.textContent).toBe('bold');
   });
+
+  /*
+   * The reasoning box is a fixed height with its own scrollbar, and the
+   * transcript behind it deliberately holds still while a reply arrives — so
+   * the box following its own newest line is the only thing that keeps the
+   * working-out visible. jsdom lays nothing out, so the geometry is stated.
+   */
+  describe('the reasoning box follows its own newest line', () => {
+    const box = (container: HTMLElement): HTMLElement =>
+      container.querySelector('.reasoning__body') as HTMLElement;
+
+    const measure = (element: HTMLElement, scrollHeight: number, clientHeight: number): void => {
+      Object.defineProperty(element, 'scrollHeight', { value: scrollHeight, configurable: true });
+      Object.defineProperty(element, 'clientHeight', { value: clientHeight, configurable: true });
+    };
+
+    it('scrolls to the newest text when it was already at the bottom', () => {
+      const { container, rerender } = render(
+        <StreamingMessage content="" reasoning="first" state="streaming" />
+      );
+
+      measure(box(container), 400, 288);
+      box(container).scrollTop = 112; // exactly at the bottom
+
+      rerender(<StreamingMessage content="" reasoning="first second" state="streaming" />);
+
+      expect(box(container).scrollTop).toBe(400);
+    });
+
+    it('leaves it alone when it has been scrolled up to reread', () => {
+      const { container, rerender } = render(
+        <StreamingMessage content="" reasoning="first" state="streaming" />
+      );
+
+      measure(box(container), 400, 288);
+      box(container).scrollTop = 0; // reading the beginning again
+
+      rerender(<StreamingMessage content="" reasoning="first second" state="streaming" />);
+
+      expect(box(container).scrollTop).toBe(0);
+    });
+  });
 });

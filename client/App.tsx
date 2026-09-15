@@ -340,6 +340,21 @@ export function App({
   }, [messages, live.content, live.reasoning, tailSpace, onContentChange]);
 
   /*
+   * The answer has filled the room held for it, so the view stops moving.
+   *
+   * While the reserve lasts, following the bottom is exactly what holds the
+   * question at the top of the screen. Once it is gone the two part company,
+   * and following would scroll the reader down a line at a time while they are
+   * still reading the top of the answer — so the rest of it arrives below the
+   * fold, and reading on is a scroll they make themselves. The jump control
+   * appears in the same moment as the way back down.
+   */
+  const { release } = scroll;
+  useEffect(() => {
+    if (busy && tailSpace === 0) release();
+  }, [busy, tailSpace, release]);
+
+  /*
    * A generation the server already has running is adopted from the
    * conversation itself, so a reload — or a different tab — resumes it without
    * relying on this client having remembered anything.
@@ -475,6 +490,9 @@ export function App({
 
     setError(null);
     onDraftChange('');
+    // Wherever the transcript had got to, the question being asked is the thing
+    // to look at — and the reserve under it is what puts it at the top.
+    scroll.pin();
 
     /*
      * Typing is the act of starting a conversation, so one is created on the
@@ -527,6 +545,7 @@ export function App({
     sendMessage,
     onDraftChange,
     onConversationCreated,
+    scroll,
     attachments,
   ]);
 
