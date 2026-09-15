@@ -1620,6 +1620,26 @@ button.linkish:hover {
   border-color: var(--text);
 }
 
+/*
+ * No ring on either of these — they carry their own.
+ *
+ * A control that already draws a border takes a second grey rectangle badly:
+ * closing the menu hands focus back to the trigger, so the ring arrived on
+ * every selection and sat there afterwards. Focus is shown the way hovering is
+ * instead, which these two already have a language for: the select brightens
+ * its border, the model trigger fills.
+ */
+.select:focus-visible {
+  outline: none;
+  border-color: var(--text);
+}
+
+.model-trigger:focus-visible {
+  outline: none;
+  background: var(--hover);
+  color: var(--text);
+}
+
 .select__value {
   overflow: hidden;
   text-overflow: ellipsis;

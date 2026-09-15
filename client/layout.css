@@ -140,9 +140,19 @@ body {
    * and bottom rule have to reach the top edge or there is a strip of page
    * showing through above them.
    */
-  padding: var(--safe-top) 0.5rem 0 max(0.5rem, var(--safe-left));
+  padding: var(--safe-top) var(--gutter) 0 max(0.5rem, var(--safe-left));
   height: calc(var(--header-height) + var(--safe-top));
   border-bottom: 1px solid var(--border);
+}
+
+/*
+ * The same margin as the main header's, from the other side. This control and
+ * that one are the same control — it moves between the two bars as the sidebar
+ * opens and closes — so the space beside it has to measure the same in both,
+ * and to the glyph rather than to the box, hence the same pull back.
+ */
+.sidebar__brand > .icon-button:last-child {
+  margin-right: calc(var(--control-bleed) * -1);
 }
 
 /* The one place the display face is used, so it reads as a mark rather than
@@ -230,18 +240,30 @@ body {
   display: flex;
   align-items: center;
   /*
-   * The same gutter that holds the bar off the edge also separates its two
-   * elements — which is what makes the two visible margins equal: the control
-   * carries 7px of its own on each side, so a gutter of 15 puts 22 between the
-   * edge and the glyph and the same 22 between the glyph and the title.
+   * 11px, which puts the title 58 from the edge — the reference's own column.
+   *
+   * Not the gutter less the control's padding, which is the arithmetic that
+   * makes both spaces measure 22: a glyph is lighter than a letter and the gap
+   * after it reads wider than the same number before it, so matching them by
+   * measurement left the title looking adrift of the control.
    */
-  gap: var(--gutter);
+  gap: 0.6875rem;
   /* Grown by the status bar exactly as the sidebar's own header is, so the two
      stay one line across the seam on a notched phone as well as on a desktop. */
   padding: var(--safe-top) max(var(--gutter), var(--safe-right)) 0
     max(var(--gutter), var(--safe-left));
   height: calc(var(--header-height) + var(--safe-top));
   border-bottom: 1px solid var(--border);
+}
+
+/*
+ * Pulled back by its own padding, so the glyph — not the box around it — sits
+ * on the gutter. Without this the control drew 7px right of where the title
+ * starts when the sidebar has taken it, and the two states disagreed about
+ * where the bar begins.
+ */
+.main__header > .icon-button:first-child {
+  margin-left: calc(var(--control-bleed) * -1);
 }
 
 /*
