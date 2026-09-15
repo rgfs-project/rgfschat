@@ -405,6 +405,9 @@ export function App({
     port: scroll.ref,
     content: transcriptRef,
     anchorId: lastUserIndex === -1 ? null : (messages[lastUserIndex]?.id ?? null),
+    // So changing the reserve cannot slide the question down the screen and
+    // bring the previous exchange back into view with it.
+    adjustBy: scroll.adjustBy,
   });
 
   useEffect(() => {

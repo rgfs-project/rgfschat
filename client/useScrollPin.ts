@@ -51,6 +51,14 @@ export interface ScrollPin {
   release: () => void;
   /** Call whenever rendered content changes (new token, new message). */
   onContentChange: () => void;
+  /**
+   * Moves the view by `delta` without it counting as the reader scrolling.
+   *
+   * For a layout change that would otherwise move what the reader is looking
+   * at — the tail reserve shrinking is the one that matters — where the
+   * correction is "put it back", not "go to the bottom".
+   */
+  adjustBy: (delta: number) => void;
 }
 
 export function useScrollPin(): ScrollPin {
@@ -215,6 +223,25 @@ export function useScrollPin(): ScrollPin {
     if (pinnedRef.current) scrollToBottom(element, false);
   }, [scrollToBottom]);
 
+  /**
+   * Nudges the view, and owns the scroll event it causes.
+   *
+   * Recorded as programmatic for the same reason every other scroll here is:
+   * an adjustment the reader did not make must not be read as them scrolling
+   * away, which would unpin the transcript mid-reply.
+   */
+  const adjustBy = useCallback((delta: number): void => {
+    const element = ref.current;
+    if (element === null || !Number.isFinite(delta) || Math.abs(delta) < 0.5) return;
+
+    const limit = Math.max(0, element.scrollHeight - element.clientHeight);
+    const next = Math.max(0, Math.min(limit, element.scrollTop + delta));
+    if (Math.abs(next - element.scrollTop) < 0.5) return;
+
+    programmaticTop.current = next;
+    element.scrollTop = next;
+  }, []);
+
   /*
    * Let go of the end without moving.
    *
@@ -256,5 +283,6 @@ export function useScrollPin(): ScrollPin {
     pin,
     release,
     onContentChange,
+    adjustBy,
   };
 }
