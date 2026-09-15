@@ -393,6 +393,12 @@ body {
   gap: 0;
 }
 
+/* Holds the room the last question is pushed up into. Its height is measured
+   and set from `useTailSpace`; it draws nothing. */
+.transcript__tail {
+  flex: none;
+}
+
 /*
  * The composer sits at the bottom of the shell, and the shell is `100dvh`.
  *

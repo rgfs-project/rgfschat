@@ -31,6 +31,7 @@ import { useGeneration } from './useGeneration.ts';
 import { GenerationAnnouncer } from './GenerationAnnouncer.tsx';
 import { useNarrowViewport } from './useNarrowViewport.ts';
 import { useScrollPin } from './useScrollPin.ts';
+import { useTailSpace } from './useTailSpace.ts';
 import { useAttachments } from './useAttachments.ts';
 
 /** An in-flight generation survives a reload, so its id is parked in storage. */
@@ -304,6 +305,19 @@ export function App({
     [messages]
   );
 
+  /*
+   * Empty room under the last turn, so asking a question puts it at the top of
+   * the screen with its answer growing into the space below. Reserving it is
+   * all it takes: the bottom of the transcript is then exactly that position,
+   * and the scroll pin already aims at the bottom.
+   */
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const tailSpace = useTailSpace({
+    port: scroll.ref,
+    content: transcriptRef,
+    anchorId: lastUserIndex === -1 ? null : (messages[lastUserIndex]?.id ?? null),
+  });
+
   useEffect(() => {
     document.documentElement.dataset['theme'] = theme;
     // Kept in step with the attribute so the browser repaints its own canvas,
@@ -319,9 +333,11 @@ export function App({
 
   const { onContentChange } = scroll;
   // Content changed: follow the bottom, or leave the reader where they are.
+  // `tailSpace` among the triggers: applying the reserve moves the bottom, and
+  // a view that was following the bottom has to follow it to the new one.
   useEffect(() => {
     onContentChange();
-  }, [messages, live.content, live.reasoning, onContentChange]);
+  }, [messages, live.content, live.reasoning, tailSpace, onContentChange]);
 
   /*
    * A generation the server already has running is adopted from the
@@ -753,7 +769,7 @@ export function App({
             the next the reader opens. */}
         <ErrorBoundary region="transcript" resetKey={currentId}>
           <div className="transcript" ref={scroll.ref} data-testid="transcript">
-            <div className="transcript__inner">
+            <div className="transcript__inner" ref={transcriptRef}>
               {error !== null && (
                 <p role="alert" className="error-banner">
                   {error}
@@ -823,6 +839,10 @@ export function App({
                   state={live.state}
                 />
               )}
+
+              {/* The reserve. Empty, and shrinking to nothing as the answer
+                  fills the room it was holding. */}
+              <div className="transcript__tail" style={{ height: tailSpace }} aria-hidden="true" />
             </div>
           </div>
         </ErrorBoundary>
