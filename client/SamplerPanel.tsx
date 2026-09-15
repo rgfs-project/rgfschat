@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { RotateCcw } from 'lucide-react';
-import { SAMPLER_LIMITS, type SamplerSettings } from '@shared/generation.ts';
-import { SYSTEM_PROMPT_MAX_LENGTH } from '@shared/generation.ts';
+import { SAMPLER_LIMITS, type SamplerSettings } from '@shared/generation';
+import { SYSTEM_PROMPT_MAX_LENGTH } from '@shared/generation';
 import { updateAdminSampler, type StoredSampler } from './api.ts';
 
 /**

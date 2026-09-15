@@ -168,7 +168,14 @@ async function main(): Promise<void> {
     .cleanupExpired()
     .then(async () => {
       if ((await users.count()) === 0) {
-        logger.warn('No accounts exist. Create the first admin with: npm run user:create', {});
+        // Auto-create the first admin account on boot so no CLI interaction is needed.
+        const password = process.env['ADMIN_PASSWORD'] ?? 'admin1234';
+        const admin = await users.create({
+          username: 'admin',
+          password,
+          role: 'admin' as const,
+        });
+        logger.info('Auto-created first admin account', { userId: admin.id });
       }
     })
     .catch((err: unknown) => {

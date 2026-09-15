@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router';
-import type { AuthState, UserDto } from '@shared/auth.ts';
+import type { AuthState, UserDto } from '@shared/auth';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
 import { logout, onAuthExpired, setCsrfToken } from './api.ts';
 import { createQueryClient, keys, useConversations, useModels, useSession } from './queries.ts';

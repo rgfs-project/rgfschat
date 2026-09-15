@@ -1,5 +1,5 @@
 import { FileText, Image as ImageIcon, Music, X } from 'lucide-react';
-import { formatSize } from '@shared/attachment.ts';
+import { formatSize } from '@shared/attachment';
 import { attachmentContentUrl } from './api.ts';
 import type { PendingAttachment } from './useAttachments.ts';
 

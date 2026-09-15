@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Check, Copy, Download, X } from 'lucide-react';
-import { ARTIFACT_LANGUAGE, type ArtifactDto } from '@shared/artifact.ts';
+import { ARTIFACT_LANGUAGE, type ArtifactDto } from '@shared/artifact';
 import { useArtifactSource } from './queries.ts';
 import { useCopy } from './useCopy.ts';
 

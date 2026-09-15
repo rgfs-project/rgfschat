@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, PanelLeft } from 'lucide-react';
-import type { ArtifactDto } from '@shared/artifact.ts';
-import type { UserDto } from '@shared/auth.ts';
+import type { ArtifactDto } from '@shared/artifact';
+import type { UserDto } from '@shared/auth';
 import { ApiError, cancelGeneration, downloadConversation } from './api.ts';
 import { ArtifactPanel } from './ArtifactPanel.tsx';
 import { ArtifactsDialog } from './ArtifactsDialog.tsx';

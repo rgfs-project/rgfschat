@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { MAX_ATTACHMENTS_PER_MESSAGE, type AttachmentDto } from '@shared/attachment.ts';
+import { MAX_ATTACHMENTS_PER_MESSAGE, type AttachmentDto } from '@shared/attachment';
 import { ApiError, deleteAttachment, uploadAttachment } from './api.ts';
 
 /**

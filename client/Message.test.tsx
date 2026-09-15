@@ -6,7 +6,7 @@ import type {
   Message as MessageModel,
   MessageStatus,
   UserMessage,
-} from '@shared/conversation.ts';
+} from '@shared/conversation';
 import { Message, StreamingMessage } from './Message.tsx';
 
 /**

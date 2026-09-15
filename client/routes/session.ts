@@ -1,5 +1,5 @@
 import { createContext, use } from 'react';
-import type { AuthState, UserDto } from '@shared/auth.ts';
+import type { AuthState, UserDto } from '@shared/auth';
 
 /**
  * Who is signed in, and the two things that change it.

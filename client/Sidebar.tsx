@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { Menu } from './Menu.tsx';
 import { useFocusTrap } from './useFocusTrap.ts';
-import type { UserDto } from '@shared/auth.ts';
+import type { UserDto } from '@shared/auth';
 import type { ConversationSummary } from './api.ts';
 
 /**

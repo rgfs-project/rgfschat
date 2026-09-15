@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { UserDto } from '@shared/auth.ts';
+import type { UserDto } from '@shared/auth';
 import type * as ApiModule from './api.ts';
 
 /**

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Check, ChevronRight, Copy, Pencil, RefreshCw, Trash2 } from 'lucide-react';
-import type { Message as MessageModel, MessageStatus } from '@shared/conversation.ts';
+import type { Message as MessageModel, MessageStatus } from '@shared/conversation';
 import { Markdown } from './Markdown.tsx';
 import { failureMessage } from './failureMessage.ts';
 import { useCopy } from './useCopy.ts';

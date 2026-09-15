@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Code2, FileText, Image, Table2, Trash2, X } from 'lucide-react';
-import { ARTIFACT_LANGUAGE, type ArtifactDto, type ArtifactMediaType } from '@shared/artifact.ts';
+import { ARTIFACT_LANGUAGE, type ArtifactDto, type ArtifactMediaType } from '@shared/artifact';
 import { useArtifacts, useDeleteArtifact } from './queries.ts';
 import { relativeTime } from './relativeTime.ts';
 

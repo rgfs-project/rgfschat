@@ -11,7 +11,7 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import type { UserDto } from '@shared/auth.ts';
+import type { UserDto } from '@shared/auth';
 import {
   ApiError,
   clearMyHistory,

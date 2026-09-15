@@ -1,8 +1,8 @@
-import type { ArtifactDto } from '@shared/artifact.ts';
-import type { AttachmentDto } from '@shared/attachment.ts';
-import type { HealthDto } from '@shared/api.ts';
-import type { GenerationAcceptedDto, GenerationSnapshotDto } from '@shared/generation.ts';
-import type { Message } from '@shared/conversation.ts';
+import type { ArtifactDto } from '@shared/artifact';
+import type { AttachmentDto } from '@shared/attachment';
+import type { HealthDto } from '@shared/api';
+import type { GenerationAcceptedDto, GenerationSnapshotDto } from '@shared/generation';
+import type { Message } from '@shared/conversation';
 
 export interface ConversationSummary {
   id: string;
@@ -29,9 +29,9 @@ export interface ConversationDetail {
    */
   activeGenerationId: string | null;
 }
-import { isErrorCode, type ErrorCode } from '@shared/errors.ts';
-import type { SamplerSettings } from '@shared/generation.ts';
-import type { SessionDto, UserDto } from '@shared/auth.ts';
+import { isErrorCode, type ErrorCode } from '@shared/errors';
+import type { SamplerSettings } from '@shared/generation';
+import type { SessionDto, UserDto } from '@shared/auth';
 
 export class ApiError extends Error {
   readonly code: ErrorCode | 'NETWORK';

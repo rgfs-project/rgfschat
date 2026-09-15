@@ -104,13 +104,14 @@ export class ProviderRegistry {
   }
 
   /**
-   * Loads the file, bootstrapping it from the Phase 2–4 environment when it is
-   * absent so an upgrade keeps working without manual setup.
+   * Loads the file. When absent, returns an empty provider list — no dummy
+   * provider is created on first boot; one must be added manually or via the
+   * admin panel.
    *
    * An invalid entry is disabled and logged rather than crashing startup: one
    * bad provider must not make the whole application unbootable.
    */
-  async load(bootstrap: {
+  async load(_bootstrap: {
     baseUrl: string;
     apiKey?: string;
     timeoutMs: number;
@@ -123,18 +124,8 @@ export class ProviderRegistry {
     }
 
     if (raw === null) {
-      const entry: ProviderConfigEntry = {
-        id: 'local',
-        name: 'Local llama.cpp',
-        kind: 'openai-compatible',
-        baseUrl: bootstrap.baseUrl,
-        ...(bootstrap.apiKey !== undefined ? { apiKey: bootstrap.apiKey } : {}),
-        timeoutMs: bootstrap.timeoutMs,
-        capabilities: {},
-      };
-      await this.save([entry]);
-      this.#logger.info('Bootstrapped providers.json from the environment', { id: entry.id });
-      return { providers: [entry], rejected: [] };
+      this.#logger.info('No providers configured; add one via the admin panel or edit _system/providers.json', {});
+      return { providers: [], rejected: [] };
     }
 
     let parsed: unknown;

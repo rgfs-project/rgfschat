@@ -6,9 +6,9 @@ import {
   type UseMutationResult,
   type UseQueryResult,
 } from '@tanstack/react-query';
-import type { ArtifactDto } from '@shared/artifact.ts';
-import type { Message } from '@shared/conversation.ts';
-import type { SessionDto } from '@shared/auth.ts';
+import type { ArtifactDto } from '@shared/artifact';
+import type { Message } from '@shared/conversation';
+import type { SessionDto } from '@shared/auth';
 import {
   createConversation,
   deleteArtifact,
