@@ -33,6 +33,22 @@ export interface MemoryProposal {
   name: string;
   /** Absent for a deletion. */
   content?: string;
+  /**
+   * What produced it: `<generationId>:<toolCallId>`.
+   *
+   * The identity a duplicate is recognised by. A run that is retried, a
+   * completion processed twice, or a recovery pass after a restart all arrive
+   * with the same generation and the same call, and a second card for one call
+   * is a question the reader is asked twice.
+   */
+  sourceId?: string;
+  /**
+   * The target memory's `updatedAt` when the proposal was made, for an update
+   * or a deletion. Absent when there was no such memory then — and absent on
+   * proposals written before this field existed, which the caller treats as
+   * "compare against `createdAt`" rather than as "no check".
+   */
+  baseUpdatedAt?: string;
   createdAt: string;
 }
 
@@ -44,6 +60,8 @@ const schema = z.strictObject({
   // can edit, and the name becomes a filename when the proposal is accepted.
   name: z.string().refine(isMemoryName),
   content: z.string().optional(),
+  sourceId: z.string().optional(),
+  baseUpdatedAt: z.string().optional(),
   createdAt: z.string(),
 });
 
@@ -101,6 +119,8 @@ export class ProposalStore {
         operation: proposal.operation,
         name: proposal.name,
         ...(proposal.content === undefined ? {} : { content: proposal.content }),
+        ...(proposal.sourceId === undefined ? {} : { sourceId: proposal.sourceId }),
+        ...(proposal.baseUpdatedAt === undefined ? {} : { baseUpdatedAt: proposal.baseUpdatedAt }),
         createdAt: proposal.createdAt,
       }));
     } catch {
@@ -124,14 +144,34 @@ export class ProposalStore {
   ): Promise<MemoryProposal[]> {
     if (entries.length === 0) return [];
 
-    const created = entries.map((entry) => ({
-      ...entry,
-      id: randomUUID(),
-      createdAt: now().toISOString(),
-    }));
-
     return this.#locks.run(proposalsKey(userId, conversationId), async () => {
       const existing = await this.list(userId, conversationId);
+
+      /*
+       * A call that has already been filed is not filed again.
+       *
+       * Checked under the lock and against what is on disk, because the
+       * duplicate arrives from another process lifetime as readily as from
+       * this one: the same generation retried, its completion handled twice, a
+       * reconnect, a recovery pass after a restart. Entries with no `sourceId`
+       * — nothing else produces them now — are always kept.
+       */
+      const seen = new Set(
+        existing
+          .map((proposal) => proposal.sourceId)
+          .filter((sourceId): sourceId is string => sourceId !== undefined)
+      );
+      const fresh = entries.filter(
+        (entry) => entry.sourceId === undefined || !seen.has(entry.sourceId)
+      );
+      if (fresh.length === 0) return [];
+
+      const created = fresh.map((entry) => ({
+        ...entry,
+        id: randomUUID(),
+        createdAt: now().toISOString(),
+      }));
+
       const all = [...existing, ...created].slice(-MAX_PENDING_PER_CONVERSATION);
 
       await this.#write(userId, conversationId, all);
@@ -151,6 +191,10 @@ export class ProposalStore {
    * Removal and the answer it belongs to are one step on purpose: the caller
    * applies the memory change only for a proposal this actually handed back, so
    * two clicks on the same card cannot write the memory twice.
+   *
+   * Prefer `resolve` when the answer can fail. This removes first, which is
+   * right for a rejection — there is nothing after it that can go wrong — and
+   * wrong for an acceptance, which is issue 1.
    */
   async take(
     userId: string,
@@ -168,6 +212,108 @@ export class ProposalStore {
         existing.filter((proposal) => proposal.id !== proposalId)
       );
       return found;
+    });
+  }
+
+  /**
+   * Applies an answer to one proposal, and removes it **only if that worked**.
+   *
+   * `take` followed by a write is not the same thing, and the difference is a
+   * bug a reader pays for: a memory that is refused on size, on the total
+   * quota, or by a full disk leaves them with no note *and* no card to try
+   * again from — the model's suggestion is simply gone, with an error toast
+   * where it used to be. So `apply` runs first and a throw leaves the proposal
+   * exactly where it was; the reader sees why, and can click again once the
+   * cause is dealt with.
+   *
+   * Both halves run under the conversation's proposal lock, which is what
+   * makes a double click safe in the other direction too: the second caller
+   * finds nothing and is told so, rather than applying the same change twice.
+   *
+   * Returns `null` for a proposal that was already answered.
+   */
+  async resolve<T>(
+    userId: string,
+    conversationId: string,
+    proposalId: string,
+    apply: (proposal: MemoryProposal) => Promise<T>
+  ): Promise<{ proposal: MemoryProposal; result: T } | null> {
+    return this.#locks.run(proposalsKey(userId, conversationId), async () => {
+      const existing = await this.list(userId, conversationId);
+      const found = existing.find((proposal) => proposal.id === proposalId);
+      if (found === undefined) return null;
+
+      // Deliberately outside a try: a rejection propagates to the caller with
+      // the file untouched, which is the entire point of this method.
+      const result = await apply(found);
+
+      await this.#write(
+        userId,
+        conversationId,
+        existing.filter((proposal) => proposal.id !== proposalId)
+      );
+
+      return { proposal: found, result };
+    });
+  }
+
+  /**
+   * Drops the proposals an assistant turn made, for when that turn goes.
+   *
+   * Regenerating replaces the assistant message, and an edit or a delete
+   * removes it. The proposals it made go with it: a card offering to save
+   * something out of a reply that is no longer in the conversation is a
+   * question with no context, and accepting it would write a memory on the
+   * strength of text the reader can no longer read.
+   *
+   * Resolves to how many were dropped.
+   */
+  async removeForMessage(
+    userId: string,
+    conversationId: string,
+    assistantMessageId: string
+  ): Promise<number> {
+    return this.#locks.run(proposalsKey(userId, conversationId), async () => {
+      const existing = await this.list(userId, conversationId);
+      const kept = existing.filter(
+        (proposal) => proposal.assistantMessageId !== assistantMessageId
+      );
+      if (kept.length === existing.length) return 0;
+
+      await this.#write(userId, conversationId, kept);
+      return existing.length - kept.length;
+    });
+  }
+
+  /**
+   * Drops every proposal whose turn is no longer in the conversation.
+   *
+   * The backstop behind `removeForMessage`, and the reason an orphan can never
+   * be *served*: a proposal is filed as its run finishes and the message is
+   * written under the conversation's lock, so a crash in between — or a
+   * conversation edited by hand on disk — can leave a card pointing at nothing.
+   * Called on the read path with the ids the conversation actually has, so the
+   * invariant holds at the only moment it is observable.
+   *
+   * Resolves to the proposals that survived.
+   */
+  async retainMessages(
+    userId: string,
+    conversationId: string,
+    messageIds: ReadonlySet<string>
+  ): Promise<MemoryProposal[]> {
+    return this.#locks.run(proposalsKey(userId, conversationId), async () => {
+      const existing = await this.list(userId, conversationId);
+      const kept = existing.filter((proposal) => messageIds.has(proposal.assistantMessageId));
+      if (kept.length === existing.length) return existing;
+
+      this.#logger.info('Dropping proposals whose message is gone', {
+        userId,
+        conversationId,
+        dropped: existing.length - kept.length,
+      });
+      await this.#write(userId, conversationId, kept);
+      return kept;
     });
   }
 

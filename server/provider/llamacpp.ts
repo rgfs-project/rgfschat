@@ -289,7 +289,22 @@ export class LlamaCppProvider implements Provider {
       headers: this.#headers({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         model,
-        messages: messages.map(({ role, content }: ChatMessage) => ({ role, content })),
+        messages: messages.map(({ role, content, toolCalls, toolCallId }: ChatMessage) => ({
+          role,
+          content,
+          // Sent in the shape upstream emitted them, so a continuation turn
+          // refers to the same calls by the same ids.
+          ...(toolCalls === undefined
+            ? {}
+            : {
+                tool_calls: toolCalls.map((call) => ({
+                  id: call.id,
+                  type: 'function',
+                  function: { name: call.name, arguments: call.arguments },
+                })),
+              }),
+          ...(toolCallId === undefined ? {} : { tool_call_id: toolCallId }),
+        })),
         max_tokens: maxOutputTokens,
         ...samplerBody(sampler),
         // Omitted entirely when there are none: see `ChatRequest.tools`.

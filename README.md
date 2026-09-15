@@ -204,6 +204,41 @@ Which models can see or listen is discovered from the provider, not configured.
 whose images and files are gone. There is no virus scanning — if you host this for other
 people, put scanning in front of `data/` yourself.
 
+## Artifacts a reply produced
+
+A file a model presents is kept as an **artifact**: source, listed in the artifacts panel,
+readable and downloadable, and outliving the conversation it came from. Deleting the chat
+leaves the artifact and only breaks the back-link.
+
+A reply says which of its code blocks are files, by naming them in the fence's info string:
+
+````markdown
+```html file="dashboard.html"
+<!doctype html> …
+```
+````
+
+The block stays in the transcript and renders as an ordinary code block; the artifact is
+saved alongside it when the reply **completes**. Single quotes work, and the attribute may
+come before or after the language word.
+
+Nothing else is treated as a file. A plain ` ```html ` fence is a code block, a filename
+in a sentence is a sentence, and a reply that was cancelled, failed, or stopped part-way
+through a block saves nothing — half a file under the name of a whole one is worse than no
+file. These extensions are saved, matched case-insensitively with the name kept as written:
+
+`.html` `.htm` `.md` `.markdown` `.css` `.csv` `.js` `.jsx` `.mjs` `.json` `.svg` `.py` `.ts`
+`.tsx` `.sql` `.yaml` `.yml`
+
+Anything else is left as an ordinary code block. The instruction describing this is added to
+the system prompt only when the server has an artifact store, so a model is never told about a
+format that would be ignored.
+
+**Artifacts are never executed or rendered.** An artifact is HTML, JavaScript or SVG as often
+as not, and all three are scriptable documents; every one is stored as content and served back
+as source, exactly like the import path does. The name is a display name and never a path —
+`../../etc/passwd.md` is stored under a flattened name, not followed.
+
 ## Docker
 
 A multi-stage image builds the client and server, prunes to production
@@ -316,6 +351,39 @@ npm run user:create -- --username ada --admin --adopt-local-data
 ```
 
 Set `REGISTRATION_MODE=open` to let people sign themselves up.
+
+### Resetting a forgotten password
+
+Every other reset path needs an admin session to start from — the admin panel
+and the route behind it — so a forgotten administrator password would otherwise
+leave no way in at all. This is that way in:
+
+```bash
+npm run user:password -- --username ada
+```
+
+The password is read from a prompt, or from stdin for scripting
+(`printf 'new-password\n' | npm run user:password -- --username ada`). Like
+`user:create` it is **never** accepted as a command-line argument — `--password`
+is refused outright rather than ignored — so it cannot land in shell history or
+in the process list.
+
+Existing sessions are revoked by default: a reset is usually done because the
+old password is suspect, and a session cookie outlives it. Pass
+`--keep-sessions` when that is not what you want — changing your own password on
+a machine you are already signed in on.
+
+In a container the same command is `reset-password` on the image's entrypoint,
+which runs the bundled build rather than the TypeScript source:
+
+```bash
+printf 'new-password\n' | docker run -i --rm -v chatui-data:/data \
+  ghcr.io/rgfs-project/rgfschat:latest reset-password --username ada
+```
+
+Under Podman, use `podman run -i` with the volume name from `podman volume ls`
+(see the note in step 2 above — `podman-compose run` does not attach stdin the
+same way).
 
 ## Providers
 

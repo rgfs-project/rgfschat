@@ -111,14 +111,27 @@ const memoryName = z.string().refine(isMemoryName, {
 });
 
 /*
- * Bounded here as well as in the store.
+ * Bounded here as well as in the store, and bounded the *same way*.
  *
  * `MemoryStore.write` enforces the real limit when the proposal is accepted,
  * but a proposal is held on disk and shown in the browser before that — so an
  * 8MB "note" should be refused at the door rather than parked in the
  * transcript waiting for someone to click it.
+ *
+ * The cap is UTF-8 bytes, not characters, because that is what the store
+ * measures: a note of emoji or CJK is up to four bytes a character, so a
+ * character count would wave through something the store then refuses — and
+ * the refusal would land on the reader's click, long after the model made the
+ * mistake. Whitespace-only content is refused for the same reason: the store
+ * calls it empty, so this must too, rather than accepting a note that can
+ * never be applied.
  */
-const memoryContent = z.string().min(1).max(MEMORY_MAX_BYTES);
+const memoryContent = z
+  .string()
+  .refine((value) => value.trim() !== '', { message: 'A memory cannot be empty.' })
+  .refine((value) => Buffer.byteLength(value, 'utf8') <= MEMORY_MAX_BYTES, {
+    message: `A memory is at most ${MEMORY_MAX_BYTES / 1024}KB.`,
+  });
 
 const writeArgs = z.strictObject({ name: memoryName, content: memoryContent });
 const deleteArgs = z.strictObject({ name: memoryName });

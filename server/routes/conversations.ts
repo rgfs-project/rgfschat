@@ -4,8 +4,8 @@ import { TITLE_MAX_LENGTH, type Conversation } from '@shared/conversation.ts';
 import type { ConversationStore } from '../storage/conversations.ts';
 import { entryFor, type ChatIndex, type ChatIndexEntry } from '../storage/index.ts';
 import type { PreferencesStore } from '../storage/preferences.ts';
-import type { ProposalStore } from '../storage/proposals.ts';
-import type { MemoryStore } from '../storage/memories.ts';
+import type { MemoryProposal, ProposalStore } from '../storage/proposals.ts';
+import type { Memory, MemoryStore } from '../storage/memories.ts';
 import { referencedIds } from '../attachments/resolve.ts';
 import type { AttachmentStore } from '../attachments/store.ts';
 import { validateBody } from '../http/validate.ts';
@@ -122,6 +122,71 @@ function toDto(id: string, conversation: Conversation, activeGenerationId: strin
     messages: conversation.messages,
     activeGenerationId,
   };
+}
+
+/**
+ * The baseline a stale-check compares against.
+ *
+ * Proposals written before `baseUpdatedAt` existed have none, and treating that
+ * as "no check" would leave exactly the hole the check is for. The proposal's
+ * own `createdAt` is the next best baseline: a note whose mtime is at or before
+ * the moment the model asked about it is the note it asked about, and anything
+ * newer is an edit made since.
+ */
+function baselineFor(proposal: MemoryProposal): { updatedAt: string | undefined; since: string } {
+  return { updatedAt: proposal.baseUpdatedAt, since: proposal.createdAt };
+}
+
+/**
+ * Applies one accepted proposal, or throws saying why it cannot be.
+ *
+ * Every refusal here is a refusal the reader is shown while the card is still
+ * on screen, because this runs inside `ProposalStore.resolve`.
+ */
+async function applyProposal(
+  memories: MemoryStore,
+  userId: string,
+  proposal: MemoryProposal
+): Promise<Memory | null> {
+  const { updatedAt, since } = baselineFor(proposal);
+
+  if (proposal.operation === 'delete') {
+    const current = await memories.read(userId, proposal.name);
+    if (current !== null && updatedAt === undefined && current.updatedAt > since) {
+      throw new AppError(
+        'CONFLICT',
+        `The memory "${proposal.name}" has changed since this was proposed, so it was not deleted.`
+      );
+    }
+    await memories.removeIfUnchanged(userId, proposal.name, updatedAt);
+    return null;
+  }
+
+  /*
+   * `content` is guaranteed by the parse that created the proposal, but it is
+   * re-checked because this object came back off a disk a person can edit.
+   */
+  if (proposal.content === undefined) throw AppError.internal('Proposal has no content');
+
+  if (proposal.operation === 'create') {
+    // Create-only: "remember" proposed a *new* note, and a name that has been
+    // taken since — by the reader, or by an earlier proposal — is a collision
+    // to report, never a note to overwrite.
+    return memories.write(userId, proposal.name, proposal.content, { mode: 'create' });
+  }
+
+  const current = await memories.read(userId, proposal.name);
+  if (current !== null && updatedAt === undefined && current.updatedAt > since) {
+    throw new AppError(
+      'CONFLICT',
+      `The memory "${proposal.name}" has changed since this was proposed, so it was not overwritten.`
+    );
+  }
+
+  return memories.write(userId, proposal.name, proposal.content, {
+    mode: 'update',
+    expectedUpdatedAt: updatedAt,
+  });
 }
 
 export function conversationRouter({
@@ -333,6 +398,12 @@ export function conversationRouter({
 
     const updated = await store.deleteMessagePair(user, id, messageId);
 
+    // The exchange's proposals go with it. The read path reconciles anyway,
+    // but a card that vanishes on the next poll rather than with the message
+    // it belonged to is a card the reader can still answer in between.
+    const remaining = new Set(updated.messages.map((message) => message.id));
+    await proposals?.retainMessages(user, id, remaining);
+
     // Deleting the last exchange leaves nothing to come back to, so the
     // conversation goes with it rather than lingering as an empty shell. A
     // conversation that is empty because it was *just created* is untouched —
@@ -362,9 +433,26 @@ export function conversationRouter({
 
     // Confirms the conversation is the caller's before answering. Without it
     // this would report on any id, which is how a list of names leaks.
-    await store.load(user, id);
+    const conversation = await store.load(user, id);
 
-    res.json({ proposals: proposals === undefined ? [] : await proposals.list(user, id) });
+    if (proposals === undefined) {
+      res.json({ proposals: [] });
+      return;
+    }
+
+    /*
+     * Never a card for a turn the conversation no longer has.
+     *
+     * Regenerating drops the replaced turn's proposals as it replaces it, and
+     * an edit or a delete does the same — but a crash between filing a
+     * proposal and writing the message, or a file edited by hand under
+     * `data/`, can still leave one pointing at nothing. Reconciling on the read
+     * path is what makes "every proposal names a message that exists" true at
+     * the only moment anyone can observe it, and it repairs the file while it
+     * is at it.
+     */
+    const present = new Set(conversation.messages.map((message) => message.id));
+    res.json({ proposals: await proposals.retainMessages(user, id, present) });
   });
 
   /**
@@ -377,9 +465,12 @@ export function conversationRouter({
    * hand itself a durable instruction, and any text it reads is a route to
    * that.
    *
-   * Taking the proposal and applying it is one step: `take` removes it under a
-   * lock and returns it only to the caller that removed it, so a double click
-   * cannot apply the same change twice.
+   * Applying the change and disposing of the proposal are one step, in that
+   * order: `resolve` runs the change under the conversation's proposal lock and
+   * removes the card only once it has succeeded. So a second click finds
+   * nothing and is told so, while a failure — a name already taken, a note
+   * edited since, the total quota, a full disk — leaves the card exactly where
+   * it was for the reader to try again.
    */
   router.post(
     '/conversations/:id/proposals/:proposalId',
@@ -400,31 +491,25 @@ export function conversationRouter({
 
       await store.load(user, id);
 
-      const proposal = await proposals.take(user, id, proposalId);
-      if (proposal === null) throw AppError.notFound('No such proposal.');
-
+      // A rejection writes nothing, so there is nothing that can fail after the
+      // card is gone; `take` is the honest spelling of that.
       if (!accept) {
+        if ((await proposals.take(user, id, proposalId)) === null) {
+          throw AppError.notFound('No such proposal.');
+        }
         res.json({ applied: false });
         return;
       }
 
-      if (proposal.operation === 'delete') {
-        await memories.remove(user, proposal.name);
-        res.json({ applied: true });
-        return;
-      }
+      const answered = await proposals.resolve(user, id, proposalId, async (proposal) =>
+        applyProposal(memories, user, proposal)
+      );
+      if (answered === null) throw AppError.notFound('No such proposal.');
 
-      /*
-       * `content` is guaranteed by the parse that created the proposal, but it
-       * is re-checked because this object came back off a disk a person can
-       * edit. The store enforces the size and total caps, so an accepted
-       * proposal can still be refused here — which reaches the reader as an
-       * error on the click rather than as a silently dropped memory.
-       */
-      if (proposal.content === undefined) throw AppError.internal('Proposal has no content');
-      const memory = await memories.write(user, proposal.name, proposal.content);
-
-      res.json({ applied: true, memory });
+      res.json({
+        applied: true,
+        ...(answered.result === null ? {} : { memory: answered.result }),
+      });
     }
   );
 

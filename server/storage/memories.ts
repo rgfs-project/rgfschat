@@ -1,5 +1,6 @@
 import { readdir, readFile, stat, unlink, utimes } from 'node:fs/promises';
 import { atomicWriteFile, ensureDir } from './atomic.ts';
+import { KeyedLock } from './locks.ts';
 import { isMemoryName, type StoragePaths } from './paths.ts';
 import { AppError } from '../errors/AppError.ts';
 import type { Logger } from '../logger.ts';
@@ -29,13 +30,34 @@ export interface Memory {
   bytes: number;
 }
 
+/**
+ * Which note a write is allowed to land on.
+ *
+ * `upsert` is the historical behaviour and stays the default, because the
+ * routes a person drives — the memories panel, an import — mean "make it say
+ * this" and have the note in front of them. A *proposal* does not: it was made
+ * turns ago, out of a conversation, by something that cannot see the disk. So
+ * an accepted `remember` is `create` and an accepted `update_memory` is
+ * `update`, and the difference is the whole of issue 2: with `upsert` a model
+ * that proposed a new note under a name that already existed would silently
+ * replace it.
+ */
+export type WriteMode = 'create' | 'update' | 'upsert';
+
+/** Lock key for one note, so check-then-write cannot interleave with itself. */
+function memoryKey(userId: string, name: string): string {
+  return `memory:${userId}/${name}`;
+}
+
 export class MemoryStore {
   readonly #paths: StoragePaths;
   readonly #logger: Logger;
+  readonly #locks: KeyedLock;
 
-  constructor(paths: StoragePaths, logger: Logger) {
+  constructor(paths: StoragePaths, logger: Logger, locks: KeyedLock = new KeyedLock()) {
     this.#paths = paths;
     this.#logger = logger;
+    this.#locks = locks;
   }
 
   /** Every memory, oldest name first. A missing directory means none. */
@@ -78,6 +100,12 @@ export class MemoryStore {
    * The total is checked against what the store would hold *after* this write,
    * so the last memory that fits is accepted and the one that would not is
    * refused — rather than the store silently exceeding its cap by one note.
+   *
+   * `mode` and `expectedUpdatedAt` are what an accepted proposal adds. Both
+   * refusals are `CONFLICT` rather than `VALIDATION`: nothing is wrong with
+   * the request, the note on disk is simply not the one the proposal was made
+   * about. The whole check-then-write runs under this note's lock, so two
+   * accepts of the same name cannot both find it absent and both "create" it.
    */
   async write(
     userId: string,
@@ -95,6 +123,17 @@ export class MemoryStore {
        * edited by hand outside this application still reports honestly.
        */
       modifiedAt?: string | undefined;
+      /** Default `upsert`, which is what every person-driven route wants. */
+      mode?: WriteMode | undefined;
+      /**
+       * The `updatedAt` the caller last saw, for an `update`.
+       *
+       * A proposal is made at one moment and accepted at another, and in
+       * between the reader may have edited or replaced the note themselves. A
+       * blind write would throw that away without anyone being told, so the
+       * baseline is carried on the proposal and compared here.
+       */
+      expectedUpdatedAt?: string | undefined;
     } = {}
   ): Promise<Memory> {
     if (!isMemoryName(name)) {
@@ -109,29 +148,66 @@ export class MemoryStore {
       throw AppError.validation(`A memory is at most ${MEMORY_MAX_BYTES / 1024}KB.`);
     }
 
-    const existing = await this.list(userId);
-    const total =
-      existing.reduce((sum, memory) => sum + (memory.name === name ? 0 : memory.bytes), 0) + bytes;
-    if (total > MEMORIES_MAX_TOTAL_BYTES) {
-      throw AppError.validation(
-        `Memories are at most ${MEMORIES_MAX_TOTAL_BYTES / 1024}KB in total; this would be ${Math.ceil(total / 1024)}KB.`
-      );
-    }
+    const mode = options.mode ?? 'upsert';
 
-    await ensureDir(this.#paths.memoriesDir(userId));
-    const file = this.#paths.memoryFile(userId, name);
-    await atomicWriteFile(file, content);
+    return this.#locks.run(memoryKey(userId, name), async () => {
+      const current = await this.read(userId, name);
 
-    if (options.modifiedAt !== undefined) {
-      const at = new Date(options.modifiedAt);
-      // An unparseable timestamp leaves the write alone rather than failing it:
-      // the note is worth more than its date.
-      if (!Number.isNaN(at.getTime())) await utimes(file, at, at).catch(() => undefined);
-    }
+      if (mode === 'create' && current !== null) {
+        throw new AppError(
+          'CONFLICT',
+          `A memory called "${name}" already exists, so it was not replaced.`
+        );
+      }
+      if (mode === 'update') {
+        if (current === null) {
+          throw new AppError('CONFLICT', `There is no memory called "${name}" any more.`);
+        }
+        this.#requireFresh(name, current, options.expectedUpdatedAt);
+      }
 
-    this.#logger.info('Memory written', { userId, name, bytes });
+      const existing = await this.list(userId);
+      const total =
+        existing.reduce((sum, memory) => sum + (memory.name === name ? 0 : memory.bytes), 0) +
+        bytes;
+      if (total > MEMORIES_MAX_TOTAL_BYTES) {
+        throw AppError.validation(
+          `Memories are at most ${MEMORIES_MAX_TOTAL_BYTES / 1024}KB in total; this would be ${Math.ceil(total / 1024)}KB.`
+        );
+      }
 
-    return (await this.read(userId, name)) ?? { name, content, updatedAt: '', bytes };
+      await ensureDir(this.#paths.memoriesDir(userId));
+      const file = this.#paths.memoryFile(userId, name);
+      await atomicWriteFile(file, content);
+
+      if (options.modifiedAt !== undefined) {
+        const at = new Date(options.modifiedAt);
+        // An unparseable timestamp leaves the write alone rather than failing it:
+        // the note is worth more than its date.
+        if (!Number.isNaN(at.getTime())) await utimes(file, at, at).catch(() => undefined);
+      }
+
+      this.#logger.info('Memory written', { userId, name, bytes });
+
+      return (await this.read(userId, name)) ?? { name, content, updatedAt: '', bytes };
+    });
+  }
+
+  /**
+   * Refuses a write aimed at a version of the note that is no longer there.
+   *
+   * An absent baseline is not treated as "anything goes": a caller that asks
+   * for the staleness check gets it, and a caller that does not want it does
+   * not pass `update`.
+   */
+  #requireFresh(name: string, current: Memory, expectedUpdatedAt: string | undefined): void {
+    if (expectedUpdatedAt === undefined) return;
+    if (expectedUpdatedAt === current.updatedAt) return;
+
+    throw new AppError(
+      'CONFLICT',
+      `The memory "${name}" has changed since this was proposed, so it was not overwritten.`
+    );
   }
 
   /** Removes one. Resolves to whether there was anything to remove. */
@@ -143,6 +219,34 @@ export class MemoryStore {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Removes one on behalf of a proposal, refusing a stale one.
+   *
+   * Deleting the wrong note is the worst outcome in this file — the content is
+   * gone and there is nothing to compare afterwards — so a deletion the reader
+   * has since edited past is a `CONFLICT` they are shown, not a silent
+   * unlink. Under the note's lock, like `write`, so it cannot race an accept
+   * of a write proposal for the same name.
+   */
+  async removeIfUnchanged(
+    userId: string,
+    name: string,
+    expectedUpdatedAt: string | undefined
+  ): Promise<boolean> {
+    if (!isMemoryName(name)) return false;
+
+    return this.#locks.run(memoryKey(userId, name), async () => {
+      const current = await this.read(userId, name);
+      // Already gone is the outcome the proposal asked for, so it is not a
+      // conflict — there is nothing left to lose by agreeing.
+      if (current === null) return false;
+
+      this.#requireFresh(name, current, expectedUpdatedAt);
+
+      return this.remove(userId, name);
+    });
   }
 
   /**

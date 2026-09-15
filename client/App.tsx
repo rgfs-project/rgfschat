@@ -31,14 +31,14 @@ import {
   useRenameConversation,
   useSendMessage,
 } from './queries.ts';
-import { useGeneration } from './useGeneration.ts';
+import { IDLE_GENERATION, useGeneration } from './useGeneration.ts';
 import { GenerationAnnouncer } from './GenerationAnnouncer.tsx';
 import { useNarrowViewport } from './useNarrowViewport.ts';
 import { useScrollPin } from './useScrollPin.ts';
 import { useTailSpace } from './useTailSpace.ts';
 import { useAttachments } from './useAttachments.ts';
 
-/** An in-flight generation survives a reload, so its id is parked in storage. */
+/** An in-flight generation survives a reload, so it is parked in storage. */
 const ACTIVE_KEY = 'workspace.activeGeneration';
 const THEME_KEY = 'workspace.theme';
 const SIDEBAR_KEY = 'workspace.sidebarCollapsed';
@@ -50,6 +50,52 @@ const THEME_FADE_MS = 320;
 
 /** Long enough to find the marked message, short enough not to sit there. */
 const MESSAGE_HIGHLIGHT_MS = 2000;
+
+/**
+ * The generation being watched, and the conversation it belongs to.
+ *
+ * The conversation id is the half that was missing, and everything downstream
+ * needed it. A generation is server-owned and outlives the view: opening
+ * another chat does not stop it (INV-06), so while it runs the reader can be
+ * looking at a conversation it has nothing to do with. Without knowing whose it
+ * is, the only question this component could answer was "is *a* generation
+ * running", and it answered it in whichever transcript happened to be open —
+ * so chat B showed chat A's dots, A's cursor, A's thinking, A's partial reply,
+ * and reserved empty space under B's last message for an answer that was never
+ * coming to B.
+ */
+interface ActiveGeneration {
+  id: string;
+  conversationId: string;
+}
+
+/**
+ * Reads the parked generation back.
+ *
+ * A bare string is what this key held before it carried a conversation id, and
+ * it is dropped rather than adopted: a generation whose conversation is unknown
+ * is exactly the thing that used to leak. Nothing is lost by it — a run the
+ * server still has is re-adopted from the conversation it belongs to as soon as
+ * that conversation loads.
+ */
+function readActive(): ActiveGeneration | null {
+  const raw = readStored(ACTIVE_KEY);
+  if (raw === null) return null;
+
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const { id, conversationId } = parsed as Record<string, unknown>;
+    if (typeof id !== 'string' || typeof conversationId !== 'string') return null;
+    return { id, conversationId };
+  } catch {
+    return null;
+  }
+}
+
+function writeActive(active: ActiveGeneration | null): void {
+  writeStored(ACTIVE_KEY, active === null ? null : JSON.stringify(active));
+}
 
 /**
  * A dialog waiting on the user.
@@ -173,7 +219,8 @@ export function App({
   const regenerate = useRegenerate();
 
   const attachments = useAttachments();
-  const [generationId, setGenerationId] = useState<string | null>(() => readStored(ACTIVE_KEY));
+  const [generation, setGeneration] = useState<ActiveGeneration | null>(readActive);
+  const generationId = generation?.id ?? null;
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<PendingDialog | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -248,8 +295,28 @@ export function App({
     parseSelection(readStored(LAST_MODEL_KEY))
   );
 
+  /*
+   * The stream stays attached to whatever is running, wherever the reader is.
+   *
+   * Detaching on a conversation change would be the other way to stop the leak,
+   * and a worse one: the run would go on without anyone watching, and coming
+   * back to it would mean waiting for a fresh snapshot. This keeps the
+   * observation channel open and *scopes what is rendered from it* instead.
+   */
   const live = useGeneration(generationId);
-  const busy = live.state === 'pending' || live.state === 'streaming';
+
+  /**
+   * The generation as this transcript sees it.
+   *
+   * `IDLE` for a conversation the running generation does not belong to, which
+   * is the whole fix: every `busy` below, the streaming block, the announcer,
+   * the tail reserve and the scroll follow read this rather than `live`, so a
+   * run in another chat is invisible here — not merely hidden, but absent from
+   * the state this view is computed from.
+   */
+  const isCurrent = generation !== null && generation.conversationId === currentId;
+  const view = isCurrent ? live : IDLE_GENERATION;
+  const busy = view.state === 'pending' || view.state === 'streaming';
   const scroll = useScrollPin();
 
   const groups = useMemo<ProviderGroups>(() => models.data?.providers ?? [], [models.data]);
@@ -359,7 +426,7 @@ export function App({
   // a view that was following the bottom has to follow it to the new one.
   useEffect(() => {
     onContentChange();
-  }, [messages, live.content, live.reasoning, tailSpace, onContentChange]);
+  }, [messages, view.content, view.reasoning, tailSpace, onContentChange]);
 
   /*
    * The answer has filled the room held for it, so the view stops moving.
@@ -383,10 +450,14 @@ export function App({
    */
   const activeGenerationId = conversation.data?.activeGenerationId ?? null;
   useEffect(() => {
-    if (activeGenerationId === null) return;
-    writeStored(ACTIVE_KEY, activeGenerationId);
-    setGenerationId(activeGenerationId);
-  }, [activeGenerationId]);
+    if (activeGenerationId === null || currentId === null) return;
+    // Adopted *with* the conversation it was found on. Opening a chat with no
+    // run of its own deliberately does not clear this: the one in the chat
+    // behind it keeps going, and is simply not rendered here.
+    const adopted = { id: activeGenerationId, conversationId: currentId };
+    writeActive(adopted);
+    setGeneration(adopted);
+  }, [activeGenerationId, currentId]);
 
   /*
    * Fold a settled generation back into the stored transcript.
@@ -422,33 +493,51 @@ export function App({
 
   const settledRef = useRef<string | null>(null);
   useEffect(() => {
-    if (generationId === null) return;
+    if (generation === null) return;
     if (live.state === 'idle' || live.state === 'pending' || live.state === 'streaming') return;
-    if (settledRef.current === generationId) return;
-    settledRef.current = generationId;
+    if (settledRef.current === generation.id) return;
+    settledRef.current = generation.id;
 
-    if (live.state === 'failed' || live.state === 'timed_out') {
-      setError(
-        live.state === 'timed_out'
-          ? 'The model provider timed out.'
-          : failureMessage(live.errorCode)
-      );
+    /*
+     * A failure belongs to the conversation that asked, not to whichever one is
+     * on screen when the answer lands. Raising the banner here regardless is
+     * how a run in chat A used to put an error over chat B; the failed turn is
+     * in A's transcript either way, which is where the reader will look.
+     */
+    if (generation.conversationId === currentId) {
+      if (live.state === 'failed' || live.state === 'timed_out') {
+        setError(
+          live.state === 'timed_out'
+            ? 'The model provider timed out.'
+            : failureMessage(live.errorCode)
+        );
+      }
     }
 
-    writeStored(ACTIVE_KEY, null);
-    setGenerationId(null);
+    writeActive(null);
+    setGeneration(null);
 
     void client.invalidateQueries({ queryKey: keys.conversations() });
-    if (currentId !== null) {
-      void client.invalidateQueries({ queryKey: keys.conversation(currentId) });
-      // Proposals are filed as the reply is persisted, so they arrive on the
-      // same event the message does — and without this the card only appeared
-      // after something else happened to refetch.
-      void client.invalidateQueries({ queryKey: keys.proposals(currentId) });
+    // The generation's own conversation, never the open one: refetching B
+    // because A finished is both a wasted request and a way for A's terminal
+    // event to change what B is showing.
+    void client.invalidateQueries({ queryKey: keys.conversation(generation.conversationId) });
+    // Proposals are filed as the reply is persisted, so they arrive on the
+    // same event the message does — and without this the card only appeared
+    // after something else happened to refetch.
+    void client.invalidateQueries({ queryKey: keys.proposals(generation.conversationId) });
+    /*
+     * A completed reply may have presented files, which the server saves as it
+     * persists the turn. The list is a separate query with its own cache, so
+     * without this the artifact exists and the panel keeps showing the set it
+     * last read — the reader is told to reload to see what they just made.
+     */
+    if (live.state === 'completed') {
+      void client.invalidateQueries({ queryKey: keys.artifacts() });
     }
     // `errorCode` arrives in the same event as the terminal state; the ref
     // above is what keeps this to once per generation, not the dependencies.
-  }, [live.state, live.errorCode, generationId, currentId, client]);
+  }, [live.state, live.errorCode, generation, currentId, client]);
 
   const onSelectModel = useCallback(
     (next: ModelSelection) => {
@@ -553,8 +642,9 @@ export function App({
         content: text,
         attachmentIds: attachments.readyIds,
       });
-      writeStored(ACTIVE_KEY, accepted.generationId);
-      setGenerationId(accepted.generationId);
+      const started = { id: accepted.generationId, conversationId };
+      writeActive(started);
+      setGeneration(started);
       // Only once the server has them: cleared earlier, a failed send would
       // lose the files as well as the text.
       attachments.clear();
@@ -587,8 +677,9 @@ export function App({
         providerId: selection.providerId,
         model: selection.modelId,
       });
-      writeStored(ACTIVE_KEY, accepted.generationId);
-      setGenerationId(accepted.generationId);
+      const started = { id: accepted.generationId, conversationId: currentId };
+      writeActive(started);
+      setGeneration(started);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not regenerate.');
     }
@@ -754,7 +845,7 @@ export function App({
         is the half the focus trap cannot do — the trap keeps focus in, and this
         takes the page behind out of reach of everything else.
       */}
-      <GenerationAnnouncer state={live.state} />
+      <GenerationAnnouncer state={view.state} />
 
       <main
         className={`main${artifact !== null ? ' main--with-artifact' : ''}`}
@@ -858,9 +949,9 @@ export function App({
 
               {busy && (
                 <StreamingMessage
-                  content={live.content}
-                  reasoning={live.reasoning}
-                  state={live.state}
+                  content={view.content}
+                  reasoning={view.reasoning}
+                  state={view.state}
                 />
               )}
 

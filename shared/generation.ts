@@ -25,7 +25,12 @@ export interface ModelDto {
   defaults?: SamplerSettings;
 }
 
-export type MessageRole = 'system' | 'user' | 'assistant';
+/**
+ * `tool` carries the result of a call back to the model, and is the second half
+ * of the tool protocol: a model that asked for something and was never told
+ * what happened has no way to finish its turn, and answers with nothing.
+ */
+export type MessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
 /**
  * One piece of a multimodal message.
@@ -48,6 +53,15 @@ export type ContentPart =
 
 export interface ChatMessage {
   role: MessageRole;
+  /**
+   * The calls this assistant turn made, replayed so a result has an antecedent.
+   *
+   * Upstream rejects a `tool` message whose `tool_call_id` matches nothing in
+   * the conversation, so the assistant turn that asked has to be sent with it.
+   */
+  toolCalls?: ToolCall[];
+  /** Which call this result answers. Required on a `tool` message. */
+  toolCallId?: string;
   /**
    * A plain string for text, or parts when the message carries media.
    *

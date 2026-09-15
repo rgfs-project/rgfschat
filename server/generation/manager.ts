@@ -15,6 +15,14 @@ import { AppError, isAppError } from '../errors/AppError.ts';
 import type { Logger } from '../logger.ts';
 import type { Provider } from '../provider/types.ts';
 
+/**
+ * How long `done` waits on a caller that promised to persist the output.
+ *
+ * Long enough for a write under load, short enough that a caller which died
+ * mid-write does not leave a reader watching a finished reply for ever.
+ */
+const PERSIST_GRACE_MS = 10_000;
+
 /** One emitted event, retained for replay. */
 interface EventEnvelope {
   id: number;
@@ -76,6 +84,24 @@ interface GenerationRecord {
   abort: AbortController;
   emitter: EventEmitter;
   terminalAt: Date | undefined;
+  /**
+   * Whether the one continuation turn this run is allowed has been taken.
+   *
+   * The bound on the loop, and it is a hard one: a continuation is issued with
+   * no tools at all, so the model cannot ask for anything during it, and this
+   * flag means it cannot be issued twice even if it somehow did.
+   */
+  continuation:
+    ((calls: readonly ToolCall[]) => Promise<readonly ChatMessage[] | null>) | undefined;
+  continued: boolean;
+  /**
+   * Set when a caller has said it will persist this run before the reader is
+   * told it finished. `done` then waits for `markPersisted`.
+   */
+  awaitsPersistence: boolean;
+  /** Emitted once, by whichever of persistence or the grace timer comes first. */
+  doneEmitted: boolean;
+  persistTimer: ReturnType<typeof setTimeout> | null;
   /** Bounded replay window; the oldest events fall off the front. */
   replay: EventEnvelope[];
   /** When the last checkpoint was written, to throttle the cadence. */
@@ -158,6 +184,25 @@ export class GenerationManager {
       sampler?: SamplerSettings;
       /** Functions this run offers the model, if any. */
       tools?: readonly ToolDefinition[];
+      /**
+       * Answers the calls this run made, for the one continuation turn.
+       *
+       * Returns the `tool` messages to send back, or `null` to take no
+       * continuation at all. Called at most once, after the first stream ends
+       * and before the run is terminal, so whatever it records — a memory
+       * proposal — is durable before the reader is told the reply finished.
+       */
+      continuation?: (calls: readonly ToolCall[]) => Promise<readonly ChatMessage[] | null>;
+      /**
+       * The caller will call `markPersisted` once this run's output is on
+       * disk, and `done` waits for it.
+       *
+       * Without this the client is told the reply finished before the message
+       * and its proposals exist, so its refetch races the write and comes back
+       * with a transcript that has the reply in it and a proposal list that
+       * does not — which is a card that only appears on the next reload.
+       */
+      awaitsPersistence?: boolean;
     } = {}
   ): { generationId: string; assistantMessageId: string } {
     const client = provider ?? this.#provider;
@@ -194,6 +239,11 @@ export class GenerationManager {
       abort: new AbortController(),
       emitter: new EventEmitter(),
       terminalAt: undefined,
+      continuation: context.continuation,
+      continued: false,
+      awaitsPersistence: context.awaitsPersistence ?? false,
+      doneEmitted: false,
+      persistTimer: null,
       replay: [],
       lastCheckpointAt: 0,
       checkpointTimer: null,
@@ -211,46 +261,116 @@ export class GenerationManager {
     return { generationId: record.id, assistantMessageId: record.assistantMessageId };
   }
 
+  /**
+   * One request against the provider, folded into the record.
+   *
+   * Returns `false` when the record went terminal under it — cancelled, or
+   * failed — so the caller knows not to continue. `tools` is passed explicitly
+   * rather than read from the record: a continuation turn offers none, which is
+   * what makes "one continuation" a property of the protocol and not only of a
+   * flag.
+   */
+  async #stream(
+    record: GenerationRecord,
+    messages: ChatMessage[],
+    tools: readonly ToolDefinition[] | undefined
+  ): Promise<boolean> {
+    // The record's own client, so a generation is unaffected by another
+    // running against a different provider.
+    const stream = record.provider.streamChat({
+      model: record.model,
+      messages,
+      maxOutputTokens: this.#maxOutputTokens,
+      ...(record.sampler === undefined ? {} : { sampler: record.sampler }),
+      ...(tools === undefined ? {} : { tools }),
+      signal: record.abort.signal,
+    });
+
+    for await (const chunk of stream) {
+      // A terminal state may have been reached by cancel while we awaited the
+      // next chunk. Late chunks are dropped rather than resurrecting it.
+      if (isTerminal(record.state)) return false;
+
+      if (record.state === 'pending') this.#setState(record, 'streaming');
+
+      if (chunk.type === 'content') {
+        record.content += chunk.text;
+        this.#emit(record, { type: 'content', delta: chunk.text });
+      } else if (chunk.type === 'reasoning') {
+        record.reasoning += chunk.text;
+        this.#emit(record, { type: 'reasoning', delta: chunk.text });
+      } else if (chunk.type === 'tool_call') {
+        /*
+         * Not emitted as an SSE event. A call is not shown to the reader
+         * until it has been validated and turned into a proposal, which
+         * happens once the run is terminal — streaming a raw call would put
+         * an unvalidated name and argument blob from the provider straight
+         * into the transcript.
+         */
+        record.toolCalls.push(chunk.call);
+      }
+      record.updatedAt = this.#now();
+      // Throttled: a long reply costs a bounded number of writes, not one
+      // per token.
+      this.#checkpoint(record, false);
+    }
+
+    return !isTerminal(record.state);
+  }
+
   async #run(record: GenerationRecord, messages: ChatMessage[]): Promise<void> {
     try {
-      // The record's own client, so a generation is unaffected by another
-      // running against a different provider.
-      const stream = record.provider.streamChat({
-        model: record.model,
-        messages,
-        maxOutputTokens: this.#maxOutputTokens,
-        ...(record.sampler === undefined ? {} : { sampler: record.sampler }),
-        ...(record.tools === undefined ? {} : { tools: record.tools }),
-        signal: record.abort.signal,
-      });
+      if (!(await this.#stream(record, messages, record.tools))) return;
 
-      for await (const chunk of stream) {
-        // A terminal state may have been reached by cancel while we awaited the
-        // next chunk. Late chunks are dropped rather than resurrecting it.
-        if (isTerminal(record.state)) return;
+      /*
+       * The turn is not over when the model asks for something.
+       *
+       * A model that calls a tool and stops has said nothing to the reader: the
+       * transcript shows the reasoning and then simply ends, which is what this
+       * looks like from the outside. The protocol's answer is to tell it what
+       * happened to its call and let it speak — so the caller records the
+       * proposal, hands back the `tool` messages, and one more turn is taken.
+       *
+       * Exactly one, and with no tools offered, so the model cannot ask again
+       * and this cannot become a loop.
+       */
+      /*
+       * Only when the model said nothing to the reader.
+       *
+       * A turn that explained itself *and* asked for something has already
+       * finished the sentence the reader needed; asking it to speak again
+       * appends a second reply to the same message. The calls it made are
+       * filed either way — the persistence path does it when no continuation
+       * is taken — so this changes who files them, never whether.
+       */
+      if (
+        record.toolCalls.length > 0 &&
+        record.content.trim() === '' &&
+        record.continuation !== undefined &&
+        !record.continued
+      ) {
+        record.continued = true;
 
-        if (record.state === 'pending') this.#setState(record, 'streaming');
-
-        if (chunk.type === 'content') {
-          record.content += chunk.text;
-          this.#emit(record, { type: 'content', delta: chunk.text });
-        } else if (chunk.type === 'reasoning') {
-          record.reasoning += chunk.text;
-          this.#emit(record, { type: 'reasoning', delta: chunk.text });
-        } else if (chunk.type === 'tool_call') {
-          /*
-           * Not emitted as an SSE event. A call is not shown to the reader
-           * until it has been validated and turned into a proposal, which
-           * happens once the run is terminal — streaming a raw call would put
-           * an unvalidated name and argument blob from the provider straight
-           * into the transcript.
-           */
-          record.toolCalls.push(chunk.call);
+        let results: readonly ChatMessage[] | null = null;
+        try {
+          results = await record.continuation(record.toolCalls);
+        } catch (err) {
+          // A continuation that could not be prepared costs the follow-up turn,
+          // never the reply that has already arrived.
+          this.#logger.warn('Could not prepare a tool continuation', {
+            generationId: record.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
-        record.updatedAt = this.#now();
-        // Throttled: a long reply costs a bounded number of writes, not one
-        // per token.
-        this.#checkpoint(record, false);
+
+        if (results !== null && results.length > 0 && !isTerminal(record.state)) {
+          const asked: ChatMessage = {
+            role: 'assistant',
+            content: record.content,
+            toolCalls: record.toolCalls,
+          };
+          if (!(await this.#stream(record, [...messages, asked, ...results], undefined))) return;
+        }
       }
 
       this.#finish(record, 'completed');
@@ -293,11 +413,32 @@ export class GenerationManager {
     record.terminalAt = record.updatedAt;
 
     this.#emit(record, { type: 'state', state });
-    this.#emit(record, {
-      type: 'done',
-      state,
-      ...(errorCode !== undefined ? { errorCode } : {}),
-    });
+
+    /*
+     * The terminal state is emitted now; `done` is not.
+     *
+     * `done` is the client's signal to stop watching and go and read the
+     * conversation, so emitting it before the reply and its proposals are on
+     * disk hands the client a refetch that races the write — it comes back
+     * with the assistant message present and the proposal list still empty,
+     * and the card only appears on some later reload. So when a caller has
+     * said it will persist this run, `done` waits for it.
+     */
+    record.emitter.emit('terminal');
+    if (record.awaitsPersistence && state === 'completed') {
+      // A caller that dies mid-write must not leave a client watching for
+      // ever, so the wait is bounded and the run is reported either way.
+      record.persistTimer = setTimeout(() => {
+        this.#logger.warn('Generation output was not persisted in time', {
+          generationId: record.id,
+        });
+        this.#emitDone(record);
+      }, PERSIST_GRACE_MS);
+      // A pending timer must not hold the process open on shutdown.
+      record.persistTimer.unref?.();
+    } else {
+      this.#emitDone(record);
+    }
 
     if (record.checkpointTimer !== null) {
       clearInterval(record.checkpointTimer);
@@ -305,6 +446,43 @@ export class GenerationManager {
     }
     // A terminal transition must always be recorded, however recent the last write.
     this.#checkpoint(record, true);
+  }
+
+  /**
+   * Emits `done` once, whatever route it arrived by.
+   *
+   * Idempotent on purpose: persistence finishing and the grace timer firing
+   * are a race, and a second `done` would be a second terminal event for one
+   * generation (INV-05 as the client sees it).
+   */
+  #emitDone(record: GenerationRecord): void {
+    if (record.doneEmitted) return;
+    record.doneEmitted = true;
+
+    if (record.persistTimer !== null) {
+      clearTimeout(record.persistTimer);
+      record.persistTimer = null;
+    }
+
+    this.#emit(record, {
+      type: 'done',
+      state: record.state as TerminalState,
+      ...(record.errorCode !== undefined ? { errorCode: record.errorCode } : {}),
+    });
+  }
+
+  /**
+   * Says this run's output is durable, releasing `done` to the client.
+   *
+   * Called by whoever claimed `awaitsPersistence`, after the assistant message
+   * and everything filed with it — proposals, artifacts — are on disk. An
+   * unknown or already-reported generation is a no-op, so a retry or a second
+   * completion path costs nothing.
+   */
+  markPersisted(generationId: string): void {
+    const record = this.#generations.get(generationId);
+    if (record === undefined || !isTerminal(record.state)) return;
+    this.#emitDone(record);
   }
 
   #setState(record: GenerationRecord, state: GenerationState): void {
@@ -461,13 +639,17 @@ export class GenerationManager {
 
     if (isTerminal(record.state)) return Promise.resolve(settled());
 
+    /*
+     * Waits on the internal terminal signal rather than on `done`, because
+     * `done` may be waiting on *this* caller: it is the persistence this
+     * resolves into that releases it.
+     */
     return new Promise((resolve) => {
-      const listener = ({ event }: { event: GenerationEvent }): void => {
-        if (event.type !== 'done') return;
-        record.emitter.off('event', listener);
+      const listener = (): void => {
+        record.emitter.off('terminal', listener);
         resolve(settled());
       };
-      record.emitter.on('event', listener);
+      record.emitter.on('terminal', listener);
     });
   }
 

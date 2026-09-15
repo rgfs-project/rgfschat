@@ -215,6 +215,15 @@ export function useResolveProposal(): UseMutationResult<
       void client.invalidateQueries({ queryKey: keys.proposals(conversationId) });
       void client.invalidateQueries({ queryKey: keys.memories() });
     },
+    /*
+     * A failed accept leaves the proposal on the server, so the list is
+     * refetched here too — the card stays, and the memories panel is brought up
+     * to date with whatever it collided with.
+     */
+    onError: (_error, { conversationId }) => {
+      void client.invalidateQueries({ queryKey: keys.proposals(conversationId) });
+      void client.invalidateQueries({ queryKey: keys.memories() });
+    },
   });
 }
 

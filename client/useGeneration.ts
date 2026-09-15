@@ -10,7 +10,11 @@ export interface LiveGeneration {
   errorCode: string | undefined;
 }
 
-const IDLE: LiveGeneration = {
+/**
+ * Nothing running, and what a transcript renders from when the generation that
+ * *is* running belongs to another conversation.
+ */
+export const IDLE_GENERATION: LiveGeneration = {
   content: '',
   reasoning: '',
   state: 'idle',
@@ -26,7 +30,7 @@ const IDLE: LiveGeneration = {
  * up mid-flight output without gaps.
  */
 export function useGeneration(generationId: string | null): LiveGeneration {
-  const [live, setLive] = useState<LiveGeneration>(IDLE);
+  const [live, setLive] = useState<LiveGeneration>(IDLE_GENERATION);
   /**
    * Highest event id applied.
    *
@@ -61,7 +65,7 @@ export function useGeneration(generationId: string | null): LiveGeneration {
 
   useEffect(() => {
     if (generationId === null) {
-      setLive(IDLE);
+      setLive(IDLE_GENERATION);
       return;
     }
 

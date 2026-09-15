@@ -41,6 +41,9 @@ const metaSchema = z.strictObject({
   mediaType: z.string(),
   description: z.string().nullable(),
   conversationId: z.string().nullable(),
+  // Added when replies began presenting files of their own. Optional on read:
+  // every artifact imported before that has none, and an import never will.
+  messageId: z.string().nullable().optional(),
   size: z.number().int().nonnegative(),
   createdAt: z.string(),
 });
@@ -52,6 +55,8 @@ export interface ArtifactMeta {
   mediaType: ArtifactMediaType;
   description: string | null;
   conversationId: string | null;
+  /** The assistant turn that presented it, for an artifact a reply produced. */
+  messageId: string | null;
   size: number;
   createdAt: string;
 }
@@ -62,6 +67,7 @@ export interface CreateArtifact {
   content: string;
   description?: string | undefined;
   conversationId?: string | undefined;
+  messageId?: string | undefined;
   /** When it was produced, if that is known to be something other than now. */
   createdAt?: string | undefined;
 }
@@ -85,6 +91,7 @@ export function toArtifactDto(meta: ArtifactMeta): ArtifactDto {
     size: meta.size,
     createdAt: meta.createdAt,
     ...(meta.conversationId === null ? {} : { conversationId: meta.conversationId }),
+    ...(meta.messageId === null ? {} : { messageId: meta.messageId }),
   };
 }
 
@@ -156,6 +163,7 @@ export class ArtifactStore {
       description:
         description === '' ? null : description.slice(0, ARTIFACT_DESCRIPTION_MAX_LENGTH),
       conversationId: input.conversationId ?? null,
+      messageId: input.messageId ?? null,
       size,
       createdAt: input.createdAt ?? this.#now().toISOString(),
     };
@@ -167,6 +175,32 @@ export class ArtifactStore {
 
     this.#logger.info('Artifact written', { userId, artifactId: id, size });
     return meta;
+  }
+
+  /**
+   * Whether this turn has already presented a file under this name.
+   *
+   * The guard against a second copy, and durable rather than remembered: a
+   * stream that reconnects, a page that reloads, a completion event handled
+   * twice, or a recovery pass after a restart all ask the same question, and
+   * only the disk can answer it across a process boundary. Scoped to the
+   * message rather than the name alone, so a reply that presents `index.html`
+   * today does not stop another one presenting `index.html` tomorrow.
+   */
+  async presentedAlready(
+    userId: string,
+    conversationId: string,
+    messageId: string,
+    name: string
+  ): Promise<boolean> {
+    const display = displayArtifactName(name);
+    const existing = await this.list(userId);
+    return existing.some(
+      (artifact) =>
+        artifact.conversationId === conversationId &&
+        artifact.messageId === messageId &&
+        artifact.name === display
+    );
   }
 
   /** Removes one. Resolves to whether there was anything to remove. */
@@ -219,6 +253,10 @@ export class ArtifactStore {
     const present = await stat(this.#paths.artifactBlob(userId, artifactId)).catch(() => null);
     if (present === null) return null;
 
-    return { ...parsed.data, mediaType: parsed.data.mediaType };
+    return {
+      ...parsed.data,
+      mediaType: parsed.data.mediaType,
+      messageId: parsed.data.messageId ?? null,
+    };
   }
 }

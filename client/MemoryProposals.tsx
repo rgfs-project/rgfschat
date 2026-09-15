@@ -1,5 +1,5 @@
 import { Brain, Check, Pencil, Trash2, X } from 'lucide-react';
-import type { MemoryProposalDto } from './api.ts';
+import { ApiError, type MemoryProposalDto } from './api.ts';
 import { useResolveProposal } from './queries.ts';
 
 /**
@@ -102,7 +102,16 @@ export function MemoryProposals({
 
       {resolve.isError && (
         <li className="proposal proposal--error" role="alert">
-          That could not be saved. {resolve.error.message}
+          {/*
+           * A conflict already says exactly what happened — the name is taken,
+           * or the note changed since the model asked — and the proposal is
+           * still above this line to answer again once that is dealt with. The
+           * generic lead-in would only bury it, and it reads wrong for a
+           * deletion, which was never a save.
+           */}
+          {resolve.error instanceof ApiError && resolve.error.code === 'CONFLICT'
+            ? resolve.error.message
+            : `That could not be saved. ${resolve.error.message}`}
         </li>
       )}
     </ul>

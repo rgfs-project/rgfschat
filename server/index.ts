@@ -107,6 +107,7 @@ async function main(): Promise<void> {
     settings,
     memories,
     proposals,
+    artifacts,
     attachments,
     maxInlineChars: config.attachments.maxInlineChars,
     users: {
