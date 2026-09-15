@@ -213,3 +213,136 @@ describe('useScrollPin', () => {
     });
   });
 });
+
+/**
+ * Nothing survives a conversation change.
+ *
+ * This hook holds a picture of one transcript: whether the reader had scrolled
+ * away from its bottom, where we last put it, whether it overflows at all.
+ * None of that describes the next one, and carrying it over is what left a
+ * jump-to-latest arrow hanging over an empty New chat — the reader had scrolled
+ * up in a long conversation, and `pinned` was still false when a transcript
+ * with nothing in it rendered underneath it.
+ */
+describe('resetting for another conversation', () => {
+  it('offers no way back on a transcript that cannot scroll', () => {
+    // Content shorter than the viewport: there is no "latest" to jump to.
+    const harness = mount(200);
+    userScrollTo(harness.element, harness.geometry, 0);
+
+    expect(harness.pin.showJumpToLatest).toBe(false);
+  });
+
+  it('offers one on a transcript that can', () => {
+    const harness = mount();
+    userScrollTo(harness.element, harness.geometry, 0);
+
+    expect(harness.pin.showJumpToLatest).toBe(true);
+  });
+
+  /* The reported sequence: scrolled away in a long chat, then New chat. */
+  it('takes the control away when the next transcript is empty', () => {
+    const harness = mount();
+    userScrollTo(harness.element, harness.geometry, 0);
+    expect(harness.pin.showJumpToLatest).toBe(true);
+
+    act(() => {
+      // The new conversation renders: nothing in it, nothing to scroll.
+      harness.geometry.set({ scrollHeight: VIEWPORT, scrollTop: 0 });
+      harness.pin.reset();
+    });
+
+    expect(harness.pin.showJumpToLatest).toBe(false);
+    expect(harness.pin.pinned).toBe(true);
+  });
+
+  it('takes it away for a short conversation too, not only an empty one', () => {
+    const harness = mount();
+    userScrollTo(harness.element, harness.geometry, 0);
+
+    act(() => {
+      harness.geometry.set({ scrollHeight: VIEWPORT - 100, scrollTop: 0 });
+      harness.pin.reset();
+    });
+
+    expect(harness.pin.showJumpToLatest).toBe(false);
+  });
+
+  it('starts the new transcript at the bottom, following again', () => {
+    const harness = mount();
+    userScrollTo(harness.element, harness.geometry, 0);
+
+    act(() => {
+      harness.geometry.set({ scrollHeight: 3000, scrollTop: 0 });
+      harness.pin.reset();
+    });
+
+    expect(harness.element.scrollTop).toBe(3000);
+    expect(harness.pin.pinned).toBe(true);
+  });
+
+  /*
+   * A guard window left running from the previous conversation would swallow
+   * the new one's first real scroll as one of ours, and the reader would find
+   * the transcript following the bottom after they had scrolled away from it.
+   */
+  it('does not swallow the next conversation’s first scroll', () => {
+    const harness = mount();
+
+    // A smooth jump opens a guard window, then the conversation changes.
+    act(() => {
+      harness.pin.jumpToLatest();
+    });
+    act(() => {
+      harness.geometry.set({ scrollHeight: 3000, scrollTop: 2500 });
+      harness.pin.reset();
+    });
+
+    userScrollTo(harness.element, harness.geometry, 0);
+
+    expect(harness.pin.pinned).toBe(false);
+    expect(harness.pin.showJumpToLatest).toBe(true);
+  });
+
+  /* Rapid switching: whichever transcript is on screen last is the one the
+     state describes, however many resets landed before it. */
+  it('describes only the transcript it was last reset on', () => {
+    const harness = mount();
+    userScrollTo(harness.element, harness.geometry, 0);
+
+    act(() => {
+      harness.geometry.set({ scrollHeight: VIEWPORT, scrollTop: 0 });
+      harness.pin.reset();
+    });
+    act(() => {
+      harness.geometry.set({ scrollHeight: 4000, scrollTop: 4000 - VIEWPORT });
+      harness.pin.reset();
+    });
+
+    // Back in a long one, at its bottom: pinned, and nothing to offer yet.
+    expect(harness.pin.pinned).toBe(true);
+    expect(harness.pin.showJumpToLatest).toBe(false);
+
+    // And it still behaves as a long transcript once they scroll up again.
+    userScrollTo(harness.element, harness.geometry, 0);
+    expect(harness.pin.showJumpToLatest).toBe(true);
+  });
+
+  it('ignores a scroll event that arrives after the reset', () => {
+    const harness = mount();
+    userScrollTo(harness.element, harness.geometry, 0);
+
+    act(() => {
+      harness.geometry.set({ scrollHeight: VIEWPORT, scrollTop: 0 });
+      harness.pin.reset();
+    });
+
+    // A late event from the transcript that has just gone: the geometry it
+    // reports is the new one's, which is not scrollable.
+    act(() => {
+      harness.element.dispatchEvent(new Event('scroll'));
+    });
+
+    expect(harness.pin.showJumpToLatest).toBe(false);
+  });
+});

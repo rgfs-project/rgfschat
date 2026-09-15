@@ -1,4 +1,12 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, PanelLeft } from 'lucide-react';
 import type { ArtifactDto } from '@shared/artifact';
@@ -422,6 +430,23 @@ export function App({
   useEffect(() => {
     writeStored(SIDEBAR_KEY, collapsed ? 'true' : 'false');
   }, [collapsed]);
+
+  /*
+   * A conversation change is not a scroll, and nothing about the last one
+   * describes this one.
+   *
+   * Laid out before the paint that shows the new transcript, so it never
+   * appears at the previous conversation's offset and then correct itself. The
+   * reserve is rebuilt by its own layout effect against the new anchor, and the
+   * streaming state is already scoped by conversation — this is the third of
+   * the three things that used to cross over, and the visible one: the
+   * jump-to-latest arrow, left pointing at a transcript that no longer existed,
+   * hanging over an empty New chat.
+   */
+  const { reset: resetScroll } = scroll;
+  useLayoutEffect(() => {
+    resetScroll();
+  }, [currentId, resetScroll]);
 
   const { onContentChange } = scroll;
   // Content changed: follow the bottom, or leave the reader where they are.

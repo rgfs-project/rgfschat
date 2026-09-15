@@ -197,3 +197,62 @@ test('a deliberate scroll away is left alone', async ({ app, page }) => {
 
   app.provider.finish();
 });
+
+/*
+ * Nothing crosses a conversation change: not the scroll position, not the
+ * anchor, not the loader, not the reply that is still streaming into the chat
+ * behind it — and not the jump-to-latest arrow, which is the one that showed.
+ */
+test('opening another conversation starts from its own state', async ({ app, page }) => {
+  await signIn(page, app.baseUrl);
+  await withHistory(page, app);
+
+  const composer = composerField(page);
+  await composer.fill('the streaming question');
+  await composer.press('Enter');
+  await app.provider.waitForStream();
+  app.provider.send('The answer is arriving.\n\n'.repeat(4));
+  await expect(page.locator('.msg--streaming')).toBeVisible();
+
+  // Scrolled up, so the way back is on offer in this conversation.
+  await page.locator('[data-testid="transcript"]').evaluate((node) => {
+    node.scrollTop = 0;
+  });
+  await expect(page.getByRole('button', { name: 'Jump to latest' })).toBeVisible();
+
+  // New chat, mid-generation.
+  await page.getByRole('button', { name: 'New chat' }).click();
+
+  // Nothing of the conversation behind it: no arrow over an empty screen, no
+  // loader, no cursor, no partial reply.
+  await expect(page.getByRole('button', { name: 'Jump to latest' })).toBeHidden();
+  await expect(page.locator('.msg--streaming')).toHaveCount(0);
+  await expect(page.locator('.thinking')).toHaveCount(0);
+  await expect(page.getByText('The answer is arriving.')).toHaveCount(0);
+
+  // And the transcript it left is where it was, still running.
+  app.provider.send('And the rest of it.\n\n');
+  await expect(page.getByText('And the rest of it.')).toHaveCount(0);
+
+  app.provider.finish();
+});
+
+test('the jump control is never offered on a transcript that fits', async ({ app, page }) => {
+  await signIn(page, app.baseUrl);
+
+  // A single short exchange: nothing to scroll, so nothing to jump to.
+  await startGeneration(page, 'hello');
+  await app.provider.waitForStream();
+  app.provider.send('Hi.');
+  app.provider.finish();
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible();
+
+  await expect(page.getByRole('button', { name: 'Jump to latest' })).toBeHidden();
+
+  // Even after a scroll attempt, which a short transcript cannot act on.
+  await page.locator('[data-testid="transcript"]').evaluate((node) => {
+    node.scrollTop = 0;
+    node.dispatchEvent(new Event('scroll'));
+  });
+  await expect(page.getByRole('button', { name: 'Jump to latest' })).toBeHidden();
+});

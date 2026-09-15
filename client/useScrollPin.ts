@@ -14,6 +14,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  * the user.
  */
 
+/** Below this, the transcript fits and there is nowhere to jump to. */
+const SCROLLABLE_EPSILON_PX = 1;
+
 /** How close to the bottom still counts as pinned. */
 const PIN_THRESHOLD_PX = 48;
 
@@ -41,7 +44,14 @@ export interface ScrollPin {
   ref: React.RefObject<HTMLDivElement | null>;
   /** Whether new content should follow the bottom. */
   pinned: boolean;
-  /** Scrolled away from the bottom, so a way back is worth offering. */
+  /**
+   * Scrolled away from the bottom of a transcript that can be scrolled.
+   *
+   * Both halves matter. A conversation with nothing in it, or one short enough
+   * to fit, has no "latest" to go back to — offering the control there is a
+   * button that does nothing, and it is exactly what a stale `pinned` from the
+   * conversation before produced: the arrow hanging over an empty New chat.
+   */
   showJumpToLatest: boolean;
   /** Scrolls to the bottom and re-pins. Safe to call from a click handler. */
   jumpToLatest: () => void;
@@ -51,6 +61,17 @@ export interface ScrollPin {
   release: () => void;
   /** Call whenever rendered content changes (new token, new message). */
   onContentChange: () => void;
+  /**
+   * Forgets everything and starts again at the bottom.
+   *
+   * For a conversation change, which is not a scroll: none of what this holds
+   * — pinned or not, the position we last set, the guard windows, whether the
+   * thing is scrollable at all — describes the transcript that is now on
+   * screen. Carried over, they are read against the new one, which is how a
+   * reader who had scrolled up in a long chat arrived at an empty New chat with
+   * a jump-to-latest arrow over it.
+   */
+  reset: () => void;
   /**
    * Moves the view by `delta` without it counting as the reader scrolling.
    *
@@ -64,6 +85,14 @@ export interface ScrollPin {
 export function useScrollPin(): ScrollPin {
   const ref = useRef<HTMLDivElement | null>(null);
   const [pinned, setPinned] = useState(true);
+
+  /**
+   * Whether there is anything to scroll, measured rather than assumed.
+   *
+   * Starts false: a transcript that has not been measured yet has nothing to
+   * go back to, and starting true would flash the control on every open.
+   */
+  const [scrollable, setScrollable] = useState(false);
 
   /**
    * The pinned flag again, readable synchronously.
@@ -104,6 +133,11 @@ export function useScrollPin(): ScrollPin {
   const isAtBottom = useCallback((element: HTMLElement): boolean => {
     const distance = element.scrollHeight - element.scrollTop - element.clientHeight;
     return distance <= PIN_THRESHOLD_PX;
+  }, []);
+
+  /** Re-reads whether this transcript overflows its viewport at all. */
+  const measureScrollable = useCallback((element: HTMLElement): void => {
+    setScrollable(element.scrollHeight - element.clientHeight > SCROLLABLE_EPSILON_PX);
   }, []);
 
   const scrollToBottom = useCallback((element: HTMLElement, smooth: boolean): void => {
@@ -162,6 +196,7 @@ export function useScrollPin(): ScrollPin {
       const atBottom = isAtBottom(element);
       pinnedRef.current = atBottom;
       setPinned(atBottom);
+      measureScrollable(element);
     };
 
     /*
@@ -196,6 +231,10 @@ export function useScrollPin(): ScrollPin {
       if (pinnedRef.current) scrollToBottom(element, false);
     };
 
+    // Measured once on mount, so a transcript that already overflows is known
+    // to before the first scroll event that might never come.
+    measureScrollable(element);
+
     element.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', markResize);
     window.visualViewport?.addEventListener('resize', markResize);
@@ -205,7 +244,7 @@ export function useScrollPin(): ScrollPin {
       window.removeEventListener('resize', markResize);
       window.visualViewport?.removeEventListener('resize', markResize);
     };
-  }, [isAtBottom, scrollToBottom]);
+  }, [isAtBottom, measureScrollable, scrollToBottom]);
 
   useEffect(
     () => () => {
@@ -218,10 +257,14 @@ export function useScrollPin(): ScrollPin {
     const element = ref.current;
     if (element === null) return;
 
+    // Whether there is anywhere to jump to changes with the content, and this
+    // is the one call that happens every time the content changes.
+    measureScrollable(element);
+
     // Unpinned, the viewport is left exactly where the reader put it; the
     // jump control is their way back, and it is already on screen.
     if (pinnedRef.current) scrollToBottom(element, false);
-  }, [scrollToBottom]);
+  }, [measureScrollable, scrollToBottom]);
 
   /**
    * Nudges the view, and owns the scroll event it causes.
@@ -265,6 +308,38 @@ export function useScrollPin(): ScrollPin {
     if (element !== null) scrollToBottom(element, false);
   }, [scrollToBottom]);
 
+  /**
+   * Starts over on a transcript this hook has never seen.
+   *
+   * Everything that could outlive the switch is dropped here: the pinned flag
+   * and its ref, the position we last scrolled to, the smooth-scroll and resize
+   * guard windows along with the timer that would have cleared them, and the
+   * scrollable measurement. A guard window left running would swallow the new
+   * conversation's first real scroll as "ours"; a stale `programmaticTop` would
+   * match a position in it by coincidence and do the same.
+   */
+  const reset = useCallback((): void => {
+    if (smoothTimer.current !== null) {
+      window.clearTimeout(smoothTimer.current);
+      smoothTimer.current = null;
+    }
+    smoothUntil.current = 0;
+    resizeUntil.current = 0;
+    programmaticTop.current = null;
+
+    pinnedRef.current = true;
+    setPinned(true);
+    setScrollable(false);
+
+    const element = ref.current;
+    if (element === null) return;
+
+    // The canonical position for a transcript nobody has scrolled yet: the
+    // bottom, which for an empty one is also the top.
+    element.scrollTop = element.scrollHeight;
+    measureScrollable(element);
+  }, [measureScrollable]);
+
   const jumpToLatest = useCallback((): void => {
     const element = ref.current;
     if (element === null) return;
@@ -278,11 +353,12 @@ export function useScrollPin(): ScrollPin {
   return {
     ref,
     pinned,
-    showJumpToLatest: !pinned,
+    showJumpToLatest: !pinned && scrollable,
     jumpToLatest,
     pin,
     release,
     onContentChange,
     adjustBy,
+    reset,
   };
 }
