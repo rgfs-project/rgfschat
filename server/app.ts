@@ -13,6 +13,7 @@ import type { PreferencesStore } from './storage/preferences.ts';
 import type { ArtifactStore } from './storage/artifacts.ts';
 import { artifactRoutes } from './routes/artifacts.ts';
 import type { MemoryStore } from './storage/memories.ts';
+import type { ProposalStore } from './storage/proposals.ts';
 import { meRouter } from './routes/me.ts';
 import { authRouter } from './routes/auth.ts';
 import { adminRouter } from './routes/admin.ts';
@@ -48,6 +49,8 @@ export interface AppOptions {
   /** Per-reader state that belongs in neither the file nor the index. */
   preferences?: PreferencesStore;
   memories?: MemoryStore;
+  /** Memory changes the model has proposed, awaiting the reader's answer. */
+  proposals?: ProposalStore;
   artifacts?: ArtifactStore;
   service?: GenerationService;
   users?: UserStore;
@@ -78,6 +81,7 @@ export function createApp({
   index,
   preferences,
   memories,
+  proposals,
   artifacts,
   service,
   users,
@@ -158,6 +162,9 @@ export function createApp({
                 service.activeGenerationId(userId, conversationId),
             }
           : {}),
+        // Both or neither: answering a proposal means writing a memory, so a
+        // route with one and not the other could only ever fail.
+        ...(proposals !== undefined && memories !== undefined ? { proposals, memories } : {}),
       })
     );
   }

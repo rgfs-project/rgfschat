@@ -59,6 +59,38 @@ export interface ChatMessage {
   content: string | ContentPart[];
 }
 
+/**
+ * A function the model may ask to have run, in the OpenAI `tools` shape.
+ *
+ * Only ever sent *to* the provider. The parameter schema is plain JSON Schema
+ * because that is what upstream takes; it is not derived from the zod schema
+ * that validates the arguments coming back, since the two answer different
+ * questions — this one tells the model what to send, and the zod one refuses
+ * to believe it.
+ */
+export interface ToolDefinition {
+  type: 'function';
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+/**
+ * One call the model asked for, reassembled from the stream.
+ *
+ * `arguments` is the raw JSON *string* upstream sent, not a parsed object: a
+ * model can emit malformed JSON, and keeping the text means the failure is
+ * visible at the point it is validated rather than crashing the stream reader
+ * several layers below where anything could be done about it.
+ */
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
 /** The text of a message, whichever form it is in. */
 export function textOf(content: string | ContentPart[]): string {
   if (typeof content === 'string') return content;

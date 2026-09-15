@@ -1,15 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, PanelLeft } from 'lucide-react';
 import type { ArtifactDto } from '@shared/artifact';
 import type { UserDto } from '@shared/auth';
-import { ApiError, cancelGeneration, downloadConversation } from './api.ts';
+import { ApiError, cancelGeneration, downloadConversation, type MemoryProposalDto } from './api.ts';
 import { ArtifactPanel } from './ArtifactPanel.tsx';
 import { ArtifactsDialog } from './ArtifactsDialog.tsx';
 import { Composer } from './Composer.tsx';
 import { Dialog } from './Dialog.tsx';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
 import { failureMessage } from './failureMessage.ts';
+import { MemoryProposals } from './MemoryProposals.tsx';
 import { Message, StreamingMessage } from './Message.tsx';
 import type { ModelSelection } from './ModelPicker.tsx';
 import { SearchDialog } from './SearchDialog.tsx';
@@ -24,6 +25,7 @@ import {
   useEditMessage,
   useModels,
   useMyPreferences,
+  useProposals,
   useRegenerate,
   usePinConversation,
   useRenameConversation,
@@ -158,6 +160,7 @@ export function App({
   const models = useModels(true);
   const conversation = useConversation(currentId);
   const preferences = useMyPreferences();
+  const proposals = useProposals(currentId);
 
   const createConversation = useCreateConversation();
   const renameConversation = useRenameConversation();
@@ -292,6 +295,28 @@ export function App({
   const messages = useMemo(() => conversation.data?.messages ?? [], [conversation.data]);
 
   /**
+   * Proposals grouped by the assistant turn that made them.
+   *
+   * Grouped once rather than filtered inside the render loop, which would walk
+   * the whole list again for every message on every keystroke of a streaming
+   * reply.
+   */
+  const proposalsByMessage = useMemo(() => {
+    const grouped = new Map<string, MemoryProposalDto[]>();
+    for (const proposal of proposals.data ?? []) {
+      const existing = grouped.get(proposal.assistantMessageId);
+      if (existing === undefined) grouped.set(proposal.assistantMessageId, [proposal]);
+      else existing.push(proposal);
+    }
+    return grouped;
+  }, [proposals.data]);
+
+  const proposalsFor = useCallback(
+    (messageId: string): MemoryProposalDto[] => proposalsByMessage.get(messageId) ?? [],
+    [proposalsByMessage]
+  );
+
+  /**
    * The last question asked, which is the only one that can be asked again:
    * regeneration replaces the reply that follows it, and for an earlier turn
    * every exchange after it would have to be discarded too.
@@ -385,6 +410,10 @@ export function App({
     void client.invalidateQueries({ queryKey: keys.conversations() });
     if (currentId !== null) {
       void client.invalidateQueries({ queryKey: keys.conversation(currentId) });
+      // Proposals are filed as the reply is persisted, so they arrive on the
+      // same event the message does — and without this the card only appeared
+      // after something else happened to refetch.
+      void client.invalidateQueries({ queryKey: keys.proposals(currentId) });
     }
     // `errorCode` arrives in the same event as the terminal state; the ref
     // above is what keeps this to once per generation, not the dependencies.
@@ -770,17 +799,26 @@ export function App({
 
               {!malformed &&
                 messages.map((message, index) => (
-                  <Message
-                    key={message.id}
-                    message={message}
-                    isLast={index === messages.length - 1}
-                    busy={busy}
-                    canResend={index === lastUserIndex}
-                    highlighted={message.id === focusMessageId}
-                    onEdit={onEditMessage}
-                    onDelete={(id) => setDialog({ kind: 'delete-message', id })}
-                    onRegenerate={() => void onRegenerate()}
-                  />
+                  <Fragment key={message.id}>
+                    <Message
+                      message={message}
+                      isLast={index === messages.length - 1}
+                      busy={busy}
+                      canResend={index === lastUserIndex}
+                      highlighted={message.id === focusMessageId}
+                      onEdit={onEditMessage}
+                      onDelete={(id) => setDialog({ kind: 'delete-message', id })}
+                      onRegenerate={() => void onRegenerate()}
+                    />
+                    {/* Under the turn that asked, so the answer is given with
+                        the conversation it came out of still in view. */}
+                    {currentId !== null && proposalsFor(message.id).length > 0 && (
+                      <MemoryProposals
+                        conversationId={currentId}
+                        proposals={proposalsFor(message.id)}
+                      />
+                    )}
+                  </Fragment>
                 ))}
 
               {busy && (

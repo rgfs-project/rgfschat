@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import type { ToolCall } from '@shared/generation.ts';
 import type { ProviderConfig } from '../config.ts';
 import { isAppError } from '../errors/AppError.ts';
 import { createLogger } from '../logger.ts';
@@ -32,7 +33,9 @@ async function provider(
   );
 }
 
-async function collect(iterable: AsyncIterable<{ type: string; text?: string; reason?: string }>) {
+async function collect(
+  iterable: AsyncIterable<{ type: string; text?: string; reason?: string; call?: ToolCall }>
+) {
   const chunks = [];
   for await (const chunk of iterable) chunks.push(chunk);
   return chunks;
@@ -435,5 +438,131 @@ describe('LlamaCppProvider.streamChat', () => {
     await expect(iterator.next()).rejects.toSatisfy(
       (err: unknown) => !isAppError(err) || err.code !== 'PROVIDER_UNAVAILABLE'
     );
+  });
+});
+
+describe('LlamaCppProvider tool calls', () => {
+  const stream = (p: LlamaCppProvider) =>
+    p.streamChat({
+      model: 'GPT',
+      messages: [{ role: 'user', content: 'hi' }],
+      maxOutputTokens: 64,
+      signal: new AbortController().signal,
+    });
+
+  it('omits `tools` entirely when none are offered', async () => {
+    const p = await provider();
+
+    await collect(stream(p));
+
+    const body = mock?.requests.at(-1)?.body as Record<string, unknown>;
+    expect(body).not.toHaveProperty('tools');
+  });
+
+  it('sends the definitions it is given', async () => {
+    const p = await provider();
+    const tools = [
+      {
+        type: 'function' as const,
+        function: { name: 'remember', description: 'save a note', parameters: { type: 'object' } },
+      },
+    ];
+
+    await collect(
+      p.streamChat({
+        model: 'GPT',
+        messages: [{ role: 'user', content: 'hi' }],
+        maxOutputTokens: 64,
+        tools,
+        signal: new AbortController().signal,
+      })
+    );
+
+    expect((mock?.requests.at(-1)?.body as Record<string, unknown>)['tools']).toEqual(tools);
+  });
+
+  /* The whole point of the accumulator: a call arrives as fragments, and only
+     the first names it. */
+  it('reassembles one call from fragments split across frames', async () => {
+    const p = await provider({
+      contentChunks: [],
+      toolCalls: [
+        {
+          id: 'call_1',
+          name: 'remember',
+          argumentChunks: ['{"name":"coff', 'ee-order","con', 'tent":"Flat white."}'],
+        },
+      ],
+    });
+
+    const chunks = await collect(stream(p));
+
+    expect(chunks.filter((chunk) => chunk.type === 'tool_call')).toEqual([
+      {
+        type: 'tool_call',
+        call: {
+          id: 'call_1',
+          name: 'remember',
+          arguments: '{"name":"coffee-order","content":"Flat white."}',
+        },
+      },
+    ]);
+  });
+
+  it('keeps two interleaved calls apart, ordered by index', async () => {
+    const p = await provider({
+      contentChunks: [],
+      toolCalls: [
+        { id: 'call_a', name: 'remember', argumentChunks: ['{"name":"a",', '"content":"A"}'] },
+        { id: 'call_b', name: 'forget_memory', argumentChunks: ['{"name"', ':"b"}'] },
+      ],
+    });
+
+    const calls = (await collect(stream(p)))
+      .filter((chunk): chunk is { type: 'tool_call'; call: ToolCall } => chunk.type === 'tool_call')
+      .map((chunk) => chunk.call);
+
+    expect(calls).toEqual([
+      { id: 'call_a', name: 'remember', arguments: '{"name":"a","content":"A"}' },
+      { id: 'call_b', name: 'forget_memory', arguments: '{"name":"b"}' },
+    ]);
+  });
+
+  /* Flushed before `finish`, so a consumer that stops reading there still has
+     them. */
+  it('emits calls ahead of the finish chunk', async () => {
+    const p = await provider({
+      contentChunks: ['ok'],
+      toolCalls: [{ id: 'c', name: 'remember', argumentChunks: ['{}'] }],
+    });
+
+    const types = (await collect(stream(p))).map((chunk) => chunk.type);
+
+    expect(types.indexOf('tool_call')).toBeLessThan(types.indexOf('finish'));
+  });
+
+  it('drops a call the provider never named', async () => {
+    const p = await provider({
+      contentChunks: [],
+      toolCalls: [{ id: 'c', name: '', argumentChunks: ['{"name":"x"}'] }],
+    });
+
+    expect((await collect(stream(p))).filter((chunk) => chunk.type === 'tool_call')).toEqual([]);
+  });
+
+  /* Content alongside a call must survive it: a reply that says "I've offered
+     to remember that" is the half the reader actually sees. */
+  it('still streams content when a call is made', async () => {
+    const p = await provider({
+      contentChunks: ['Noted', '.'],
+      toolCalls: [{ id: 'c', name: 'remember', argumentChunks: ['{}'] }],
+    });
+
+    const text = (await collect(stream(p)))
+      .filter((chunk) => chunk.type === 'content')
+      .map((chunk) => chunk.text)
+      .join('');
+
+    expect(text).toBe('Noted.');
   });
 });

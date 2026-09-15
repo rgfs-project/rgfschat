@@ -2402,6 +2402,95 @@ button.linkish:hover {
   white-space: nowrap;
 }
 
+/* --- memory proposals ----------------------------------------------------- */
+
+/*
+ * A memory the model has offered to save, under the turn that offered it.
+ *
+ * Deliberately quiet. This is a question, not an alert: it sits in the
+ * transcript's own left column like an assistant turn, carries the surface the
+ * user bubble does rather than a border of its own, and spends no colour — the
+ * palette is achromatic, so what marks it out is the icon and the pair of
+ * controls, not a hue nothing else here uses.
+ *
+ * The negative top margin pulls it up out of the transcript's 2.5rem turn gap:
+ * it belongs to the message above it rather than sitting between two turns, and
+ * at the full gap it read as a third participant in the conversation.
+ */
+.proposals {
+  list-style: none;
+  align-self: stretch;
+  margin: -1.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  animation: rise-in var(--motion) var(--ease-out);
+}
+
+.proposal {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  padding: 0.625rem 0.625rem 0.625rem 0.75rem;
+  background: var(--surface-2);
+  border-radius: 0.625rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.proposal__icon {
+  display: inline-flex;
+  flex: none;
+  /* Centred on the first line of text rather than on the box, so it stays put
+     as the note below it wraps. */
+  margin-top: 0.125rem;
+  color: var(--muted);
+}
+
+.proposal__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.proposal__head {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* The one thing in the row that is an identifier rather than prose. */
+.proposal__name {
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* The note as it would be saved, so what is being agreed to is what is shown.
+   Wrapped rather than elided: a memory nobody can read is one nobody can
+   judge, and these are a sentence or two by construction. */
+.proposal__body {
+  margin: 0.25rem 0 0;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.proposal__actions {
+  flex: none;
+  display: flex;
+  gap: 0.125rem;
+}
+
+/* Accept leads by weight, not by fill: a filled button here would outrank the
+   send control, which is the one thing on the screen that should look like the
+   primary action. */
+.proposal__accept {
+  color: var(--text);
+}
+
+.proposal--error {
+  color: var(--muted);
+}
+
 /* --- artifacts ----------------------------------------------------------- */
 
 /*

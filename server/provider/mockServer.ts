@@ -31,6 +31,12 @@ export interface MockProviderOptions {
   requireApiKey?: string;
   /** Replaces the whole /v1/models body, to exercise malformed shapes. */
   modelsPayload?: unknown;
+  /**
+   * Tool calls to dictate before the finish, as upstream really does it: the
+   * name in one fragment and the arguments split across several, every
+   * fragment addressed by `index` and only the first carrying an `id`.
+   */
+  toolCalls?: { id: string; name: string; argumentChunks: string[] }[];
 }
 
 export interface MockProvider {
@@ -55,6 +61,7 @@ export async function startMockProvider(options: MockProviderOptions = {}): Prom
     hang = false,
     requireApiKey,
     modelsPayload,
+    toolCalls = [],
   } = options;
 
   const requests: MockProvider['requests'] = [];
@@ -153,6 +160,7 @@ export async function startMockProvider(options: MockProviderOptions = {}): Prom
           chunkDelayMs,
           emitGarbageFrame,
           errorMidStream,
+          toolCalls,
         });
         return;
       }
@@ -185,6 +193,7 @@ async function streamCompletion(
     chunkDelayMs: number;
     emitGarbageFrame: boolean;
     errorMidStream: boolean;
+    toolCalls: { id: string; name: string; argumentChunks: string[] }[];
   }
 ): Promise<void> {
   res.writeHead(200, {
@@ -232,6 +241,56 @@ async function streamCompletion(
       if (res.writableEnded) return;
       await wait(opts.chunkDelayMs);
       send(envelope([{ finish_reason: null, index: 0, delta: { content: text } }]));
+    }
+
+    /*
+     * Calls, dictated the way a real server does: an opening fragment naming
+     * the function, then the arguments a few characters at a time. Interleaved
+     * across calls on purpose — a second call's fragments can arrive before the
+     * first is finished, and reassembly has to be by `index` rather than by
+     * arrival.
+     */
+    if (opts.toolCalls.length > 0) {
+      opts.toolCalls.forEach((call, index) => {
+        send(
+          envelope([
+            {
+              finish_reason: null,
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index,
+                    id: call.id,
+                    type: 'function',
+                    function: { name: call.name, arguments: '' },
+                  },
+                ],
+              },
+            },
+          ])
+        );
+      });
+
+      const rounds = Math.max(...opts.toolCalls.map((call) => call.argumentChunks.length));
+      for (let round = 0; round < rounds; round += 1) {
+        for (const [index, call] of opts.toolCalls.entries()) {
+          const piece = call.argumentChunks[round];
+          if (piece === undefined) continue;
+          if (res.writableEnded) return;
+          await wait(opts.chunkDelayMs);
+          // Later fragments carry no id and no name, exactly as upstream sends.
+          send(
+            envelope([
+              {
+                finish_reason: null,
+                index: 0,
+                delta: { tool_calls: [{ index, function: { arguments: piece } }] },
+              },
+            ])
+          );
+        }
+      }
     }
 
     if (res.writableEnded) return;

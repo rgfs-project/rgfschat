@@ -119,6 +119,31 @@ export class StoragePaths {
     return this.#contain(resolve(this.userDir(userId), 'memories'));
   }
 
+  /**
+   * `data/<user>/proposals/<conversation>.json` — memory changes the model has
+   * asked for and the reader has not yet answered.
+   *
+   * Disposable state, like a generation checkpoint and unlike anything in
+   * `chats/`: the conversation Markdown is the record of what was *said*, and a
+   * question waiting on a click is not that. Keeping it out also means the
+   * canonical format — frozen at the attributes in contracts §3.4 — does not
+   * have to grow a field for it.
+   *
+   * Keyed by conversation rather than by proposal because that is how it is
+   * read: opening a conversation asks "is anything pending here", which is one
+   * file rather than a scan.
+   */
+  proposalsFile(userId: string, conversationId: string): string {
+    if (!isCanonicalUuid(conversationId)) {
+      throw AppError.internal('Invalid conversation id for path construction');
+    }
+    return this.#contain(resolve(this.proposalsDir(userId), `${conversationId}.json`));
+  }
+
+  proposalsDir(userId: string): string {
+    return this.#contain(resolve(this.userDir(userId), 'proposals'));
+  }
+
   attachmentsDir(userId: string): string {
     return this.#contain(resolve(this.userDir(userId), 'attachments'));
   }

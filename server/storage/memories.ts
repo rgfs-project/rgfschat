@@ -146,15 +146,48 @@ export class MemoryStore {
   }
 
   /**
-   * The memories as one block for the system prompt, or `null` when there are
-   * none. Named and fenced so the model can tell remembered context from the
-   * instruction around it, and from the conversation itself.
+   * The memories as one block for the system prompt, or `null` when there is
+   * nothing to say. Named and fenced so the model can tell remembered context
+   * from the instruction around it, and from the conversation itself.
+   *
+   * With `tools` set the block is produced even when there are no memories yet:
+   * a model that is told it can propose one needs to be told so on the first
+   * conversation too, which is exactly when the list is empty.
    */
-  async prompt(userId: string): Promise<string | null> {
+  async prompt(userId: string, options: { tools?: boolean } = {}): Promise<string | null> {
     const memories = await this.list(userId);
-    if (memories.length === 0) return null;
+    if (memories.length === 0 && options.tools !== true) return null;
 
-    const blocks = memories.map((memory) => `## ${memory.name}\n\n${memory.content.trim()}`);
-    return `The following notes are what this user has asked you to remember.\n\n${blocks.join('\n\n')}`;
+    const sections: string[] = [];
+
+    if (memories.length > 0) {
+      const blocks = memories.map((memory) => `## ${memory.name}\n\n${memory.content.trim()}`);
+      sections.push(
+        `The following notes are what this user has asked you to remember.\n\n${blocks.join('\n\n')}`
+      );
+    } else {
+      sections.push('You have no saved notes about this user yet.');
+    }
+
+    if (options.tools === true) {
+      /*
+       * Two things the model cannot work out from the schemas alone, and both
+       * are failure modes seen in practice: it will claim to have saved
+       * something the reader never agreed to, and it will propose a note after
+       * every passing remark. Naming the existing notes as the only valid
+       * targets for update and delete is the third — the tool descriptions say
+       * so, but the list they refer to is here.
+       */
+      sections.push(
+        'You can propose changes to these notes with the memory tools. A proposal is ' +
+          'shown to the user and takes effect only if they accept it, so never say a note ' +
+          'has been saved, changed or deleted — say that you have offered to. Propose ' +
+          'something only when it is a durable fact or preference worth recalling in a ' +
+          'later conversation, or when the user asks you to remember, update or forget ' +
+          'something. Only the note names listed above may be updated or deleted.'
+      );
+    }
+
+    return sections.join('\n\n');
   }
 }

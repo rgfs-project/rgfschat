@@ -398,6 +398,53 @@ export function saveMyMemory(content: string, name?: string): Promise<{ memory: 
   });
 }
 
+/**
+ * A memory change the model has asked for and nobody has answered yet.
+ *
+ * Nothing has been written when one of these exists — that is the point of it.
+ * A memory is prepended to the system prompt of every later generation, so one
+ * the model could write unattended would be an instruction it had given itself,
+ * and text it merely *read* (a pasted document, an attached file) is a route to
+ * that. Accepting is a click a person makes.
+ */
+export interface MemoryProposalDto {
+  id: string;
+  /** The assistant turn that asked, so the card can sit under that message. */
+  assistantMessageId: string;
+  operation: 'create' | 'update' | 'delete';
+  name: string;
+  /** Absent for a deletion. */
+  content?: string;
+  createdAt: string;
+}
+
+export async function fetchProposals(
+  conversationId: string,
+  signal?: AbortSignal
+): Promise<MemoryProposalDto[]> {
+  const { proposals } = await request<{ proposals: MemoryProposalDto[] }>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/proposals`,
+    signalInit(signal)
+  );
+  return proposals;
+}
+
+/** Answers one. Rejecting disposes of it without writing anything. */
+export function resolveProposal(
+  conversationId: string,
+  proposalId: string,
+  accept: boolean
+): Promise<{ applied: boolean; memory?: MemoryDto }> {
+  return request<{ applied: boolean; memory?: MemoryDto }>(
+    `/api/conversations/${encodeURIComponent(conversationId)}/proposals/${encodeURIComponent(proposalId)}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accept }),
+    }
+  );
+}
+
 export async function deleteMyMemory(name: string): Promise<void> {
   const response = await fetch(`/api/me/memories/${encodeURIComponent(name)}`, {
     method: 'DELETE',

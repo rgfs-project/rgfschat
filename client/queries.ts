@@ -20,17 +20,20 @@ import {
   fetchModels,
   fetchMyMemories,
   fetchMyPreferences,
+  fetchProposals,
   fetchSession,
   getConversation,
   listConversations,
   regenerate,
   pinConversation,
   renameConversation,
+  resolveProposal,
   searchConversations,
   startGeneration,
   type ConversationDetail,
   type ConversationSummary,
   type MemoryDto,
+  type MemoryProposalDto,
   type MePreferences,
   type ModelCatalogue,
   type SearchResult,
@@ -63,6 +66,7 @@ export const keys = {
   search: (query: string) => ['search', query] as const,
   preferences: () => ['me', 'preferences'] as const,
   memories: () => ['me', 'memories'] as const,
+  proposals: (conversationId: string) => ['conversation', conversationId, 'proposals'] as const,
   artifacts: () => ['artifacts'] as const,
   artifactSource: (id: string) => ['artifact', id, 'source'] as const,
 };
@@ -174,6 +178,43 @@ export function useMyMemories(enabled = true): UseQueryResult<MemoryDto[]> {
     queryKey: keys.memories(),
     queryFn: ({ signal }) => fetchMyMemories(signal),
     enabled,
+  });
+}
+
+/**
+ * Memory changes the model has proposed in one conversation.
+ *
+ * Its own query rather than a field on the conversation: these live in their
+ * own file server-side, and a conversation should still open when the
+ * proposals beside it cannot be read.
+ */
+export function useProposals(conversationId: string | null): UseQueryResult<MemoryProposalDto[]> {
+  return useQuery({
+    queryKey: keys.proposals(conversationId ?? ''),
+    queryFn: ({ signal }) => fetchProposals(conversationId as string, signal),
+    enabled: conversationId !== null,
+  });
+}
+
+/**
+ * Accepts or rejects one.
+ *
+ * Both memories and proposals are invalidated on success: accepting writes a
+ * memory, and either answer removes the card.
+ */
+export function useResolveProposal(): UseMutationResult<
+  { applied: boolean },
+  Error,
+  { conversationId: string; proposalId: string; accept: boolean }
+> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ conversationId, proposalId, accept }) =>
+      resolveProposal(conversationId, proposalId, accept),
+    onSuccess: (_result, { conversationId }) => {
+      void client.invalidateQueries({ queryKey: keys.proposals(conversationId) });
+      void client.invalidateQueries({ queryKey: keys.memories() });
+    },
   });
 }
 

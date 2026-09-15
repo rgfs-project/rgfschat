@@ -87,6 +87,25 @@ function samplerBody(sampler: SamplerSettings | undefined): Record<string, numbe
   return body;
 }
 
+/**
+ * How many calls one reply may ask for, and how long their arguments may run.
+ *
+ * Both are bounds on what the *provider* can make this process hold, in the
+ * same spirit as the response byte cap: a generation asks for at most a handful
+ * of memory operations, and a few kilobytes of arguments is already far more
+ * than the 8KB a single memory may contain.
+ */
+const MAX_TOOL_CALLS = 16;
+const MAX_TOOL_ARGUMENT_CHARS = 16_384;
+
+/** One call mid-flight. `overflow` outlives a truncation, so it stays refused. */
+interface PartialToolCall {
+  id: string;
+  name: string;
+  args: string;
+  overflow: boolean;
+}
+
 export class LlamaCppProvider implements Provider {
   readonly #config: ProviderConfig;
   readonly #logger: Logger;
@@ -262,6 +281,7 @@ export class LlamaCppProvider implements Provider {
     messages,
     maxOutputTokens,
     sampler,
+    tools,
     signal,
   }: ChatRequest): AsyncIterable<ProviderChunk> {
     const { response, release } = await this.#fetch('/v1/chat/completions', {
@@ -272,6 +292,8 @@ export class LlamaCppProvider implements Provider {
         messages: messages.map(({ role, content }: ChatMessage) => ({ role, content })),
         max_tokens: maxOutputTokens,
         ...samplerBody(sampler),
+        // Omitted entirely when there are none: see `ChatRequest.tools`.
+        ...(tools !== undefined && tools.length > 0 ? { tools } : {}),
         stream: true,
         stream_options: { include_usage: true },
       }),
@@ -293,6 +315,14 @@ export class LlamaCppProvider implements Provider {
     const decoder = new TextDecoder();
     let buffer = '';
     let received = 0;
+    /*
+     * Calls under construction, addressed by the `index` upstream gives them.
+     *
+     * Local to this call rather than an instance field: one provider serves
+     * every concurrent generation, and a shared accumulator would splice two
+     * readers' arguments into one another's calls.
+     */
+    const pending = new Map<number, PartialToolCall>();
 
     try {
       for (;;) {
@@ -334,7 +364,7 @@ export class LlamaCppProvider implements Provider {
           const frame = buffer.slice(0, boundary);
           buffer = buffer.slice(boundary + 2);
 
-          for (const chunk of this.#parseFrame(frame, model)) {
+          for (const chunk of this.#parseFrame(frame, model, pending)) {
             yield chunk;
           }
         }
@@ -347,8 +377,18 @@ export class LlamaCppProvider implements Provider {
     }
   }
 
-  /** Parses one SSE frame into zero or more chunks. Tolerates every shape seen live. */
-  *#parseFrame(frame: string, model: string): Generator<ProviderChunk> {
+  /**
+   * Parses one SSE frame into zero or more chunks. Tolerates every shape seen live.
+   *
+   * `pending` carries calls part-way through arriving; it belongs to the
+   * caller's stream and is mutated here rather than returned, because a frame
+   * can contain a fragment of a call that several later frames also add to.
+   */
+  *#parseFrame(
+    frame: string,
+    model: string,
+    pending: Map<number, PartialToolCall>
+  ): Generator<ProviderChunk> {
     for (const line of frame.split('\n')) {
       if (!line.startsWith('data:')) continue;
 
@@ -379,7 +419,7 @@ export class LlamaCppProvider implements Provider {
       if (!Array.isArray(chunk.choices) || chunk.choices.length === 0) continue;
 
       const choice = chunk.choices[0] as {
-        delta?: { content?: unknown; reasoning_content?: unknown };
+        delta?: { content?: unknown; reasoning_content?: unknown; tool_calls?: unknown };
         finish_reason?: unknown;
       };
 
@@ -394,9 +434,101 @@ export class LlamaCppProvider implements Provider {
         yield { type: 'content', text: content };
       }
 
+      this.#accumulateToolCalls(choice.delta?.tool_calls, pending, model);
+
       if (typeof choice.finish_reason === 'string') {
+        /*
+         * Calls are flushed ahead of the finish, so a consumer that stops
+         * reading at `finish` still sees them. Sorted by the index upstream
+         * assigned rather than by insertion, since a fragment for index 1 can
+         * arrive before index 0 has its name.
+         */
+        for (const index of [...pending.keys()].sort((a, b) => a - b)) {
+          const call = pending.get(index) as PartialToolCall;
+          // A call upstream never named is not a call, and one whose arguments
+          // ran past the cap was truncated — emitting either would push a
+          // guaranteed validation failure downstream.
+          if (call.name === '' || call.overflow) continue;
+          yield { type: 'tool_call', call: { id: call.id, name: call.name, arguments: call.args } };
+        }
+        pending.clear();
+
         yield { type: 'finish', reason: choice.finish_reason };
       }
+    }
+  }
+
+  /**
+   * Folds one frame's `tool_calls` fragments into the calls being built.
+   *
+   * Upstream dictates a call across many frames: the first carries `id` and
+   * `function.name`, and the rest append to `function.arguments` a few
+   * characters at a time. Fragments are addressed by `index`, which is the only
+   * thing tying them together — `id` is absent from every fragment after the
+   * first.
+   *
+   * Everything here is defensive for the reason the byte cap above is: the
+   * provider is configured by an administrator and reached over the network, so
+   * it is trusted to be *theirs* but not to be well-behaved. A malformed
+   * fragment is dropped rather than throwing, since a broken call should cost
+   * the call and not the reply that was streamed alongside it.
+   */
+  #accumulateToolCalls(raw: unknown, pending: Map<number, PartialToolCall>, model: string): void {
+    if (!Array.isArray(raw)) return;
+
+    for (const entry of raw) {
+      if (typeof entry !== 'object' || entry === null) continue;
+
+      const fragment = entry as {
+        index?: unknown;
+        id?: unknown;
+        function?: { name?: unknown; arguments?: unknown };
+      };
+
+      // `index` is what threads fragments together, so one without it cannot be
+      // attributed to a call at all. Defaulted to 0 because a provider emitting
+      // a single call sometimes omits it entirely.
+      const index = typeof fragment.index === 'number' ? fragment.index : 0;
+      if (!Number.isInteger(index) || index < 0 || index >= MAX_TOOL_CALLS) {
+        this.#logger.warn('Provider sent a tool call fragment with an unusable index', { model });
+        continue;
+      }
+
+      const call = pending.get(index) ?? { id: '', name: '', args: '', overflow: false };
+
+      if (typeof fragment.id === 'string' && fragment.id !== '') call.id = fragment.id;
+      const name = fragment.function?.name;
+      if (typeof name === 'string' && name !== '') call.name = name;
+
+      const args = fragment.function?.arguments;
+      if (typeof args === 'string' && args !== '') {
+        /*
+         * Bounded like the stream itself. Arguments are accumulated in memory
+         * and handed on to a JSON parser, and a provider that never stops
+         * appending would otherwise be limited only by the total response cap —
+         * which is orders of magnitude more than any real call needs.
+         */
+        if (call.args.length + args.length > MAX_TOOL_ARGUMENT_CHARS) {
+          /*
+           * Marked rather than deleted. Deleting it would let the next fragment
+           * for this index start a fresh call from the middle of the arguments
+           * of the one just refused, which is how a discard turns into a
+           * plausible-looking call nobody asked for.
+           */
+          if (!call.overflow) {
+            this.#logger.warn('Discarding an oversized tool call from the provider', {
+              model,
+              index,
+            });
+          }
+          call.overflow = true;
+          pending.set(index, call);
+          continue;
+        }
+        call.args += args;
+      }
+
+      pending.set(index, call);
     }
   }
 }

@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { deriveTitle, DEFAULT_TITLE, type AssistantMessage } from '@shared/conversation.ts';
-import type { GenerationState, SamplerSettings, TerminalState } from '@shared/generation.ts';
+import type {
+  GenerationState,
+  SamplerSettings,
+  TerminalState,
+  ToolCall,
+} from '@shared/generation.ts';
 import { AppError } from '../errors/AppError.ts';
 import { MAX_ATTACHMENTS_PER_MESSAGE, type AttachmentKind } from '@shared/attachment.ts';
 import { resolveAttachments } from '../attachments/resolve.ts';
@@ -9,6 +14,8 @@ import type { ModelDto } from '@shared/generation.ts';
 import type { Logger } from '../logger.ts';
 import type { ProviderHub } from '../provider/hub.ts';
 import type { ConversationStore } from '../storage/conversations.ts';
+import type { ProposalStore } from '../storage/proposals.ts';
+import { MEMORY_TOOLS, parseMemoryCall } from '../memory/tools.ts';
 import { entryFor, type ChatIndex } from '../storage/index.ts';
 import { conversationKey } from '../storage/locks.ts';
 import type { GenerationManager } from './manager.ts';
@@ -62,7 +69,16 @@ export interface GenerationServiceOptions {
    * Per user, so it is read here rather than passed in by the route: a caller
    * that supplied its own memories would be writing another reader's context.
    */
-  memories?: { prompt: (userId: string) => Promise<string | null> };
+  memories?: { prompt: (userId: string, options?: { tools?: boolean }) => Promise<string | null> };
+  /**
+   * Where memory changes the model asks for are parked until the reader answers.
+   *
+   * Its presence is what turns the memory tools on: without somewhere to put a
+   * proposal there is nothing useful to do with a call, so the model is not
+   * offered one. That also keeps every existing caller — the tests among them —
+   * sending exactly the request it sent before.
+   */
+  proposals?: ProposalStore;
   /** Injectable so a test can pin the instant stamped on a message. */
   now?: () => Date;
 }
@@ -86,6 +102,7 @@ export class GenerationService {
   readonly #maxInlineChars: number;
   readonly #settings: GenerationServiceOptions['settings'];
   readonly #memories: GenerationServiceOptions['memories'];
+  readonly #proposals: ProposalStore | undefined;
   readonly #now: () => Date;
 
   /** Conversations with a generation that has not yet reached a terminal state. */
@@ -104,6 +121,7 @@ export class GenerationService {
     this.#maxOutputTokens = options.maxOutputTokens;
     this.#settings = options.settings;
     this.#memories = options.memories;
+    this.#proposals = options.proposals;
     this.#now = options.now ?? ((): Date => new Date());
   }
 
@@ -116,13 +134,19 @@ export class GenerationService {
    * administrator's instruction reads better as the last word.
    */
   async #systemPromptFor(userId: string, sampler: SamplerSettings): Promise<string | undefined> {
-    const remembered = (await this.#memories?.prompt(userId)) ?? null;
+    const remembered =
+      (await this.#memories?.prompt(userId, { tools: this.#toolsEnabled })) ?? null;
     const configured = sampler.systemPrompt;
 
     if (remembered === null) return configured;
     return configured === undefined || configured.trim() === ''
       ? remembered
       : `${remembered}\n\n${configured}`;
+  }
+
+  /** Whether this server can do anything with a call the model makes. */
+  get #toolsEnabled(): boolean {
+    return this.#proposals !== undefined && this.#memories !== undefined;
   }
 
   /** The configured sampling for a model, or nothing. */
@@ -256,7 +280,12 @@ export class GenerationService {
       model,
       prepared.prompt.messages,
       client,
-      { conversationId, providerId, sampler }
+      {
+        conversationId,
+        providerId,
+        sampler,
+        ...(this.#toolsEnabled ? { tools: MEMORY_TOOLS } : {}),
+      }
     );
     this.#active.set(key, generationId);
 
@@ -413,7 +442,12 @@ export class GenerationService {
       model,
       prepared.prompt.messages,
       client,
-      { conversationId, providerId, sampler }
+      {
+        conversationId,
+        providerId,
+        sampler,
+        ...(this.#toolsEnabled ? { tools: MEMORY_TOOLS } : {}),
+      }
     );
     this.#active.set(key, generationId);
 
@@ -528,6 +562,23 @@ export class GenerationService {
         });
         await this.#index.upsert(userId, entryFor(conversationId, written));
 
+        /*
+         * Filed after the reply is durable, and only for a run that finished.
+         *
+         * A cancelled or failed generation can still have dictated a call
+         * before it stopped, and proposing a memory change out of a reply the
+         * reader never saw finish would be asking them to approve something
+         * with no context for it.
+         */
+        if (final.state === 'completed' && final.toolCalls.length > 0) {
+          await this.#recordProposals(
+            userId,
+            conversationId,
+            context.assistantMessageId,
+            final.toolCalls
+          );
+        }
+
         // The canonical write has landed, so the checkpoint can go. If the
         // process dies before this line, recovery finds the message already
         // present and skips it rather than writing twice.
@@ -544,6 +595,45 @@ export class GenerationService {
       // assistant block is still being appended.
       if (this.#active.get(key) === generationId) this.#active.delete(key);
     }
+  }
+
+  /**
+   * Turns the calls a finished run made into proposals for the reader.
+   *
+   * Validation happens here rather than in the manager because this is the
+   * layer that chose the tools, and it is deliberately forgiving: a call the
+   * model got wrong costs that call and is logged, never the reply it arrived
+   * with. Nothing in a memory is written — accepting is the reader's to do.
+   */
+  async #recordProposals(
+    userId: string,
+    conversationId: string,
+    assistantMessageId: string,
+    calls: readonly ToolCall[]
+  ): Promise<void> {
+    if (this.#proposals === undefined) return;
+
+    const entries = [];
+    for (const call of calls) {
+      const parsed = parseMemoryCall(call);
+      if (!parsed.ok) {
+        this.#logger.warn('Discarding a malformed tool call', {
+          conversationId,
+          tool: call.name,
+          reason: parsed.reason,
+        });
+        continue;
+      }
+
+      entries.push({
+        assistantMessageId,
+        operation: parsed.value.operation,
+        name: parsed.value.name,
+        ...(parsed.value.content === undefined ? {} : { content: parsed.value.content }),
+      });
+    }
+
+    await this.#proposals.add(userId, conversationId, entries, this.#now);
   }
 
   /** Cancels and waits for the write, so callers observe a settled conversation. */

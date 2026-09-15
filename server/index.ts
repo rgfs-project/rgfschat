@@ -16,6 +16,7 @@ import { ChatIndex } from './storage/index.ts';
 import { PreferencesStore } from './storage/preferences.ts';
 import { ArtifactStore } from './storage/artifacts.ts';
 import { MemoryStore } from './storage/memories.ts';
+import { ProposalStore } from './storage/proposals.ts';
 import { AttachmentStore } from './attachments/store.ts';
 import { reconcileAttachments } from './attachments/reconcile.ts';
 import { StoragePaths } from './storage/paths.ts';
@@ -60,6 +61,7 @@ async function main(): Promise<void> {
   const index = new ChatIndex({ store, logger });
   const preferences = new PreferencesStore(paths0, logger);
   const memories = new MemoryStore(paths0, logger);
+  const proposals = new ProposalStore(paths0, logger);
   const artifacts = new ArtifactStore(paths0, logger);
 
   /*
@@ -99,6 +101,7 @@ async function main(): Promise<void> {
     maxOutputTokens: config.provider.maxOutputTokens,
     settings,
     memories,
+    proposals,
     attachments,
     maxInlineChars: config.attachments.maxInlineChars,
   });
@@ -125,6 +128,7 @@ async function main(): Promise<void> {
     index,
     preferences,
     memories,
+    proposals,
     artifacts,
     service,
     users,

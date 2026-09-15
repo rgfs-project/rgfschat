@@ -6,6 +6,8 @@ import type {
   GenerationSnapshotDto,
   GenerationState,
   TerminalState,
+  ToolCall,
+  ToolDefinition,
 } from '@shared/generation.ts';
 import { isTerminal, type SamplerSettings } from '@shared/generation.ts';
 import type { CheckpointStore } from './checkpoints.ts';
@@ -51,11 +53,22 @@ interface GenerationRecord {
   /** A copy, settled when the run starts, so a settings change landing
       mid-flight cannot alter a generation already under way. */
   sampler?: SamplerSettings;
+  /** What this run offered the model, settled at start for the same reason. */
+  tools?: readonly ToolDefinition[];
   assistantMessageId: string;
   model: string;
   state: GenerationState;
   content: string;
   reasoning: string;
+  /**
+   * Calls the model asked for, in the order they were dictated.
+   *
+   * Accumulated but never acted on here. The manager's job ends at "this is
+   * what the run produced"; deciding what a call *means* belongs to the service
+   * that supplied the tools, and running one from inside the stream loop would
+   * put a filesystem write on the path of every token.
+   */
+  toolCalls: ToolCall[];
   errorCode: string | undefined;
   createdAt: Date;
   updatedAt: Date;
@@ -143,6 +156,8 @@ export class GenerationManager {
       providerId?: string;
       /** Administrator-configured sampling for this model, if any. */
       sampler?: SamplerSettings;
+      /** Functions this run offers the model, if any. */
+      tools?: readonly ToolDefinition[];
     } = {}
   ): { generationId: string; assistantMessageId: string } {
     const client = provider ?? this.#provider;
@@ -164,12 +179,14 @@ export class GenerationManager {
        * here, and cannot change under it.
        */
       ...(context.sampler === undefined ? {} : { sampler: { ...context.sampler } }),
+      ...(context.tools === undefined ? {} : { tools: context.tools }),
       provider: client,
       assistantMessageId: randomUUID(),
       model,
       state: 'pending',
       content: '',
       reasoning: '',
+      toolCalls: [],
       errorCode: undefined,
       createdAt,
       updatedAt: createdAt,
@@ -203,6 +220,7 @@ export class GenerationManager {
         messages,
         maxOutputTokens: this.#maxOutputTokens,
         ...(record.sampler === undefined ? {} : { sampler: record.sampler }),
+        ...(record.tools === undefined ? {} : { tools: record.tools }),
         signal: record.abort.signal,
       });
 
@@ -219,6 +237,15 @@ export class GenerationManager {
         } else if (chunk.type === 'reasoning') {
           record.reasoning += chunk.text;
           this.#emit(record, { type: 'reasoning', delta: chunk.text });
+        } else if (chunk.type === 'tool_call') {
+          /*
+           * Not emitted as an SSE event. A call is not shown to the reader
+           * until it has been validated and turned into a proposal, which
+           * happens once the run is terminal — streaming a raw call would put
+           * an unvalidated name and argument blob from the provider straight
+           * into the transcript.
+           */
+          record.toolCalls.push(chunk.call);
         }
         record.updatedAt = this.#now();
         // Throttled: a long reply costs a bounded number of writes, not one
@@ -408,6 +435,8 @@ export class GenerationManager {
     state: TerminalState;
     content: string;
     reasoning: string;
+    /** What the model asked to have run, unvalidated. */
+    toolCalls: ToolCall[];
     /** How the run was classified when it failed, so the record can say so. */
     errorCode: string | undefined;
   }> {
@@ -420,11 +449,13 @@ export class GenerationManager {
       state: TerminalState;
       content: string;
       reasoning: string;
+      toolCalls: ToolCall[];
       errorCode: string | undefined;
     } => ({
       state: record.state as TerminalState,
       content: record.content,
       reasoning: record.reasoning,
+      toolCalls: record.toolCalls,
       errorCode: record.errorCode,
     });
 

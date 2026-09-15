@@ -4,6 +4,8 @@ import { TITLE_MAX_LENGTH, type Conversation } from '@shared/conversation.ts';
 import type { ConversationStore } from '../storage/conversations.ts';
 import { entryFor, type ChatIndex, type ChatIndexEntry } from '../storage/index.ts';
 import type { PreferencesStore } from '../storage/preferences.ts';
+import type { ProposalStore } from '../storage/proposals.ts';
+import type { MemoryStore } from '../storage/memories.ts';
 import { referencedIds } from '../attachments/resolve.ts';
 import type { AttachmentStore } from '../attachments/store.ts';
 import { validateBody } from '../http/validate.ts';
@@ -30,6 +32,9 @@ const createSchema = z.strictObject({ title: titleSchema.optional() });
 const patchSchema = z.strictObject({ title: titleSchema });
 const editMessageSchema = z.strictObject({ body: z.string().min(1).max(200_000) });
 const pinSchema = z.strictObject({ pinned: z.boolean() });
+/* Accept or reject. One route for both, because either answer disposes of the
+   proposal and the only difference is whether the memory is written. */
+const proposalSchema = z.strictObject({ accept: z.boolean() });
 
 /** Long enough for a sentence someone half-remembers, short enough to bound. */
 const SEARCH_QUERY_MAX_LENGTH = 200;
@@ -78,6 +83,10 @@ export interface ConversationRoutesOptions {
   attachments?: AttachmentStore;
   /** Lets a reloading client rediscover the run it was watching. */
   activeGenerationId?: (userId: string, conversationId: string) => string | null;
+  /** Memory changes the model has proposed. Absent turns the routes off. */
+  proposals?: ProposalStore;
+  /** Applied when a proposal is accepted; never by the model directly. */
+  memories?: MemoryStore;
 }
 
 /**
@@ -121,6 +130,8 @@ export function conversationRouter({
   preferences,
   attachments,
   activeGenerationId,
+  proposals,
+  memories,
 }: ConversationRoutesOptions): Router {
   const router = Router();
 
@@ -338,6 +349,85 @@ export function conversationRouter({
     res.json(toDto(id, updated));
   });
 
+  /**
+   * Memory changes the model has asked for in this conversation.
+   *
+   * A separate request from the conversation itself rather than a field on it:
+   * these are not messages, they live in their own file, and a conversation
+   * should still load when the proposals beside it cannot be read.
+   */
+  router.get('/conversations/:id/proposals', async (req, res) => {
+    const id = requireId(req.params.id);
+    const user = ownerOf(req);
+
+    // Confirms the conversation is the caller's before answering. Without it
+    // this would report on any id, which is how a list of names leaks.
+    await store.load(user, id);
+
+    res.json({ proposals: proposals === undefined ? [] : await proposals.list(user, id) });
+  });
+
+  /**
+   * Answers one proposal.
+   *
+   * This route is the only thing that ever writes a memory on the model's
+   * suggestion, and it runs because a person clicked — which is the property
+   * the whole design exists to keep. A memory is prepended to the system prompt
+   * of every later generation, so a model that could write one unattended could
+   * hand itself a durable instruction, and any text it reads is a route to
+   * that.
+   *
+   * Taking the proposal and applying it is one step: `take` removes it under a
+   * lock and returns it only to the caller that removed it, so a double click
+   * cannot apply the same change twice.
+   */
+  router.post(
+    '/conversations/:id/proposals/:proposalId',
+    validateBody(proposalSchema),
+    async (req, res) => {
+      const id = requireId(req.params.id);
+      const user = ownerOf(req);
+      const { accept } = req.body as z.infer<typeof proposalSchema>;
+
+      if (proposals === undefined || memories === undefined) {
+        throw AppError.internal('Memory proposals are not configured');
+      }
+
+      const proposalId = req.params.proposalId;
+      if (typeof proposalId !== 'string' || !isCanonicalUuid(proposalId)) {
+        throw AppError.notFound('No such proposal.');
+      }
+
+      await store.load(user, id);
+
+      const proposal = await proposals.take(user, id, proposalId);
+      if (proposal === null) throw AppError.notFound('No such proposal.');
+
+      if (!accept) {
+        res.json({ applied: false });
+        return;
+      }
+
+      if (proposal.operation === 'delete') {
+        await memories.remove(user, proposal.name);
+        res.json({ applied: true });
+        return;
+      }
+
+      /*
+       * `content` is guaranteed by the parse that created the proposal, but it
+       * is re-checked because this object came back off a disk a person can
+       * edit. The store enforces the size and total caps, so an accepted
+       * proposal can still be refused here — which reaches the reader as an
+       * error on the click rather than as a silently dropped memory.
+       */
+      if (proposal.content === undefined) throw AppError.internal('Proposal has no content');
+      const memory = await memories.write(user, proposal.name, proposal.content);
+
+      res.json({ applied: true, memory });
+    }
+  );
+
   router.delete('/conversations/:id', async (req, res) => {
     const id = requireId(req.params.id);
     const user = ownerOf(req);
@@ -367,6 +457,9 @@ export function conversationRouter({
     await index.remove(user, id);
     // And the pin, which would otherwise outlive what it pointed at.
     await preferences?.forget(user, id);
+    // Along with any unanswered proposals, which belong to a conversation that
+    // no longer exists to show them in.
+    await proposals?.clear(user, id);
 
     res.status(204).end();
   });
