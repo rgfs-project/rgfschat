@@ -2,7 +2,6 @@ import { Navigate, Route, Routes, useLocation } from 'react-router';
 import { ChatRoute } from './ChatRoute.tsx';
 import { ChatsIndexRoute } from './ChatsIndexRoute.tsx';
 import { LoginRoute } from './LoginRoute.tsx';
-import { NotFoundRoute } from './NotFoundRoute.tsx';
 import { AdminRoute, SettingsRoute } from './OverlayRoutes.tsx';
 import { RequireAuth } from './RequireAuth.tsx';
 import { patterns, paths } from './paths.ts';
@@ -28,6 +27,17 @@ import type { Location } from 'react-router';
  * The alternative — nesting the panels under `/chat/:conversationId/settings` —
  * keeps the conversation in the URL without any of this, at the cost of the
  * short addresses that were asked for.
+ *
+ * **An address that matches nothing** is handled by a catch-all *inside* the
+ * `RequireAuth` layout, not beside it — that is what makes it resolve the same
+ * way every protected route already does, with no auth logic of its own:
+ * `unknown` gets the boot placeholder, `unauthenticated` is sent to `/login`,
+ * and only `authenticated` ever reaches the catch-all's own element, which
+ * sends it on to the new-chat draft. A route pattern not matching is a routing
+ * question; a well-formed `/chat/:conversationId` naming a conversation that
+ * does not exist is a data question, answered by the chat screen itself
+ * (contracts §7) — the two are not the same failure and this only ever
+ * touches the first.
  */
 
 interface BackgroundState {
@@ -63,13 +73,19 @@ export function AppRoutes({ draft, onDraftChange }: AppRoutesProps): React.JSX.E
           {/*
             The panels appear in this table as well as the one below. Without
             these two, a direct visit to /settings would find no match here and
-            render the not-found screen behind the panel.
+            render the catch-all behind the panel.
           */}
           <Route path={patterns.settings} element={chat} />
           <Route path={patterns.admin} element={chat} />
-        </Route>
 
-        <Route path="*" element={<NotFoundRoute />} />
+          {/*
+            Every other address. A child of `RequireAuth` rather than a sibling
+            of it, so it goes through the exact same three-way decision as
+            every route above it — this element only ever mounts once that
+            decision has already come out `authenticated`.
+          */}
+          <Route path="*" element={<Navigate to={paths.newChat} replace />} />
+        </Route>
       </Routes>
 
       <Routes>

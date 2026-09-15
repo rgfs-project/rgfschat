@@ -175,12 +175,30 @@ test('/admin is reachable by an admin', async ({ app, page }) => {
   await expect(page.getByRole('dialog', { name: 'Administration' })).toBeVisible();
 });
 
-test('an unknown address gets the not-found screen, not the chat', async ({ app, page }) => {
+test('an unknown address sends a signed-in reader to a new chat', async ({ app, page }) => {
   await signIn(page, app.baseUrl);
   await page.goto(`${app.baseUrl}/no-such-page`);
 
-  await expect(page.getByText('This page does not exist')).toBeVisible();
-  await expect(page.locator('.transcript')).toHaveCount(0);
+  await expect.poll(() => path(page)).toBe('/chat/new');
+  await expect(composerField(page)).toBeVisible();
+});
+
+test('an unknown address sends a signed-out visitor to /login', async ({ app, page }) => {
+  await page.goto(`${app.baseUrl}/no-such-page`);
+
+  await expect.poll(() => path(page)).toBe('/login');
+});
+
+test('Back after the redirect does not return to the unknown address', async ({ app, page }) => {
+  await signIn(page, app.baseUrl);
+  const before = path(page);
+
+  await page.goto(`${app.baseUrl}/no-such-page`);
+  await expect.poll(() => path(page)).toBe('/chat/new');
+
+  // The bad address was replaced in history, not pushed onto it.
+  await page.goBack();
+  await expect.poll(() => path(page)).toBe(before);
 });
 
 test('a protected URL sends you to /login and back again afterwards', async ({ app, page }) => {
