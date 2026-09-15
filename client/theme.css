@@ -401,13 +401,13 @@ button.linkish:active:not(:disabled),
 .nav-button {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.625rem;
   width: 100%;
   padding: 0.5rem 0.625rem;
-  border-radius: 0.625rem;
+  border-radius: 0.5rem;
   text-align: left;
-  color: var(--text);
-  font-size: 0.8125rem;
+  color: var(--text-soft);
+  font-size: 0.875rem;
 }
 
 .nav-button {
@@ -417,7 +417,7 @@ button.linkish:active:not(:disabled),
 }
 
 .nav-button:hover {
-  background: var(--surface-2);
+  background: var(--hover);
 }
 
 /* A filled pill, not a bordered field — the design gives search the same
