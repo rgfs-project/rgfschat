@@ -1,11 +1,11 @@
 /* --- sidebar list -------------------------------------------------------- */
 
-/* 13px with 16px above it and 4px below, which is what separates one date
-   from the rows of the one before it. Measured off the reference, where the
-   label's box is 39.5px tall. */
+/* 14px with 16px above it and 4px below, which is what separates one date from
+   the rows of the one before it. A step over the 13 measured off the reference,
+   in step with the rows it heads. */
 .sidebar__empty,
 .sidebar__group-label {
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   line-height: 1.5;
   padding: 1rem 0.625rem 0.25rem;
   margin: 0;
@@ -35,7 +35,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
 }
 
 .conversation {
@@ -53,7 +53,7 @@
   min-width: 0;
   text-align: left;
   padding: 0.5rem 0.625rem;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2004,6 +2004,29 @@ button.linkish:hover {
 
   .empty-state h2 {
     font-size: 1.875rem;
+  }
+
+  /*
+   * The sidebar grows with the transcript.
+   *
+   * It is the same reader at the same distance: a conversation set at 17 and a
+   * list of conversations set at 14 read as two applications, and the list is
+   * the half that is being *scanned* rather than read, which is the harder job
+   * of the two. The date headings stay a step behind the rows they head —
+   * they are punctuation in the list, not entries in it.
+   */
+  .nav-button {
+    font-size: 1.0625rem;
+  }
+
+  .conversation__open,
+  .sidebar__username {
+    font-size: 1rem;
+  }
+
+  .sidebar__empty,
+  .sidebar__group-label {
+    font-size: 0.875rem;
   }
 }
 

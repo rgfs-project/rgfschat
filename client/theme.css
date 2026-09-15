@@ -473,7 +473,10 @@ button.linkish:active:not(:disabled),
   border-radius: 0.5rem;
   text-align: left;
   color: var(--text-soft);
-  font-size: 0.875rem;
+  /* 15px. A step over the reference's 14, asked for directly: the sidebar sets
+     the smallest type in the application and a step up reads more easily than
+     it measures. The rows below it move with it. */
+  font-size: 0.9375rem;
 }
 
 .nav-button {
