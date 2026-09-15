@@ -1130,7 +1130,15 @@ button.linkish:hover {
   background: var(--raised);
   border: 1px solid var(--border);
   border-radius: 0.75rem;
-  box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
+  /*
+   * Lighter than the overlays that float over the canvas.
+   *
+   * This one opens against the sidebar, which is already a recessed surface, so
+   * a 32px spread at 18% stacked under the hairline border and read as a dark
+   * ring drawn around the menu rather than as a lift off the page. Tighter and
+   * fainter puts it on the same footing as the sidebar's own edge.
+   */
+  box-shadow: 0 8px 24px rgb(0 0 0 / 10%);
   animation: scale-in var(--motion-fast) var(--ease-out);
 }
 
@@ -1870,9 +1878,12 @@ button.linkish:hover {
   gap: 0.75rem;
 }
 
-/* Sentence case, at the size the admin rows use for their own labels. */
+/* Sentence case, at the size the admin rows use for their own labels —
+   `.panel__row-label`, which is 0.8125rem. This had drifted to 0.875 against a
+   comment that already said otherwise, which put the sampler's own grid a step
+   larger than every row above it in the same pane. */
 .sampler__label {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   color: var(--muted);
   cursor: help;
 }
@@ -1897,7 +1908,10 @@ button.linkish:hover {
   border: 1px solid transparent;
   border-radius: 0.375rem;
   color: var(--muted);
-  font-size: 0.9375rem;
+  /* The label's size: the two sit on one row, and a readout larger than the
+     thing it is labelled by made the grid read as the pane's headline rather
+     than as one of its settings. */
+  font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
   text-align: right;
   transition:
@@ -2581,10 +2595,20 @@ button.linkish:hover {
   justify-content: space-between;
 }
 
+/*
+ * Stated, because the row it sits in is muted.
+ *
+ * `.palette__field` sets `color: var(--muted)` for the search glyph and the
+ * placeholder beside it, which is right for a field — but this heading is a
+ * child of that row and was inheriting it, so the dialog's title came out the
+ * colour of its own placeholder text. A title is the one thing in the row that
+ * is not secondary.
+ */
 .palette__heading {
   margin: 0;
   font-size: 0.9375rem;
   font-weight: 500;
+  color: var(--text);
 }
 
 /*
