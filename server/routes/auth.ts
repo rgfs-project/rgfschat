@@ -43,6 +43,13 @@ export interface AuthRoutesOptions {
    * close registration.
    */
   registrationMode?: () => 'open' | 'closed';
+  /**
+   * Called once, after registration creates the very first account, when
+   * registration was only open because of that — never when an administrator
+   * had already opened it for everyone. Lets the caller close it back down so
+   * a fresh instance does not stay open to the public past its own setup.
+   */
+  onFirstAccountRegistered?: () => Promise<void>;
 }
 
 export function authRouter({
@@ -53,6 +60,7 @@ export function authRouter({
   logger,
   limiter,
   registrationMode = () => config.registrationMode,
+  onFirstAccountRegistered,
 }: AuthRoutesOptions): Router {
   const router = Router();
 
@@ -89,8 +97,18 @@ export function authRouter({
     });
   };
 
+  /**
+   * Whether registration should be reachable right now.
+   *
+   * An administrator's own choice always wins. Only when they have not opened
+   * it does a fresh instance — nobody has ever created an account — get a
+   * one-time exception, so setup does not require shell access to the box.
+   */
+  const isRegistrationOpen = async (): Promise<boolean> =>
+    registrationMode() === 'open' || (await users.count()) === 0;
+
   /** Public: how the client learns whether it is signed in, and its CSRF token. */
-  router.get('/auth/session', (req, res) => {
+  router.get('/auth/session', async (req, res) => {
     const dto: SessionDto = {
       user:
         req.auth === undefined
@@ -103,7 +121,7 @@ export function authRouter({
               createdAt: '',
             }),
       csrfToken: req.auth?.csrfToken ?? null,
-      registrationOpen: registrationMode() === 'open',
+      registrationOpen: await isRegistrationOpen(),
     };
     res.json(dto);
   });
@@ -115,12 +133,24 @@ export function authRouter({
     perAddress('register-address', 10),
     perUsername('register-username', 5),
     async (req, res) => {
-      if (registrationMode() !== 'open') {
+      const configuredOpen = registrationMode() === 'open';
+      // Only the bootstrap exception cares who is first; an administrator's
+      // own "open" needs no count and creates ordinary accounts.
+      const bootstrapping = !configuredOpen && (await users.count()) === 0;
+      if (!configuredOpen && !bootstrapping) {
         throw new AppError('REGISTRATION_CLOSED', 'Registration is closed.');
       }
 
       const { username, password } = req.body as z.infer<typeof credentialsSchema>;
-      const user = await users.create({ username, password });
+      const user = await users.create({
+        username,
+        password,
+        ...(bootstrapping ? { role: 'admin' as const } : {}),
+      });
+
+      // Closes the exception back down rather than leaving the instance open
+      // to the public past its own setup.
+      if (bootstrapping) await onFirstAccountRegistered?.();
 
       const session = await sessions.create(user.id);
       setSessionCookie(res, session.token);

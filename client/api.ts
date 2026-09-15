@@ -1,3 +1,4 @@
+import type { ArtifactSummary } from '@shared/artifact.ts';
 import type { AttachmentDto } from '@shared/attachment.ts';
 import type { HealthDto } from '@shared/api.ts';
 import type { GenerationAcceptedDto, GenerationSnapshotDto } from '@shared/generation.ts';
@@ -259,6 +260,21 @@ export async function listConversations(signal?: AbortSignal): Promise<Conversat
     signalInit(signal)
   );
   return conversations;
+}
+
+/**
+ * Every code block across the reader's conversations.
+ *
+ * Only summaries: the code itself is not carried here, because the gallery
+ * shows names and the panel reads the block out of the conversation it already
+ * has loaded.
+ */
+export async function listArtifacts(signal?: AbortSignal): Promise<ArtifactSummary[]> {
+  const { artifacts } = await request<{ artifacts: ArtifactSummary[] }>(
+    '/api/artifacts',
+    signalInit(signal)
+  );
+  return artifacts;
 }
 
 export function pinConversation(id: string, pinned: boolean): Promise<{ pinned: boolean }> {

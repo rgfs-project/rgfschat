@@ -371,3 +371,51 @@ body {
   font-size: 0.75rem;
   margin: 0.5rem 0 0;
 }
+
+/* --- artifact panel ----------------------------------------------------- */
+
+/*
+ * A column on the right, laid out exactly as the sidebar is on the left: an
+ * absolutely-positioned overlay, with `.main` inset to make room for it.
+ *
+ * The same reasoning as the sidebar's, for the same reason. Putting the shell
+ * on a grid would mean opening a panel re-wraps every line of the conversation
+ * beside it — the text shifting under the reader for something that had nothing
+ * to do with the text. Insetting the main column moves it once, predictably,
+ * and the transcript's own max-width does the rest.
+ */
+.artifact {
+  position: absolute;
+  inset: 0 0 0 auto;
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  width: var(--artifact-width);
+  max-width: 100%;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  /* Cannot be reached by the page behind it; the panel scrolls internally. */
+  overflow: hidden;
+}
+
+.shell[data-artifact='open']:not([data-narrow='true']) .main {
+  padding-right: var(--artifact-width);
+}
+
+/*
+ * Below the breakpoint there is no "beside": the panel takes the window.
+ *
+ * It sits above the sidebar drawer's z-index so that opening an artifact from
+ * the gallery — which is reached through the drawer on a phone — does not land
+ * behind it.
+ */
+@media (max-width: 56rem) {
+  .artifact {
+    z-index: 30;
+    width: 100%;
+    border-left: none;
+    /* Clear of the home indicator on a phone, via the same token the rest of
+       the layout uses rather than a second spelling of `env()`. */
+    padding-bottom: var(--safe-bottom);
+  }
+}

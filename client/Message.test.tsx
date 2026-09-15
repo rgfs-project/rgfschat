@@ -210,12 +210,13 @@ describe('StreamingMessage', () => {
     expect(container.querySelector('.cursor')).not.toBeNull();
   });
 
-  /** Open while streaming: it is the only thing to look at before text starts. */
-  it('expands reasoning while it is being produced', () => {
+  /** Collapsed by default, like a finished message's — streaming is not a
+      reason to force it open on someone who has already dismissed it once. */
+  it('does not auto-expand reasoning while it is being produced', () => {
     const { container } = render(
       <StreamingMessage content="" reasoning="thinking out loud" state="streaming" />
     );
-    expect(container.querySelector('details')?.open).toBe(true);
+    expect(container.querySelector('details')?.open).toBe(false);
   });
 
   it('renders streamed markdown, not raw text', () => {

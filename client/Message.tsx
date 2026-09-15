@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Check, ChevronRight, Copy, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import type { Message as MessageModel, MessageStatus } from '@shared/conversation.ts';
+import { artifactId, extractCodeBlocks } from '@shared/artifact.ts';
+import { ArtifactOpenContext, type OpenArtifact } from './artifactContext.ts';
 import { Markdown } from './Markdown.tsx';
 import { MessageAttachments } from './MessageAttachments.tsx';
 
@@ -37,6 +39,8 @@ export interface MessageProps {
   onEdit: (messageId: string, body: string, resend: boolean) => void;
   onDelete: (messageId: string) => void;
   onRegenerate: () => void;
+  /** Opens one of this message's code blocks in the artifact panel. */
+  onOpenArtifact?: (artifactId: string) => void;
 }
 
 export function Message({
@@ -48,10 +52,27 @@ export function Message({
   onEdit,
   onDelete,
   onRegenerate,
+  onOpenArtifact,
 }: MessageProps): React.JSX.Element {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.body);
   const [copied, setCopied] = useState(false);
+
+  /*
+   * Resolves a rendered block back to its address within this message.
+   *
+   * The renderer knows the text of the block it drew but not its position, and
+   * this is the only place that has both: the body it was drawn from, and the
+   * id of the message it belongs to.
+   */
+  const openArtifact = useMemo<OpenArtifact>(() => {
+    if (onOpenArtifact === undefined) return null;
+    return (code: string) => {
+      const block = extractCodeBlocks(message.body).find((candidate) => candidate.code === code);
+      if (block === undefined) return;
+      onOpenArtifact(artifactId(message.id, block.ordinal));
+    };
+  }, [onOpenArtifact, message.body, message.id]);
 
   /** Copies the message as it was written, not as it was rendered. */
   const copy = (): void => {
@@ -128,7 +149,9 @@ export function Message({
         {message.body === '' && statusLabel !== undefined ? (
           <p className="muted msg__empty">No output was produced.</p>
         ) : (
-          <Markdown>{message.body}</Markdown>
+          <ArtifactOpenContext.Provider value={openArtifact}>
+            <Markdown>{message.body}</Markdown>
+          </ArtifactOpenContext.Provider>
         )}
       </div>
 
@@ -203,7 +226,7 @@ export function StreamingMessage({
   return (
     <article className="msg msg--assistant msg--streaming">
       {reasoning !== '' && (
-        <details className="reasoning" open>
+        <details className="reasoning">
           <summary>
             <ChevronRight size={14} className="reasoning__chevron" />
             Reasoning

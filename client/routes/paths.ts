@@ -23,6 +23,9 @@ export const paths = {
 
   settings: '/settings',
   admin: '/admin',
+
+  /** The artifact gallery: every code block, across every conversation. */
+  artifacts: '/artifacts',
 } as const;
 
 /**
@@ -39,6 +42,7 @@ export const patterns = {
   chat: '/chat/:conversationId',
   settings: '/settings',
   admin: '/admin',
+  artifacts: '/artifacts',
 } as const;
 
 /**
@@ -46,3 +50,13 @@ export const patterns = {
  * spelled once.
  */
 export const CONVERSATION_PARAM = 'conversationId';
+
+/**
+ * The search parameter that opens the artifact panel beside a conversation.
+ *
+ * A query parameter rather than a path segment: the panel is a view *of* the
+ * conversation already addressed by the path, not a different screen, so
+ * `/chat/:id?artifact=…` keeps one address for "this conversation, with this
+ * block open" and leaves the conversation route itself unchanged.
+ */
+export const ARTIFACT_PARAM = 'artifact';

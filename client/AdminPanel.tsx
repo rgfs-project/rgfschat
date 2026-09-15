@@ -90,18 +90,20 @@ export function AdminPanel({
             <X size={18} />
           </button>
 
-          {SECTIONS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              className={`panel__rail-item${section === id ? ' is-current' : ''}`}
-              onClick={() => setSection(id)}
-              aria-current={section === id}
-            >
-              <Icon size={17} />
-              {label}
-            </button>
-          ))}
+          <div className="panel__rail-items">
+            {SECTIONS.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                type="button"
+                className={`panel__rail-item${section === id ? ' is-current' : ''}`}
+                onClick={() => setSection(id)}
+                aria-current={section === id}
+              >
+                <Icon size={17} />
+                {label}
+              </button>
+            ))}
+          </div>
         </nav>
 
         <div className="panel__pane">

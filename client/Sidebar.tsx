@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import {
   ChevronUp,
+  Code2,
   Download,
   LogOut,
   Moon,
@@ -48,6 +49,8 @@ export interface SidebarProps {
   onDownload: (id: string, title: string) => void;
   onSettings: () => void;
   onOpenAdmin: () => void;
+  /** Opens the artifact gallery: every code block, across conversations. */
+  onOpenArtifacts: () => void;
   onSignOut: () => void;
   /**
    * Open as a drawer over the page rather than standing beside it.
@@ -99,6 +102,7 @@ export function Sidebar({
   onDownload,
   onSettings,
   onOpenAdmin,
+  onOpenArtifacts,
   onSignOut,
   modal = false,
 }: SidebarProps): React.JSX.Element {
@@ -173,6 +177,14 @@ export function Sidebar({
         <button type="button" className="nav-button" onClick={onSearch}>
           <Search size={15} />
           Search
+        </button>
+
+        {/* Beside Search because it answers the same question — "where did I
+            put that?" — for the one kind of content people go back for by
+            name rather than by conversation. */}
+        <button type="button" className="nav-button" onClick={onOpenArtifacts}>
+          <Code2 size={15} />
+          Artifacts
         </button>
       </div>
 

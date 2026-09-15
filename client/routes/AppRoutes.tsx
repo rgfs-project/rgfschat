@@ -3,7 +3,7 @@ import { ChatRoute } from './ChatRoute.tsx';
 import { ChatsIndexRoute } from './ChatsIndexRoute.tsx';
 import { LoginRoute } from './LoginRoute.tsx';
 import { NotFoundRoute } from './NotFoundRoute.tsx';
-import { AdminRoute, SettingsRoute } from './OverlayRoutes.tsx';
+import { AdminRoute, ArtifactsRoute, SettingsRoute } from './OverlayRoutes.tsx';
 import { RequireAuth } from './RequireAuth.tsx';
 import { patterns, paths } from './paths.ts';
 import type { Location } from 'react-router';
@@ -67,6 +67,7 @@ export function AppRoutes({ draft, onDraftChange }: AppRoutesProps): React.JSX.E
           */}
           <Route path={patterns.settings} element={chat} />
           <Route path={patterns.admin} element={chat} />
+          <Route path={patterns.artifacts} element={chat} />
         </Route>
 
         <Route path="*" element={<NotFoundRoute />} />
@@ -76,6 +77,7 @@ export function AppRoutes({ draft, onDraftChange }: AppRoutesProps): React.JSX.E
         <Route element={<RequireAuth />}>
           <Route path={patterns.settings} element={<SettingsRoute />} />
           <Route path={patterns.admin} element={<AdminRoute />} />
+          <Route path={patterns.artifacts} element={<ArtifactsRoute />} />
         </Route>
         {/* Every other address draws no overlay. `null`, not a fallback screen:
             the background table has already drawn whatever belongs there. */}

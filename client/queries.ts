@@ -6,6 +6,7 @@ import {
   type UseMutationResult,
   type UseQueryResult,
 } from '@tanstack/react-query';
+import type { ArtifactSummary } from '@shared/artifact.ts';
 import type { Message } from '@shared/conversation.ts';
 import type { SessionDto } from '@shared/auth.ts';
 import {
@@ -18,6 +19,7 @@ import {
   fetchMyPreferences,
   fetchSession,
   getConversation,
+  listArtifacts,
   listConversations,
   regenerate,
   pinConversation,
@@ -55,6 +57,7 @@ export const keys = {
   session: () => ['session'] as const,
   models: () => ['models'] as const,
   conversations: () => ['conversations'] as const,
+  artifacts: () => ['artifacts'] as const,
   conversation: (id: string) => ['conversation', id] as const,
   search: (query: string) => ['search', query] as const,
   preferences: () => ['me', 'preferences'] as const,
@@ -107,6 +110,23 @@ export function useConversations(enabled: boolean): UseQueryResult<ConversationS
     queryKey: keys.conversations(),
     queryFn: ({ signal }) => listConversations(signal),
     enabled,
+  });
+}
+
+/**
+ * The artifact gallery.
+ *
+ * Fetched when the gallery opens rather than kept warm: it is derived on the
+ * server by reading every conversation, so it is the most expensive read in the
+ * application and the least often wanted. `staleTime` keeps closing and
+ * reopening it from paying that cost twice.
+ */
+export function useArtifacts(enabled: boolean): UseQueryResult<ArtifactSummary[]> {
+  return useQuery({
+    queryKey: keys.artifacts(),
+    queryFn: ({ signal }) => listArtifacts(signal),
+    enabled,
+    staleTime: 30_000,
   });
 }
 

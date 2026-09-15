@@ -1,7 +1,9 @@
 import { Navigate, useLocation, useNavigate } from 'react-router';
+import type { ArtifactSummary } from '@shared/artifact.ts';
 import { AdminPanel } from '../AdminPanel.tsx';
+import { ArtifactGallery } from '../ArtifactGallery.tsx';
 import { SettingsPanel } from '../SettingsPanel.tsx';
-import { paths } from './paths.ts';
+import { ARTIFACT_PARAM, paths } from './paths.ts';
 import { useAuthenticatedUser } from './session.ts';
 
 /**
@@ -54,4 +56,25 @@ export function AdminRoute(): React.JSX.Element {
   if (user.role !== 'admin') return <Navigate to={paths.newChat} replace />;
 
   return <AdminPanel user={user} onClose={dismiss} />;
+}
+
+/**
+ * The artifact gallery, and what choosing a row means.
+ *
+ * Opening one is a navigation to its conversation with the panel already open,
+ * rather than a viewer floating over the list: an artifact is a part of a
+ * conversation, and the reader almost always wants the thing that was said
+ * around it. `replace` is deliberately not used — the gallery stays in history,
+ * so Back returns to it and the list can be walked through one row at a time.
+ */
+export function ArtifactsRoute(): React.JSX.Element {
+  const navigate = useNavigate();
+  const dismiss = useDismiss();
+
+  const open = (artifact: ArtifactSummary): void => {
+    const params = new URLSearchParams({ [ARTIFACT_PARAM]: artifact.id });
+    void navigate(`${paths.chat(artifact.conversationId)}?${params.toString()}`);
+  };
+
+  return <ArtifactGallery onOpen={open} onClose={dismiss} />;
 }

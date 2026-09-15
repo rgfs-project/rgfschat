@@ -63,6 +63,8 @@
 
   /* 268px, read straight off the reference's own `w-[268px]`. */
   --sidebar-width: 16.75rem;
+  /* Wide enough for a comfortable 80-column line of code plus its gutter. */
+  --artifact-width: 30rem;
   /* 56px, the reference's. The bar holds one line of type on each side of the
      seam; the extra 12px it had were empty on both. */
   --header-height: 3.5rem;

@@ -87,6 +87,7 @@ function renderApp(): { setCurrentId: ReturnType<typeof vi.fn> } {
         }}
         onOpenSettings={vi.fn()}
         onOpenAdmin={vi.fn()}
+        onOpenArtifacts={vi.fn()}
         onSignOut={vi.fn()}
       />
     );

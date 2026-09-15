@@ -9,6 +9,7 @@ import type { ProviderHub } from './provider/hub.ts';
 import { generationRouter } from './routes/generations.ts';
 import { healthRouter } from './routes/health.ts';
 import { conversationRouter } from './routes/conversations.ts';
+import { artifactsRouter } from './routes/artifacts.ts';
 import type { PreferencesStore } from './storage/preferences.ts';
 import type { MemoryStore } from './storage/memories.ts';
 import { meRouter } from './routes/me.ts';
@@ -130,7 +131,12 @@ export function createApp({
         logger,
         ...(settings === undefined
           ? {}
-          : { registrationMode: () => settings.resolved().registrationMode }),
+          : {
+              registrationMode: () => settings.resolved().registrationMode,
+              onFirstAccountRegistered: async () => {
+                await settings.save({ ...settings.stored(), registrationMode: 'closed' });
+              },
+            }),
       })
     );
 
@@ -156,6 +162,10 @@ export function createApp({
           : {}),
       })
     );
+
+    // Artifacts are a read-only projection of the same conversations, so they
+    // need the same two collaborators and nothing else.
+    app.use('/api', artifactsRouter({ store, index }));
   }
 
   // Everything a reader can change about their own account. Mounted after the
