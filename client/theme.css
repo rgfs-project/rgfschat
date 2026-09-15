@@ -316,6 +316,41 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/*
+ * Chrome is not text.
+ *
+ * A stray drag across the window, a select-all, or a long press on a phone
+ * highlighted the entire application — nav labels, section headings, the
+ * wordmark, timestamps, even the glyphs inside buttons — none of which anyone
+ * wants on the clipboard. The callout is suppressed with it: on iOS a press
+ * and hold on a control raised the system's own Copy / Look Up menu over the
+ * thing being pressed.
+ *
+ * Stated as the regions that are furniture rather than as a blanket rule on
+ * the root, so everything not listed stays selectable: an answer, a code
+ * block, a path or an id in the admin panel, an error message worth pasting
+ * into a search.
+ */
+button,
+label,
+summary,
+.sidebar,
+.main__header,
+.msg__actions {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* The exceptions inside those regions: a field is for typing into, and what is
+   typed can be selected. */
+input,
+textarea {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
