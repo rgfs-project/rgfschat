@@ -5,6 +5,7 @@ import { artifactId, extractCodeBlocks } from '@shared/artifact.ts';
 import { ArtifactOpenContext, type OpenArtifact } from './artifactContext.ts';
 import { Markdown } from './Markdown.tsx';
 import { MessageAttachments } from './MessageAttachments.tsx';
+import { formatRelativeTime } from './relativeTime.ts';
 
 /**
  * One turn in the transcript.
@@ -88,6 +89,7 @@ export function Message({
   const status = message.type === 'assistant' ? message.status : undefined;
   const statusLabel = status === undefined ? undefined : STATUS_LABEL[status];
   const reasoning = message.type === 'assistant' ? message.reasoning : undefined;
+  const createdAt = message.type === 'system' ? undefined : message.createdAt;
 
   const save = (): void => {
     const next = draft.trim();
@@ -161,17 +163,11 @@ export function Message({
 
       {!busy && (
         <div className="msg__actions">
-          {/* On both sides: wanting a copy of what you asked is as ordinary as
-              wanting a copy of the answer. */}
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={copied ? 'Copied' : 'Copy message'}
-            title={copied ? 'Copied' : 'Copy'}
-            onClick={copy}
-          >
-            {copied ? <Check size={14} /> : <Copy size={14} />}
-          </button>
+          {/* Absent on a message from before this existed (formatVersion 1)
+              rather than showing a fabricated or misleading time. */}
+          {createdAt !== undefined && (
+            <span className="msg__time">{formatRelativeTime(createdAt)}</span>
+          )}
 
           {message.type === 'user' && (
             <button
@@ -198,6 +194,19 @@ export function Message({
               <RefreshCw size={14} />
             </button>
           )}
+
+          {/* On both sides: wanting a copy of what you asked is as ordinary as
+              wanting a copy of the answer. */}
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={copied ? 'Copied' : 'Copy message'}
+            title={copied ? 'Copied' : 'Copy'}
+            onClick={copy}
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+          </button>
+
           <button
             type="button"
             className="icon-button"

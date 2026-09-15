@@ -185,6 +185,7 @@ export class GenerationService {
           {
             type: 'user' as const,
             id: userMessageId,
+            createdAt: this.#store.timestamp(),
             body: content,
             ...(attached.length === 0 ? {} : { attachments: attached.map((a) => a.id) }),
           },
@@ -461,6 +462,7 @@ export class GenerationService {
           provider: providerId,
           model,
           ...(final.reasoning !== '' ? { reasoning: final.reasoning } : {}),
+          createdAt: this.#store.timestamp(),
           body: final.content,
         };
 

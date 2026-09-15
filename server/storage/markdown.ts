@@ -1,6 +1,7 @@
 import { parseDocument, type Document } from 'yaml';
 import {
   FORMAT_VERSION,
+  MIN_READABLE_FORMAT_VERSION,
   MESSAGE_STATUSES,
   isCanonicalTimestamp,
   isCanonicalUuid,
@@ -39,15 +40,21 @@ const NEEDS_ESCAPE = /^\\*[ \t]*<!--[ \t]*cc:/;
 const MESSAGE_TYPES = ['system', 'user', 'reasoning', 'assistant'] as const;
 type BlockType = (typeof MESSAGE_TYPES)[number];
 
-const ATTRIBUTE_KEYS = ['id', 'status', 'provider', 'model', 'attachments'] as const;
+const ATTRIBUTE_KEYS = ['id', 'status', 'provider', 'model', 'attachments', 'createdAt'] as const;
 type AttributeKey = (typeof ATTRIBUTE_KEYS)[number];
 
-/** Which attributes each type permits, and which are required (§3.4). */
+/**
+ * Which attributes each type permits, and which are required (§3.4).
+ *
+ * `createdAt` is optional everywhere it is allowed, never required: a
+ * `formatVersion: 1` file predates it and is still readable (§3.3), so a
+ * block from one simply has no `createdAt` rather than failing to parse.
+ */
 const ATTRIBUTE_RULES: Record<BlockType, { required: AttributeKey[]; optional: AttributeKey[] }> = {
   system: { required: ['id'], optional: [] },
-  user: { required: ['id'], optional: ['attachments'] },
+  user: { required: ['id'], optional: ['attachments', 'createdAt'] },
   reasoning: { required: ['id'], optional: [] },
-  assistant: { required: ['id', 'status'], optional: ['provider', 'model'] },
+  assistant: { required: ['id', 'status'], optional: ['provider', 'model', 'createdAt'] },
 };
 
 interface ParsedDelimiter {
@@ -109,7 +116,9 @@ function parseDelimiter(
     if (wsBefore === 0) return { ok: false, reason: 'missing whitespace before attribute' };
 
     const keyStart = i;
-    while (i < line.length && /[a-z]/.test(line[i] as string)) i += 1;
+    // Letters only, upper included: every other attribute is lowercase, but
+    // `createdAt` is camelCase and would otherwise be truncated at its "A".
+    while (i < line.length && /[a-zA-Z]/.test(line[i] as string)) i += 1;
     const rawKey = line.slice(keyStart, i);
     if (!(ATTRIBUTE_KEYS as readonly string[]).includes(rawKey)) {
       return { ok: false, reason: `unknown attribute "${rawKey}"` };
@@ -206,6 +215,11 @@ function validateAttributes(
     }
   }
 
+  const createdAt = attributes.get('createdAt');
+  if (createdAt !== undefined && !isCanonicalTimestamp(createdAt)) {
+    return { ok: false, reason: 'createdAt must be YYYY-MM-DDTHH:mm:ss.sssZ', line };
+  }
+
   return { ok: true };
 }
 
@@ -274,9 +288,15 @@ function parseFrontMatter(
 
   const data = doc.toJS() as Record<string, unknown>;
 
-  if (data['formatVersion'] !== FORMAT_VERSION) {
-    // No implicit migration: any other value is malformed (§3.3).
-    return { ok: false, reason: 'formatVersion must be the integer 1', line: 2 };
+  const version = data['formatVersion'];
+  if (version !== MIN_READABLE_FORMAT_VERSION && version !== FORMAT_VERSION) {
+    // No implicit migration beyond the readable range: any other value is
+    // malformed (§3.3). `1` is still read — see the note on `createdAt`.
+    return {
+      ok: false,
+      reason: `formatVersion must be the integer ${MIN_READABLE_FORMAT_VERSION} or ${FORMAT_VERSION}`,
+      line: 2,
+    };
   }
 
   const title = data['title'];
@@ -396,6 +416,9 @@ export function parseConversation(input: string): ParseResult {
           type: 'user',
           id,
           ...(attachments !== undefined ? { attachments: attachments.split(',') } : {}),
+          ...(attributes.has('createdAt')
+            ? { createdAt: attributes.get('createdAt') as string }
+            : {}),
           body,
         });
         break;
@@ -408,6 +431,9 @@ export function parseConversation(input: string): ParseResult {
           ...(attributes.has('provider') ? { provider: attributes.get('provider') as string } : {}),
           ...(attributes.has('model') ? { model: attributes.get('model') as string } : {}),
           ...(pendingReasoning !== null ? { reasoning: pendingReasoning.body } : {}),
+          ...(attributes.has('createdAt')
+            ? { createdAt: attributes.get('createdAt') as string }
+            : {}),
           body,
         };
         pendingReasoning = null;
@@ -488,7 +514,7 @@ export function serializeConversation(conversation: Conversation): string {
       blocks.push(block(delimiterFor('reasoning', [['id', message.id]]), message.reasoning));
     }
 
-    // Canonical attribute order: id, status, provider, model, attachments.
+    // Canonical attribute order: id, status, provider, model, attachments, createdAt.
     const attributes: [AttributeKey, string][] = [['id', message.id]];
     if (message.type === 'assistant') {
       attributes.push(['status', message.status]);
@@ -497,6 +523,9 @@ export function serializeConversation(conversation: Conversation): string {
     }
     if (message.type === 'user' && message.attachments !== undefined) {
       attributes.push(['attachments', quote(message.attachments.join(','))]);
+    }
+    if (message.type !== 'system' && message.createdAt !== undefined) {
+      attributes.push(['createdAt', quote(message.createdAt)]);
     }
 
     blocks.push(block(delimiterFor(message.type, attributes), message.body));

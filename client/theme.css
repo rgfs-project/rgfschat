@@ -24,15 +24,21 @@
  * the canvas, so the canvas is held just off white to give it one.
  */
 :root {
-  --bg: #fafafa;
+  --bg: #ffffff;
   --raised: #ffffff;
-  --surface: #f2f2f2;
-  --surface-2: #e9e9e9;
-  --surface-3: #dedede;
-  --border: #e4e4e4;
-  --border-strong: #8a8a8a;
-  --text: #121212;
-  --muted: #6b6b6b;
+  --surface: #f4f4f4;
+  --surface-2: #ececec;
+  --surface-3: #e0e0e0;
+  --border: #e2e2e2;
+  --border-strong: #d4d4d4;
+  --text: #000000;
+  --text-soft: #333333;
+  --muted: #737373;
+  --faint: #a3a3a3;
+  --focus: #b5b5b5;
+  --danger: #9a3f36;
+  --danger-bg: #f9eeec;
+  --danger-border: #e2c3bf;
   --accent: #121212;
   --on-accent: #ffffff;
 
@@ -136,14 +142,20 @@
    * inverted rather than compressed.
    */
   --bg: #000000;
-  --raised: #171717;
+  --raised: #131313;
   --surface: #0d0d0d;
-  --surface-2: #1f1f1f;
-  --surface-3: #2b2b2b;
-  --border: #242424;
-  --border-strong: #6b6b6b;
-  --text: #f2f2f2;
+  --surface-2: #161616;
+  --surface-3: #262626;
+  --border: #232323;
+  --border-strong: #333333;
+  --text: #f5f5f5;
+  --text-soft: #d8d8d8;
   --muted: #9a9a9a;
+  --faint: #6b6b6b;
+  --focus: #4a4a4a;
+  --danger: #e0837c;
+  --danger-bg: #170d0c;
+  --danger-border: #3a201e;
   --accent: #f2f2f2;
   --on-accent: #0a0a0a;
 }

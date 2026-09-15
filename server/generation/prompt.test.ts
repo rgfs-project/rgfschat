@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import type { Conversation, Message } from '@shared/conversation.ts';
+import { FORMAT_VERSION, type Conversation, type Message } from '@shared/conversation.ts';
 import { assemblePrompt, estimateTokens } from './prompt.ts';
 
 function conversation(messages: Message[]): Conversation {
   return {
-    formatVersion: 1,
+    formatVersion: FORMAT_VERSION,
     title: 'x',
     createdAt: '2026-09-11T00:00:00.000Z',
     updatedAt: '2026-09-11T00:00:00.000Z',

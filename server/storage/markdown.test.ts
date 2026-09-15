@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import type { Conversation, Message } from '@shared/conversation.ts';
-import { deriveTitle } from '@shared/conversation.ts';
+import { FORMAT_VERSION, deriveTitle } from '@shared/conversation.ts';
 import { parseConversation, serializeConversation } from './markdown.ts';
 
 const ID_A = '0b7e1f2a-3c4d-4e5f-8a9b-0c1d2e3f4a5b';
@@ -10,7 +10,7 @@ const ID_C = '6f1c2222-3333-4444-8555-666677778888';
 
 function conversation(messages: Message[], overrides: Partial<Conversation> = {}): Conversation {
   return {
-    formatVersion: 1,
+    formatVersion: FORMAT_VERSION,
     title: 'Trip planning',
     createdAt: '2026-09-11T17:03:12.000Z',
     updatedAt: '2026-09-11T17:05:40.512Z',
@@ -84,8 +84,18 @@ describe('front matter', () => {
     expect(expectMalformed(text).reason).toMatch(/must be "formatVersion"/);
   });
 
-  it('rejects any formatVersion other than the integer 1 — there is no implicit migration', () => {
-    expect(expectMalformed(FRONT.replace('formatVersion: 1', 'formatVersion: 2')).reason).toMatch(
+  it('accepts formatVersion 1 (pre-dates per-message createdAt) and 2 (current)', () => {
+    expect(parseOk(FRONT).title).toBe('Trip planning');
+    expect(parseOk(FRONT.replace('formatVersion: 1', 'formatVersion: 2')).title).toBe(
+      'Trip planning'
+    );
+  });
+
+  it('rejects any formatVersion outside the readable range — there is no implicit migration', () => {
+    expect(expectMalformed(FRONT.replace('formatVersion: 1', 'formatVersion: 3')).reason).toMatch(
+      /formatVersion/
+    );
+    expect(expectMalformed(FRONT.replace('formatVersion: 1', 'formatVersion: 0')).reason).toMatch(
       /formatVersion/
     );
     expect(expectMalformed(FRONT.replace('formatVersion: 1', 'formatVersion: "1"')).reason).toMatch(
@@ -200,6 +210,27 @@ describe('delimiter grammar', () => {
     expect(
       expectMalformed(`${FRONT}<!-- cc:user id=${ID_A} attachments="${eleven}" -->\nx\n`).reason
     ).toMatch(/1-10/);
+  });
+
+  it('accepts createdAt on a user or assistant block, and requires it be canonical', () => {
+    const stamp = '2026-09-14T20:45:00.123Z';
+
+    const user = parseOk(`${FRONT}<!-- cc:user id=${ID_A} createdAt="${stamp}" -->\nx\n`);
+    expect((user.messages[0] as { createdAt?: string }).createdAt).toBe(stamp);
+
+    const assistant = parseOk(
+      `${FRONT}<!-- cc:assistant id=${ID_A} status=complete createdAt="${stamp}" -->\nx\n`
+    );
+    expect((assistant.messages[0] as { createdAt?: string }).createdAt).toBe(stamp);
+
+    expect(
+      expectMalformed(`${FRONT}<!-- cc:user id=${ID_A} createdAt="2026-09-14" -->\nx\n`).reason
+    ).toMatch(/createdAt/);
+  });
+
+  it('leaves createdAt absent on a block that omits it — a formatVersion 1 message', () => {
+    const parsed = parseOk(`${FRONT}<!-- cc:user id=${ID_A} -->\nx\n`);
+    expect((parsed.messages[0] as { createdAt?: string }).createdAt).toBeUndefined();
   });
 });
 
@@ -379,6 +410,14 @@ const bodyArb = fc.array(bodyLine, { maxLength: 6 }).map((parts) => {
 });
 
 const uuidArb = fc.uuid({ version: 4 }).map((u) => u.toLowerCase());
+// Built from a millisecond offset rather than `fc.date()`: `isCanonicalTimestamp`
+// requires a four-digit year, and `fc.date()`'s own min/max still shrunk into
+// an occasional `Invalid Date` at the edges of its range. A plain integer
+// bounded to epoch-through-9999 sidesteps that entirely.
+const createdAtArb = fc.option(
+  fc.integer({ min: 0, max: 253_402_300_799_999 }).map((ms) => new Date(ms).toISOString()),
+  { nil: undefined }
+);
 
 const messageArb = (id: string): fc.Arbitrary<Message> =>
   fc.oneof(
@@ -389,11 +428,13 @@ const messageArb = (id: string): fc.Arbitrary<Message> =>
         attachments: fc.option(fc.array(uuidArb, { minLength: 1, maxLength: 10 }), {
           nil: undefined,
         }),
+        createdAt: createdAtArb,
       })
-      .map(({ body, attachments }): Message => ({
+      .map(({ body, attachments, createdAt }): Message => ({
         type: 'user',
         id,
         ...(attachments !== undefined ? { attachments } : {}),
+        ...(createdAt !== undefined ? { createdAt } : {}),
         body,
       })),
     fc
@@ -409,14 +450,16 @@ const messageArb = (id: string): fc.Arbitrary<Message> =>
         provider: fc.option(fc.string(), { nil: undefined }),
         model: fc.option(fc.string(), { nil: undefined }),
         reasoning: fc.option(bodyArb, { nil: undefined }),
+        createdAt: createdAtArb,
       })
-      .map(({ body, status, provider, model, reasoning }): Message => ({
+      .map(({ body, status, provider, model, reasoning, createdAt }): Message => ({
         type: 'assistant',
         id,
         status,
         ...(provider !== undefined ? { provider } : {}),
         ...(model !== undefined ? { model } : {}),
         ...(reasoning !== undefined ? { reasoning } : {}),
+        ...(createdAt !== undefined ? { createdAt } : {}),
         body,
       }))
   );
@@ -428,7 +471,7 @@ const conversationArb: fc.Arbitrary<Conversation> = fc
   })
   .chain(({ title, ids }) =>
     fc.tuple(...ids.map((id) => messageArb(id))).map((messages) => ({
-      formatVersion: 1 as const,
+      formatVersion: FORMAT_VERSION,
       title,
       createdAt: '2026-09-11T17:03:12.000Z',
       updatedAt: '2026-09-11T17:05:40.512Z',
@@ -436,7 +479,7 @@ const conversationArb: fc.Arbitrary<Conversation> = fc
     }))
   );
 
-describe('INV-09: formatVersion 1 round-trips exactly', () => {
+describe('INV-09: formatVersion 2 round-trips exactly', () => {
   it('parse(serialize(x)) deep-equals x', () => {
     fc.assert(
       fc.property(conversationArb, (model) => {

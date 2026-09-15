@@ -275,7 +275,7 @@ body {
   /* What an icon button holds around its glyph, so the title starts on the
      column the control's glyph starts on — whichever header it is in. */
   padding-left: 0.4375rem;
-  font-size: 0.8125rem;
+  font-size: 0.90625rem;
   font-weight: 400;
   line-height: 1.5rem;
   margin: 0;
@@ -363,13 +363,6 @@ body {
 /* Positioning context for the jump-to-latest control above it. */
 .composer-region__inner {
   position: relative;
-}
-
-.composer-hint {
-  text-align: center;
-  color: var(--muted);
-  font-size: 0.75rem;
-  margin: 0.5rem 0 0;
 }
 
 /* --- artifact panel ----------------------------------------------------- */

@@ -1,12 +1,17 @@
 /**
- * Conversation model — `formatVersion: 1` (contracts §3).
+ * Conversation model — `formatVersion: 2` (contracts §3).
  *
- * This shape is frozen once Phase 3 ships. Every field any later phase needs is
- * defined now, including `attachments` (Phase 11), so no later phase requires a
- * version bump.
+ * The shape was meant to be frozen once Phase 3 shipped, with every field a
+ * later phase needs defined up front so nothing would require a version bump.
+ * Per-message `createdAt` was the one field that plan missed: `formatVersion:
+ * 1` predates it. The parser still reads `1` — those messages simply carry no
+ * `createdAt` — but every conversation it writes back out, and every new one,
+ * is `2`.
  */
 
-export const FORMAT_VERSION = 1;
+export const FORMAT_VERSION = 2;
+/** The oldest file shape the parser still accepts, for the reason above. */
+export const MIN_READABLE_FORMAT_VERSION = 1;
 
 export const MESSAGE_STATUSES = [
   'complete',
@@ -29,6 +34,8 @@ export interface UserMessage {
   id: string;
   /** 1–10 canonical UUIDs. Parsed and validated from Phase 3; used from Phase 11. */
   attachments?: string[];
+  /** Absent on a message written under `formatVersion: 1`, before this existed. */
+  createdAt?: string;
   body: string;
 }
 
@@ -48,6 +55,8 @@ export interface AssistantMessage {
    * never be mistaken for a message to send back to the model (contracts §4).
    */
   reasoning?: string;
+  /** Absent on a message written under `formatVersion: 1`, before this existed. */
+  createdAt?: string;
   body: string;
 }
 

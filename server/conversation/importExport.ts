@@ -143,9 +143,18 @@ export function convertConversation(source: z.infer<typeof conversationSchema>):
     // The export's ids are already canonical UUIDs; anything else gets a fresh
     // one rather than being forced into a path or an attribute.
     const id = isCanonicalUuid(message.uuid) ? message.uuid : randomUUID();
+    // The export always carries one, but not necessarily in the canonical
+    // millisecond form this format requires; normalised the same way the
+    // conversation's own createdAt/updatedAt are, below. Omitted only if it
+    // turns out unparsable, rather than inventing a time this message was not
+    // actually sent at.
+    const parsedCreatedAt = Date.parse(message.created_at);
+    const createdAt = Number.isFinite(parsedCreatedAt)
+      ? new Date(parsedCreatedAt).toISOString()
+      : undefined;
 
     if (message.sender === 'human') {
-      messages.push({ type: 'user', id, body });
+      messages.push({ type: 'user', id, ...(createdAt === undefined ? {} : { createdAt }), body });
     } else {
       messages.push({
         type: 'assistant',
@@ -153,6 +162,7 @@ export function convertConversation(source: z.infer<typeof conversationSchema>):
         status: 'complete',
         body,
         ...(reasoning === '' ? {} : { reasoning }),
+        ...(createdAt === undefined ? {} : { createdAt }),
       });
     }
   }

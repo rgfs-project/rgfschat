@@ -856,7 +856,6 @@ export function App({
               selection={selection}
               onSelectModel={onSelectModel}
             />
-            <p className="composer-hint">Enter to send · Shift+Enter for a new line</p>
           </div>
         </div>
       </main>

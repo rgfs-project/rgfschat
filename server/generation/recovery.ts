@@ -92,6 +92,7 @@ export async function recoverGenerations({
             provider: checkpoint.providerId,
             model: checkpoint.model,
             ...(checkpoint.reasoning !== '' ? { reasoning: checkpoint.reasoning } : {}),
+            createdAt: store.timestamp(),
             body: checkpoint.content,
           };
 
