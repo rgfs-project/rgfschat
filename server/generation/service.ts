@@ -16,6 +16,7 @@ import type { ProviderHub } from '../provider/hub.ts';
 import type { ConversationStore } from '../storage/conversations.ts';
 import type { ProposalStore } from '../storage/proposals.ts';
 import { MEMORY_TOOLS, parseMemoryCall } from '../memory/tools.ts';
+import { applyPromptVariables } from '@shared/promptVariables.ts';
 import { entryFor, type ChatIndex } from '../storage/index.ts';
 import { conversationKey } from '../storage/locks.ts';
 import type { GenerationManager } from './manager.ts';
@@ -79,6 +80,14 @@ export interface GenerationServiceOptions {
    * sending exactly the request it sent before.
    */
   proposals?: ProposalStore;
+  /**
+   * Resolves the name a placeholder in a system prompt should be filled with.
+   *
+   * A function rather than the `UserStore` itself, so this stays the narrowest
+   * thing that works: generation has no business being able to rename or delete
+   * an account because it needed to read one field.
+   */
+  users?: { usernameFor: (userId: string) => Promise<string | null> };
   /** Injectable so a test can pin the instant stamped on a message. */
   now?: () => Date;
 }
@@ -103,6 +112,7 @@ export class GenerationService {
   readonly #settings: GenerationServiceOptions['settings'];
   readonly #memories: GenerationServiceOptions['memories'];
   readonly #proposals: ProposalStore | undefined;
+  readonly #users: GenerationServiceOptions['users'];
   readonly #now: () => Date;
 
   /** Conversations with a generation that has not yet reached a terminal state. */
@@ -122,6 +132,7 @@ export class GenerationService {
     this.#settings = options.settings;
     this.#memories = options.memories;
     this.#proposals = options.proposals;
+    this.#users = options.users;
     this.#now = options.now ?? ((): Date => new Date());
   }
 
@@ -133,15 +144,48 @@ export class GenerationService {
    * the memories are about *who it is answering* — and because an
    * administrator's instruction reads better as the last word.
    */
-  async #systemPromptFor(userId: string, sampler: SamplerSettings): Promise<string | undefined> {
+  async #systemPromptFor(
+    userId: string,
+    sampler: SamplerSettings,
+    timeZone: string | undefined
+  ): Promise<string | undefined> {
     const remembered =
       (await this.#memories?.prompt(userId, { tools: this.#toolsEnabled })) ?? null;
-    const configured = sampler.systemPrompt;
+    const configured = await this.#fillVariables(userId, sampler.systemPrompt, timeZone);
 
     if (remembered === null) return configured;
     return configured === undefined || configured.trim() === ''
       ? remembered
       : `${remembered}\n\n${configured}`;
+  }
+
+  /**
+   * Fills `{{CURRENT_DATETIME}}` and friends in the administrator's prompt.
+   *
+   * Only that prompt. Memories are the reader's own words and are left exactly
+   * as written — a note that happens to contain double braces is a note, not a
+   * template, and rewriting it would change what the reader asked to be
+   * remembered.
+   *
+   * Done per generation, because the whole point of a clock is that it moves.
+   */
+  async #fillVariables(
+    userId: string,
+    template: string | undefined,
+    timeZone: string | undefined
+  ): Promise<string | undefined> {
+    if (template === undefined || !template.includes('{{')) return template;
+
+    const userName = (await this.#users?.usernameFor(userId)) ?? '';
+
+    return applyPromptVariables(template, {
+      userName,
+      now: this.#now(),
+      // Absent means the client did not send one — an older build, or a
+      // non-browser caller. The server's own zone is a worse guess than saying
+      // so plainly, which `resolvePromptVariables` does by falling back to UTC.
+      timeZone: timeZone ?? '',
+    });
   }
 
   /** Whether this server can do anything with a call the model makes. */
@@ -168,7 +212,9 @@ export class GenerationService {
     providerId: string,
     model: string,
     content: string,
-    attachmentIds: readonly string[] = []
+    attachmentIds: readonly string[] = [],
+    /** The reader's IANA zone, for the clock placeholders. */
+    timeZone?: string
   ): Promise<StartResult> {
     const key = conversationKey(userId, conversationId);
 
@@ -192,7 +238,7 @@ export class GenerationService {
     const sampler = this.#samplerFor(providerId, model);
     // Read before the lock: it touches the filesystem, and the lock is held
     // across the whole check-and-append.
-    const systemPrompt = await this.#systemPromptFor(userId, sampler);
+    const systemPrompt = await this.#systemPromptFor(userId, sampler, timeZone);
 
     const prepared = await this.#store.locks.run(key, async () => {
       if (this.#active.has(key)) {
@@ -374,14 +420,15 @@ export class GenerationService {
     userId: string,
     conversationId: string,
     providerId: string,
-    model: string
+    model: string,
+    timeZone?: string
   ): Promise<{ generationId: string; assistantMessageId: string }> {
     const key = conversationKey(userId, conversationId);
     const { entry, client, model: modelDto } = await this.#hub.resolveModel(providerId, model);
     const sampler = this.#samplerFor(providerId, model);
     // Read before the lock: it touches the filesystem, and the lock is held
     // across the whole check-and-append.
-    const systemPrompt = await this.#systemPromptFor(userId, sampler);
+    const systemPrompt = await this.#systemPromptFor(userId, sampler, timeZone);
 
     const prepared = await this.#store.locks.run(key, async () => {
       if (this.#active.has(key)) {

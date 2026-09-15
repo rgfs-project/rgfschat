@@ -232,3 +232,80 @@ describe('the proposal id namespace', () => {
     expect(await proposals.take(USER, second.id, randomUUID())).toBeNull();
   });
 });
+
+/**
+ * The clock placeholders, end to end.
+ *
+ * Asserted against what actually left for the provider, not against the
+ * substitution function — the function has its own unit tests, and what this
+ * one is for is proving the wiring reaches the request body.
+ */
+describe('system prompt placeholders', () => {
+  const systemPromptOf = (): string => {
+    const body = mock?.requests.at(-1)?.body as { messages: { role: string; content: string }[] };
+    return body.messages.find((m) => m.role === 'system')?.content ?? '';
+  };
+
+  async function bootWithPrompt(template: string): Promise<void> {
+    await boot([]);
+    service = new GenerationService({
+      ...serviceOptions(),
+      settings: { samplerFor: () => ({ systemPrompt: template }) },
+      users: { usernameFor: () => Promise.resolve('ada') },
+      now: () => new Date('2026-09-14T14:30:00Z'),
+    });
+  }
+
+  it('fills the clock and the name in the prompt that is sent', async () => {
+    await bootWithPrompt('Today is {{CURRENT_WEEKDAY}}. Speak to {{USER_NAME}}.');
+
+    const { id } = await store.create(USER, 'Test');
+    await service.start(USER, id, 'local', 'GPT', 'hello', [], 'UTC');
+    await service.settled(USER, id);
+
+    expect(systemPromptOf()).toContain('Today is Monday. Speak to ada.');
+  });
+
+  it('uses the zone the client sent, not the server’s', async () => {
+    await bootWithPrompt('{{CURRENT_TIMEZONE}}');
+
+    const { id } = await store.create(USER, 'Test');
+    await service.start(USER, id, 'local', 'GPT', 'hello', [], 'Asia/Tokyo');
+    await service.settled(USER, id);
+
+    expect(systemPromptOf()).toContain('Asia/Tokyo');
+  });
+
+  it('falls back to UTC when the client sent no zone', async () => {
+    await bootWithPrompt('{{CURRENT_TIMEZONE}}');
+
+    const { id } = await store.create(USER, 'Test');
+    await service.start(USER, id, 'local', 'GPT', 'hello');
+    await service.settled(USER, id);
+
+    expect(systemPromptOf()).toContain('UTC');
+  });
+
+  /* Memories are the reader's own words. A note that happens to contain double
+     braces is a note, not a template. */
+  it('does not rewrite placeholders inside a memory', async () => {
+    await bootWithPrompt('Be brief.');
+    await memories.write(USER, 'style', 'Writes {{CURRENT_DATETIME}} in their notes.');
+
+    const { id } = await store.create(USER, 'Test');
+    await service.start(USER, id, 'local', 'GPT', 'hello', [], 'UTC');
+    await service.settled(USER, id);
+
+    expect(systemPromptOf()).toContain('{{CURRENT_DATETIME}}');
+  });
+
+  it('leaves a prompt with no placeholders untouched', async () => {
+    await bootWithPrompt('Be concise.');
+
+    const { id } = await store.create(USER, 'Test');
+    await service.start(USER, id, 'local', 'GPT', 'hello', [], 'UTC');
+    await service.settled(USER, id);
+
+    expect(systemPromptOf()).toContain('Be concise.');
+  });
+});

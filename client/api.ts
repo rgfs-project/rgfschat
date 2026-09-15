@@ -175,6 +175,22 @@ export async function fetchModels(signal?: AbortSignal): Promise<ModelCatalogue>
 }
 
 /**
+ * This browser's IANA zone, e.g. `Europe/London`.
+ *
+ * Sent with every generation so the clock placeholders in a system prompt read
+ * in the reader's own time rather than the server's — a self-hosted instance is
+ * very often somewhere else. `undefined` where the runtime cannot say, which
+ * the server treats as "unknown" rather than substituting its own zone.
+ */
+function browserTimeZone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * The server assembles history from storage; only the new message is sent.
  * A model is identified by its `(providerId, model)` pair.
  */
@@ -185,6 +201,7 @@ export function startGeneration(
   content: string,
   attachmentIds: readonly string[] = []
 ): Promise<GenerationAcceptedDto> {
+  const timeZone = browserTimeZone();
   return request<GenerationAcceptedDto>('/api/generations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -196,6 +213,7 @@ export function startGeneration(
       // Omitted rather than sent empty: the route's schema rejects unknown
       // fields and accepts an absent one, and an empty array says nothing.
       ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
+      ...(timeZone === undefined ? {} : { timeZone }),
     }),
   });
 }
@@ -244,12 +262,18 @@ export function regenerate(
   providerId: string,
   model: string
 ): Promise<{ generationId: string; assistantMessageId: string }> {
+  const timeZone = browserTimeZone();
   return request<{ generationId: string; assistantMessageId: string }>(
     '/api/generations/regenerate',
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ conversationId, providerId, model }),
+      body: JSON.stringify({
+        conversationId,
+        providerId,
+        model,
+        ...(timeZone === undefined ? {} : { timeZone }),
+      }),
     }
   );
 }

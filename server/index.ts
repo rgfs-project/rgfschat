@@ -90,6 +90,11 @@ async function main(): Promise<void> {
     pendingTtlMs: config.attachments.pendingTtlMs,
   }));
 
+  // Built before the service, which needs to resolve a username for the
+  // `{{USER_NAME}}` placeholder in a system prompt.
+  const paths = store.paths;
+  const users = new UserStore({ paths, logger });
+
   const service = new GenerationService({
     store,
     index,
@@ -104,10 +109,11 @@ async function main(): Promise<void> {
     proposals,
     attachments,
     maxInlineChars: config.attachments.maxInlineChars,
+    users: {
+      usernameFor: async (userId) => (await users.findById(userId))?.username ?? null,
+    },
   });
 
-  const paths = store.paths;
-  const users = new UserStore({ paths, logger });
   const sessions = new SessionManager({
     paths,
     logger,

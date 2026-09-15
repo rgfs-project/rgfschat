@@ -1983,6 +1983,19 @@ button.linkish:hover {
   color: var(--muted);
 }
 
+/* The placeholders the prompt above accepts. Set in the monospace face so a
+   `{{TOKEN}}` reads as something to be typed exactly, not as prose. */
+.sampler__variables {
+  margin-top: 0.5rem;
+  line-height: 1.6;
+}
+
+.sampler__variables code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--text);
+}
+
 /* ==========================================================================
    Touch
    ==========================================================================

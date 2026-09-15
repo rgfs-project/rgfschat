@@ -30,6 +30,15 @@ const createGenerationSchema = z.strictObject({
   providerId: z.string().min(1).max(64),
   model: z.string().min(1).max(200),
   content: z.string().min(1).max(200_000),
+  /**
+   * The reader's IANA zone, for the clock placeholders in a system prompt.
+   *
+   * Optional: an older client does not send one, and a generation is not worth
+   * refusing over a cosmetic detail. Bounded and re-checked against `Intl`
+   * downstream — this is a browser-supplied string, so the length cap here is
+   * the first bound and not the only one.
+   */
+  timeZone: z.string().min(1).max(64).optional(),
 });
 
 /** Re-runs the last turn; no new user message is added. */
@@ -37,6 +46,7 @@ const regenerateSchema = z.strictObject({
   conversationId: z.string().min(1).max(200),
   providerId: z.string().min(1).max(64),
   model: z.string().min(1).max(200),
+  timeZone: z.string().min(1).max(64).optional(),
 });
 
 export interface GenerationRoutesOptions {
@@ -109,9 +119,8 @@ export function generationRouter({
   });
 
   router.post('/generations', validateBody(createGenerationSchema), async (req, res) => {
-    const { conversationId, providerId, model, content, attachmentIds } = req.body as z.infer<
-      typeof createGenerationSchema
-    >;
+    const { conversationId, providerId, model, content, attachmentIds, timeZone } =
+      req.body as z.infer<typeof createGenerationSchema>;
 
     // The same answer a model that does not exist gets, so hiding one cannot
     // be used to discover that it is there.
@@ -130,7 +139,8 @@ export function generationRouter({
       providerId,
       model,
       content,
-      attachmentIds ?? []
+      attachmentIds ?? [],
+      timeZone
     );
 
     const dto: GenerationAcceptedDto = result;
@@ -138,11 +148,15 @@ export function generationRouter({
   });
 
   router.post('/generations/regenerate', validateBody(regenerateSchema), async (req, res) => {
-    const { conversationId, providerId, model } = req.body as z.infer<typeof regenerateSchema>;
+    const { conversationId, providerId, model, timeZone } = req.body as z.infer<
+      typeof regenerateSchema
+    >;
 
     if (!isCanonicalUuid(conversationId)) throw AppError.notFound('Conversation not found.');
 
-    res.status(202).json(await service.regenerate(ownerOf(req), conversationId, providerId, model));
+    res
+      .status(202)
+      .json(await service.regenerate(ownerOf(req), conversationId, providerId, model, timeZone));
   });
 
   router.get('/generations/:id', (req, res) => {

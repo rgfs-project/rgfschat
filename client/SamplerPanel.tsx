@@ -239,6 +239,16 @@ export function SamplerPanel({
           }}
         />
       </label>
+
+      {/* Under the field rather than in the placeholder: the placeholder is
+          gone the moment anything is typed, which is exactly when someone
+          wants to know what they can write. */}
+      <p className="sampler__origin sampler__variables">
+        <code>{'{{CURRENT_WEEKDAY}}'}</code>, <code>{'{{CURRENT_DATETIME}}'}</code> and{' '}
+        <code>{'{{CURRENT_TIMEZONE}}'}</code> are filled with the reader&apos;s own clock at send
+        time; <code>{'{{USER_NAME}}'}</code> with the signed-in name. Anything else in double braces
+        is left as written.
+      </p>
     </div>
   );
 }
