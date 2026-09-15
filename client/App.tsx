@@ -40,7 +40,7 @@ import {
   useRenameConversation,
   useSendMessage,
 } from './queries.ts';
-import { IDLE_GENERATION, useGeneration } from './useGeneration.ts';
+import { IDLE_GENERATION, useGeneration, type LiveGeneration } from './useGeneration.ts';
 import { GenerationAnnouncer } from './GenerationAnnouncer.tsx';
 import { useNarrowViewport } from './useNarrowViewport.ts';
 import { useScrollPin } from './useScrollPin.ts';
@@ -215,6 +215,8 @@ export function App({
   const conversations = useConversations(true);
   const models = useModels(true);
   const conversation = useConversation(currentId);
+  /** When this transcript last came back from the server. */
+  const conversationUpdatedAt = conversation.dataUpdatedAt;
   const preferences = useMyPreferences();
   const proposals = useProposals(currentId);
 
@@ -323,9 +325,60 @@ export function App({
    * run in another chat is invisible here — not merely hidden, but absent from
    * the state this view is computed from.
    */
+  /**
+   * The finished reply, held on screen until the stored one arrives.
+   *
+   * A generation ending unmounts the streaming block, and the message that
+   * replaces it comes from a refetch that has not happened yet — so for a frame
+   * or two the transcript loses the whole answer. The browser clamps
+   * `scrollTop` to the suddenly shorter content, the refetch puts the height
+   * back, and nothing puts the position back: the view ends up a screenful
+   * further up than where the reader was reading, which is the jump at the end
+   * of every long answer.
+   *
+   * Holding the text means the content never shrinks, so there is nothing to
+   * clamp and nothing to restore.
+   */
+  const [settling, setSettling] = useState<{
+    conversationId: string;
+    content: string;
+    reasoning: string;
+    state: LiveGeneration['state'];
+    /** The transcript's data at the moment it finished, to notice the refetch. */
+    since: number;
+  } | null>(null);
+
   const isCurrent = generation !== null && generation.conversationId === currentId;
   const view = isCurrent ? live : IDLE_GENERATION;
   const busy = view.state === 'pending' || view.state === 'streaming';
+
+  /**
+   * The reply still on screen: the one streaming, or the one just finished and
+   * not yet replaced by its stored form.
+   *
+   * The composer reads `busy`, not this — a finished generation is finished,
+   * and the reader may send again immediately. This is only about what the
+   * transcript is showing, which must not blink out from under them.
+   */
+  const held = settling !== null && settling.conversationId === currentId ? settling : null;
+
+  /*
+   * The frame between the two is the one that matters.
+   *
+   * `busy` goes false in the render that sees the terminal state, while
+   * `settling` is set by an effect *after* that render has been laid out — so
+   * on the old code there was exactly one commit with neither the streaming
+   * block nor the stored message in it. The transcript briefly held only the
+   * history, the browser clamped `scrollTop` to that much shorter content, and
+   * the message arriving afterwards restored the height but not the position:
+   * measured, a 1170px jump backwards at the end of every long answer.
+   *
+   * So the terminal render keeps showing what it already has. `generation` is
+   * still set there — it is cleared by the same effect — which is what makes
+   * this frame reachable without another flag.
+   */
+  const finishedWithText = isCurrent && !busy && view.content !== '';
+  const showsReply = busy || finishedWithText || held !== null;
   const scroll = useScrollPin();
 
   const groups = useMemo<ProviderGroups>(() => models.data?.providers ?? [], [models.data]);
@@ -455,7 +508,7 @@ export function App({
   // a view that was following the bottom has to follow it to the new one.
   useEffect(() => {
     onContentChange();
-  }, [messages, view.content, view.reasoning, tailSpace, onContentChange]);
+  }, [messages, view.content, view.reasoning, held, showsReply, tailSpace, onContentChange]);
 
   /*
    * The answer has filled the room held for it, so the view stops moving.
@@ -543,6 +596,21 @@ export function App({
       }
     }
 
+    /*
+     * Held only for the conversation on screen: a run that finished elsewhere
+     * has nothing rendered to hold, and holding it would be the leak this
+     * scoping exists to prevent.
+     */
+    if (generation.conversationId === currentId) {
+      setSettling({
+        conversationId: generation.conversationId,
+        content: live.content,
+        reasoning: live.reasoning,
+        state: live.state,
+        since: conversationUpdatedAt,
+      });
+    }
+
     writeActive(null);
     setGeneration(null);
 
@@ -566,7 +634,34 @@ export function App({
     }
     // `errorCode` arrives in the same event as the terminal state; the ref
     // above is what keeps this to once per generation, not the dependencies.
-  }, [live.state, live.errorCode, generation, currentId, client]);
+  }, [
+    live.state,
+    live.errorCode,
+    live.content,
+    live.reasoning,
+    generation,
+    currentId,
+    client,
+    conversationUpdatedAt,
+  ]);
+
+  /*
+   * Let go once the stored transcript has landed.
+   *
+   * Keyed on the query's own update stamp rather than on finding the message
+   * by id: the id is not known on the path where a running generation was
+   * adopted from the server, and "the transcript has been refetched since this
+   * finished" is the condition that actually matters — whatever came back is
+   * now what the reader should be looking at.
+   */
+  useEffect(() => {
+    if (settling === null) return;
+    if (settling.conversationId !== currentId) {
+      setSettling(null);
+      return;
+    }
+    if (conversationUpdatedAt > settling.since) setSettling(null);
+  }, [settling, currentId, conversationUpdatedAt]);
 
   const onSelectModel = useCallback(
     (next: ModelSelection) => {
@@ -822,7 +917,7 @@ export function App({
 
   const list = conversations.data ?? [];
   const title = list.find((c) => c.id === currentId)?.title ?? 'New chat';
-  const showEmptyState = !malformed && messages.length === 0 && !busy;
+  const showEmptyState = !malformed && messages.length === 0 && !showsReply;
 
   const noModels = models.isSuccess && groups.length === 0;
   const allProvidersUnavailable =
@@ -985,11 +1080,11 @@ export function App({
                   </Fragment>
                 ))}
 
-              {busy && (
+              {showsReply && (
                 <StreamingMessage
-                  content={view.content}
-                  reasoning={view.reasoning}
-                  state={view.state}
+                  content={busy || finishedWithText ? view.content : (held?.content ?? '')}
+                  reasoning={busy || finishedWithText ? view.reasoning : (held?.reasoning ?? '')}
+                  state={busy || finishedWithText ? view.state : (held?.state ?? 'completed')}
                 />
               )}
 
