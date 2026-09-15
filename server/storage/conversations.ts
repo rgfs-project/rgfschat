@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { readdir, readFile, unlink } from 'node:fs/promises';
-import { DEFAULT_TITLE, type Conversation, type Message } from '@shared/conversation.ts';
+import {
+  DEFAULT_TITLE,
+  FORMAT_VERSION,
+  type Conversation,
+  type Message,
+} from '@shared/conversation.ts';
 import { AppError } from '../errors/AppError.ts';
 import type { Logger } from '../logger.ts';
 import { atomicWriteFile, cleanupTempFiles, ensureDir, pathExists } from './atomic.ts';
@@ -47,6 +52,19 @@ export class ConversationStore {
 
   #timestamp(): string {
     return this.#now().toISOString();
+  }
+
+  /**
+   * The current instant, as the canonical UTC timestamp string this store
+   * uses for `createdAt`/`updatedAt`.
+   *
+   * Exposed so a caller stamping a new message's `createdAt` reads the same
+   * clock a write would use — a test that injects `now` gets one consistent
+   * time throughout, rather than the message carrying the real wall clock
+   * while the conversation envelope carries the fake one.
+   */
+  timestamp(): string {
+    return this.#timestamp();
   }
 
   /**
@@ -159,7 +177,7 @@ export class ConversationStore {
     const id = randomUUID();
     const now = this.#timestamp();
     const conversation: Conversation = {
-      formatVersion: 1,
+      formatVersion: FORMAT_VERSION,
       title,
       createdAt: now,
       updatedAt: now,

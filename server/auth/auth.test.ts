@@ -635,13 +635,50 @@ describe('INV-15: users cannot reach each other', () => {
 });
 
 describe('registration', () => {
-  it('is closed by default', async () => {
+  it('is closed by default once an account exists', async () => {
+    await boot('closed');
+    await createUser('ada');
+
+    const response = await fetch(`${base}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin' },
+      body: JSON.stringify({ username: 'newbie', password: 'correct horse battery' }),
+    });
+
+    expect(response.status).toBe(403);
+    expect((await response.json()).error.code).toBe('REGISTRATION_CLOSED');
+  });
+
+  // A fresh instance has no shell-only escape hatch to create the first
+  // account, so registration opens for exactly that one signup regardless of
+  // the configured mode — and hands it the admin role, since nobody else
+  // could have set one up.
+  it('opens for the very first account on a fresh instance', async () => {
     await boot('closed');
 
     const response = await fetch(`${base}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin' },
       body: JSON.stringify({ username: 'newbie', password: 'correct horse battery' }),
+    });
+
+    expect(response.status).toBe(201);
+    expect((await response.json()).user.role).toBe('admin');
+  });
+
+  it('closes again once that first account exists', async () => {
+    await boot('closed');
+
+    await fetch(`${base}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin' },
+      body: JSON.stringify({ username: 'first', password: 'correct horse battery' }),
+    });
+
+    const response = await fetch(`${base}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin' },
+      body: JSON.stringify({ username: 'second', password: 'correct horse battery' }),
     });
 
     expect(response.status).toBe(403);

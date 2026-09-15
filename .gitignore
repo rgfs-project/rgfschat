@@ -37,3 +37,6 @@ blob-report/
 .DS_Store
 Thumbs.db
 *.log
+
+# Vite dependency cache, rebuilt on every dev start.
+.vite/

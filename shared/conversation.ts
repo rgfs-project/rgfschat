@@ -1,12 +1,23 @@
 /**
  * Conversation model — `formatVersion: 1` (contracts §3).
  *
- * This shape is frozen once Phase 3 ships. Every field any later phase needs is
- * defined now, including `attachments` (Phase 11), so no later phase requires a
- * version bump.
+ * The shape was meant to be frozen once Phase 3 shipped, with every field a
+ * later phase needs defined up front so nothing would require a version bump.
+ * Per-message time was the one field that plan missed, and it was added twice
+ * in parallel: once as an optional `time` attribute at version 1, and once as
+ * `createdAt` behind a bump to version 2. Neither is wrong, and files of both
+ * shapes exist.
+ *
+ * So the reader takes both and the writer picks one. `time` at version 1 is
+ * what is written: an optional attribute needs no bump to be added, and a file
+ * this app writes stays readable by a build that predates the argument.
+ * `createdAt` and version 2 are accepted on the way in and migrate to `time`
+ * the next time the conversation is written.
  */
 
 export const FORMAT_VERSION = 1;
+/** The newest file shape the parser still accepts, for the reason above. */
+export const MAX_READABLE_FORMAT_VERSION = 2;
 
 export const MESSAGE_STATUSES = [
   'complete',
@@ -34,7 +45,9 @@ export interface UserMessage {
    *
    * Optional because conversations written before it existed have no such
    * attribute, and a file that parsed yesterday has to parse today. A message
-   * without one is shown without a time rather than with a guessed one.
+   * without one is shown without a time rather than with a guessed one. Read
+   * from `createdAt` as well, which is what the same field was called in the
+   * parallel implementation of it.
    */
   time?: string;
   body: string;

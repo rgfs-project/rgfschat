@@ -24,15 +24,25 @@
  * the canvas, so the canvas is held just off white to give it one.
  */
 :root {
-  --bg: #fafafa;
+  --bg: #ffffff;
   --raised: #ffffff;
-  --surface: #f2f2f2;
-  --surface-2: #e9e9e9;
-  --surface-3: #dedede;
-  --border: #e4e4e4;
-  --border-strong: #8a8a8a;
-  --text: #121212;
-  --muted: #6b6b6b;
+  --surface: #f4f4f4;
+  --surface-2: #ececec;
+  --surface-3: #e0e0e0;
+  --border: #e2e2e2;
+  --border-strong: #d4d4d4;
+  --text: #000000;
+  --text-soft: #333333;
+  --muted: #737373;
+  --faint: #a3a3a3;
+  --hover: #ececec;
+  --active: #e0e0e0;
+  --focus: #b5b5b5;
+  --danger: #9a3f36;
+  --danger-bg: #f9eeec;
+  --danger-border: #e2c3bf;
+  --ok: #3f7a4f;
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.12);
   --accent: #121212;
   --on-accent: #ffffff;
 
@@ -71,20 +81,34 @@
 
   /* 268px, read straight off the reference's own `w-[268px]`. */
   --sidebar-width: 16.75rem;
+  /* Wide enough for a comfortable 80-column line of code plus its gutter. */
+  --artifact-width: 30rem;
   /* 56px, the reference's. The bar holds one line of type on each side of the
      seam; the extra 12px it had were empty on both. */
   --header-height: 3.5rem;
   /*
-   * What a header holds its *boxes* off the edge by. Every glyph then lands 15
-   * from that edge: an icon button carries 7 of its own around what it draws,
-   * and the title is given the same 7 so it starts on the same column.
+   * The margin down the left of a header, measured to what can actually be
+   * seen there rather than to the box around it.
    *
-   * Stated this way because the control moves between the two headers. Insetting
-   * the box by 15 instead put the title right when the sidebar was open and the
-   * control 7px adrift the moment it closed.
+   * The bar holds either a control and a title or, once the sidebar has taken
+   * the control, a title alone — and both have to begin on the same column.
+   * They do not measure the same, though: an icon button carries 7px of padding
+   * inside its own box, so the box is pulled back by that much (`--control-bleed`
+   * below) and its glyph lands where the title's first letter otherwise would.
    */
-  --gutter: 0.5rem;
+  --gutter: 1.375rem;
+
+  /* What an icon button holds between its edge and the glyph it draws: 32px
+     box, 18px glyph. Subtracted wherever a margin is meant to be measured to
+     the glyph rather than to the box. */
+  --control-bleed: 0.4375rem;
   --radius: 0.75rem;
+
+  /* How far the conversation column and the composer under it stand off the
+     window's edges. One value for both, so the composer sits directly beneath
+     the text rather than a few pixels wider or narrower than it. Tightened on
+     a phone, where the screen has none of that room to give away. */
+  --column-inset: 1.5rem;
 
   /*
    * Where the sidebar stops being a column and becomes a drawer.
@@ -142,14 +166,24 @@
    * inverted rather than compressed.
    */
   --bg: #000000;
-  --raised: #171717;
+  --raised: #131313;
   --surface: #0d0d0d;
-  --surface-2: #1f1f1f;
-  --surface-3: #2b2b2b;
-  --border: #242424;
-  --border-strong: #6b6b6b;
-  --text: #f2f2f2;
+  --surface-2: #161616;
+  --surface-3: #262626;
+  --border: #232323;
+  --border-strong: #333333;
+  --text: #f5f5f5;
+  --text-soft: #d8d8d8;
   --muted: #9a9a9a;
+  --faint: #6b6b6b;
+  --hover: #1a1a1a;
+  --active: #262626;
+  --focus: #4a4a4a;
+  --danger: #e0837c;
+  --danger-bg: #170d0c;
+  --danger-border: #3a201e;
+  --ok: #6fbf83;
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.6);
   --accent: #f2f2f2;
   --on-accent: #0a0a0a;
 }
@@ -290,6 +324,48 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/*
+ * The conversation is the only text there is.
+ *
+ * Everything else is furniture — nav labels, section headings, the wordmark,
+ * timestamps, the glyphs inside buttons — and none of it is anything anyone
+ * wants on the clipboard. A stray drag across the window, a select-all, or a
+ * long press on a phone used to highlight all of it. The callout goes with it:
+ * on iOS a press and hold on a control raised the system's own Copy / Look Up
+ * menu over the control being pressed.
+ *
+ * So: off everywhere, back on for the two things it is actually for — what was
+ * said, and what is being typed.
+ */
+body {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.msg__body,
+input,
+textarea,
+[contenteditable='true'] {
+  -webkit-touch-callout: default;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/*
+ * No tap flash.
+ *
+ * iOS paints a grey rectangle over whatever was tapped, drawn to the element's
+ * box and ignoring its rounding — so a round control flashed square, and a row
+ * flashed a shade that belongs to no palette here. Every control already
+ * answers a press with its own fill or scale.
+ */
+button,
+a,
+[role='button'] {
+  -webkit-tap-highlight-color: transparent;
+}
+
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
@@ -299,14 +375,28 @@ select:focus-visible,
   outline-offset: 2px;
 }
 
-/** A quiet square button, used for icons throughout. */
+/**
+ * A quiet square button, used for icons throughout.
+ *
+ * The padding is zeroed and the glyph pinned, which is a fix rather than a
+ * tidy-up: a button carries 1px 6px of padding by default, so a box narrower
+ * than its glyph plus 12 left the glyph — a flex child, and shrinkable —
+ * squeezed narrower than it was asked to be. It drew a 15px icon at 9 in the
+ * message actions and a round 18px plus at 14 wide in the composer, each time
+ * looking like a different bug.
+ */
 .icon-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 2rem;
   height: 2rem;
+  padding: 0;
   color: var(--muted);
+  flex: none;
+}
+
+.icon-button > svg {
   flex: none;
 }
 
@@ -317,8 +407,16 @@ select:focus-visible,
     transform var(--motion-fast) var(--ease-out);
 }
 
+/*
+ * Colour, not a fill.
+ *
+ * A filled hover puts a box behind a glyph that is mostly holes, and at these
+ * sizes the box is the thing that registers rather than the icon inside it —
+ * most of them sit on a surface that is already a panel or an already-filled
+ * row, so what appeared was a darker patch rather than a lit control. Going
+ * from muted to full text colour says the same thing without drawing anything.
+ */
 .icon-button:hover:not(:disabled) {
-  background: var(--surface-2);
   color: var(--text);
 }
 
@@ -391,13 +489,16 @@ button.linkish:active:not(:disabled),
 .nav-button {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.625rem;
   width: 100%;
   padding: 0.5rem 0.625rem;
-  border-radius: 0.625rem;
+  border-radius: 0.5rem;
   text-align: left;
-  color: var(--text);
-  font-size: 0.8125rem;
+  color: var(--text-soft);
+  /* 15px. A step over the reference's 14, asked for directly: the sidebar sets
+     the smallest type in the application and a step up reads more easily than
+     it measures. The rows below it move with it. */
+  font-size: 0.9375rem;
 }
 
 .nav-button {
@@ -407,7 +508,7 @@ button.linkish:active:not(:disabled),
 }
 
 .nav-button:hover {
-  background: var(--surface-2);
+  background: var(--hover);
 }
 
 /* A filled pill, not a bordered field — the design gives search the same

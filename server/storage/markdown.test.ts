@@ -84,13 +84,12 @@ describe('front matter', () => {
     expect(expectMalformed(text).reason).toMatch(/must be "formatVersion"/);
   });
 
-  it('rejects any formatVersion other than the integer 1 — there is no implicit migration', () => {
-    expect(expectMalformed(FRONT.replace('formatVersion: 1', 'formatVersion: 2')).reason).toMatch(
-      /formatVersion/
-    );
-    expect(expectMalformed(FRONT.replace('formatVersion: 1', 'formatVersion: "1"')).reason).toMatch(
-      /formatVersion/
-    );
+  it('rejects any formatVersion outside 1 and 2 — there is no implicit migration', () => {
+    for (const bad of ['0', '3', '"1"', 'null']) {
+      expect(
+        expectMalformed(FRONT.replace('formatVersion: 1', `formatVersion: ${bad}`)).reason
+      ).toMatch(/formatVersion/);
+    }
   });
 
   it('rejects an invalid title or timestamp', () => {
@@ -219,6 +218,28 @@ describe('delimiter grammar', () => {
 
     expect(ok.messages[0]).toEqual({ type: 'user', id: ID_A, body: 'q' });
     expect(ok.messages[0]).not.toHaveProperty('time');
+  });
+
+  /*
+   * The other spelling. Per-message time was added twice in parallel — once as
+   * `time` at formatVersion 1, once as `createdAt` behind a bump to 2 — and
+   * files of both shapes exist. Both are read; one is written.
+   */
+  it('reads createdAt as time, and writes it back as time', () => {
+    const time = '2026-09-11T17:03:12.000Z';
+    const ok = parseOk(`${FRONT}<!-- cc:user id=${ID_A} createdAt="${time}" -->\nq\n`);
+
+    expect(ok.messages[0]).toEqual({ type: 'user', id: ID_A, time, body: 'q' });
+    expect(serializeConversation(ok)).toContain(`time="${time}"`);
+    expect(serializeConversation(ok)).not.toContain('createdAt="');
+  });
+
+  it('reads a formatVersion 2 file, and writes it back as 1', () => {
+    const front = FRONT.replace('formatVersion: 1', 'formatVersion: 2');
+    const ok = parseOk(`${front}<!-- cc:user id=${ID_A} -->\nq\n`);
+
+    expect(ok.formatVersion).toBe(1);
+    expect(serializeConversation(ok)).toContain('formatVersion: 1');
   });
 
   it('rejects a time that is not a canonical timestamp', () => {

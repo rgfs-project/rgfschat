@@ -55,15 +55,23 @@ function registry(): ProviderRegistry {
 const BOOTSTRAP = { baseUrl: 'http://127.0.0.1:8080', timeoutMs: 120_000 };
 
 describe('providers.json', () => {
-  it('bootstraps one provider from the environment when the file is absent', async () => {
+  /*
+   * No provider is invented when the file is absent.
+   *
+   * It used to bootstrap a `local` entry from the environment, which meant
+   * every fresh instance came up listing a llama.cpp server that is only
+   * running if you happen to be the person this was written for. An empty list
+   * is the honest answer, and the admin panel is where one gets added.
+   */
+  it('configures nothing when the file is absent', async () => {
     const result = await registry().load({ ...BOOTSTRAP, apiKey: 'secret-key' });
 
-    expect(result.providers).toHaveLength(1);
-    expect(result.providers[0]?.id).toBe('local');
+    expect(result.providers).toEqual([]);
+    expect(result.rejected).toEqual([]);
 
-    // Written through, so the next start reads the file rather than guessing.
-    const raw = await readFile(join(paths.systemDir(), 'providers.json'), 'utf8');
-    expect(JSON.parse(raw)).toMatchObject({ version: 1 });
+    // And writes nothing: a file that exists is authoritative, so creating an
+    // empty one would be a decision the next start could not tell from a choice.
+    await expect(readFile(join(paths.systemDir(), 'providers.json'), 'utf8')).rejects.toThrow();
   });
 
   it('is authoritative once it exists', async () => {

@@ -76,17 +76,25 @@ describe('iOS focus zoom', () => {
   });
 
   /*
-   * The other half of the contract: `user-scalable=no` and `maximum-scale` are
-   * not how this is solved. Safari has ignored them since iOS 10, and they take
-   * pinch-zoom away from readers who need it — so a regression that reaches for
-   * them would be both ineffective and harmful.
+   * The stylesheet is the half that works, and it is not optional.
+   *
+   * The viewport meta also carries `user-scalable=no, maximum-scale=1`, asked
+   * for deliberately to stop the pinch and double-tap zoom an app-shaped layout
+   * reads as a bug. Two things are worth writing down about it. Safari has
+   * ignored both for pinch-zoom since iOS 10, so on the device this whole file
+   * is about, the rule below is the only thing actually preventing the zoom —
+   * remove it and nothing else saves you. And where they are honoured, they
+   * take zoom away from a reader who needs it, which is a cost rather than a
+   * feature. The rule stays either way; the meta is the part that can be
+   * reconsidered.
    */
-  it('does not try to forbid zooming in the viewport meta', () => {
+  it('keeps the stylesheet rule, whatever the viewport meta says', () => {
     const viewport = /<meta\s+name="viewport"[\s\S]*?>/.exec(html)?.[0] ?? '';
 
     expect(viewport).toContain('width=device-width');
-    expect(viewport).not.toMatch(/user-scalable\s*=\s*no/);
-    expect(viewport).not.toMatch(/maximum-scale/);
+
+    const rule = /input[^{]*,\s*\n?\s*textarea,\s*\n?\s*select\s*\{[^}]*\}/.exec(coarse)?.[0];
+    expect(rule).toMatch(/font-size:\s*(1rem|16px)/);
   });
 
   it('leaves the controls inheriting their font, so only size is overridden', () => {

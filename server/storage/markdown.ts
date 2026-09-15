@@ -2,6 +2,7 @@ import { parseDocument, type Document } from 'yaml';
 import { ERROR_CODES } from '@shared/errors.ts';
 import {
   FORMAT_VERSION,
+  MAX_READABLE_FORMAT_VERSION,
   MESSAGE_STATUSES,
   isCanonicalTimestamp,
   isCanonicalUuid,
@@ -47,24 +48,48 @@ const ATTRIBUTE_KEYS = [
   'model',
   'attachments',
   'time',
+  // The same field as `time`, under the name the parallel implementation of it
+  // used. Read, never written: it is normalised to `time` on the way in, so a
+  // file written by either build opens and every file written from here uses
+  // one spelling.
+  'createdAt',
   'error',
 ] as const;
 type AttributeKey = (typeof ATTRIBUTE_KEYS)[number];
 
-/** Which attributes each type permits, and which are required (§3.4). */
+/**
+ * Which attributes each type permits, and which are required (§3.4).
+ *
+ * `time` is optional everywhere it is allowed, never required: a file written
+ * before it existed simply has no `time` rather than failing to parse (§3.3),
+ * and `createdAt` is accepted in the same places for the same reason.
+ */
 const ATTRIBUTE_RULES: Record<BlockType, { required: AttributeKey[]; optional: AttributeKey[] }> = {
   system: { required: ['id'], optional: [] },
-  user: { required: ['id'], optional: ['attachments', 'time'] },
+  user: { required: ['id'], optional: ['attachments', 'time', 'createdAt'] },
   reasoning: { required: ['id'], optional: [] },
   // `time` sits on the assistant block, not on the reasoning block that may
   // precede it: the two are one turn and share a single instant.
   // `error` is assistant-only: nothing else in the format can fail.
-  assistant: { required: ['id', 'status'], optional: ['provider', 'model', 'time', 'error'] },
+  assistant: {
+    required: ['id', 'status'],
+    optional: ['provider', 'model', 'time', 'createdAt', 'error'],
+  },
 };
 
 interface ParsedDelimiter {
   type: BlockType;
   attributes: Map<AttributeKey, string>;
+}
+
+/**
+ * When a message was sent, under either of the two names it has been given.
+ *
+ * `time` wins where a file somehow carries both — it is the one this build
+ * writes, so it is the one that was written last.
+ */
+function messageTime(attributes: Map<AttributeKey, string>): string | undefined {
+  return attributes.get('time') ?? attributes.get('createdAt');
 }
 
 // ---------------------------------------------------------------------------
@@ -121,7 +146,9 @@ function parseDelimiter(
     if (wsBefore === 0) return { ok: false, reason: 'missing whitespace before attribute' };
 
     const keyStart = i;
-    while (i < line.length && /[a-z]/.test(line[i] as string)) i += 1;
+    // Letters only, upper included: every other attribute is lowercase, but
+    // `createdAt` is camelCase and would otherwise be truncated at its "A".
+    while (i < line.length && /[a-zA-Z]/.test(line[i] as string)) i += 1;
     const rawKey = line.slice(keyStart, i);
     if (!(ATTRIBUTE_KEYS as readonly string[]).includes(rawKey)) {
       return { ok: false, reason: `unknown attribute "${rawKey}"` };
@@ -231,6 +258,11 @@ function validateAttributes(
     }
   }
 
+  const createdAt = attributes.get('createdAt');
+  if (createdAt !== undefined && !isCanonicalTimestamp(createdAt)) {
+    return { ok: false, reason: 'createdAt must be YYYY-MM-DDTHH:mm:ss.sssZ', line };
+  }
+
   return { ok: true };
 }
 
@@ -299,9 +331,18 @@ function parseFrontMatter(
 
   const data = doc.toJS() as Record<string, unknown>;
 
-  if (data['formatVersion'] !== FORMAT_VERSION) {
-    // No implicit migration: any other value is malformed (§3.3).
-    return { ok: false, reason: 'formatVersion must be the integer 1', line: 2 };
+  const version = data['formatVersion'];
+  if (version !== FORMAT_VERSION && version !== MAX_READABLE_FORMAT_VERSION) {
+    // No implicit migration beyond the readable range: any other value is
+    // malformed (§3.3). `2` is read as well as written-in-`1` because the
+    // parallel implementation of per-message time bumped the version to carry
+    // it; such a file is read and written back out as `1`, since the attribute
+    // it added never needed the bump.
+    return {
+      ok: false,
+      reason: `formatVersion must be the integer ${FORMAT_VERSION} or ${MAX_READABLE_FORMAT_VERSION}`,
+      line: 2,
+    };
   }
 
   const title = data['title'];
@@ -421,7 +462,9 @@ export function parseConversation(input: string): ParseResult {
           type: 'user',
           id,
           ...(attachments !== undefined ? { attachments: attachments.split(',') } : {}),
-          ...(attributes.has('time') ? { time: attributes.get('time') as string } : {}),
+          ...(messageTime(attributes) !== undefined
+            ? { time: messageTime(attributes) as string }
+            : {}),
           body,
         });
         break;
@@ -434,7 +477,9 @@ export function parseConversation(input: string): ParseResult {
           ...(attributes.has('provider') ? { provider: attributes.get('provider') as string } : {}),
           ...(attributes.has('model') ? { model: attributes.get('model') as string } : {}),
           ...(pendingReasoning !== null ? { reasoning: pendingReasoning.body } : {}),
-          ...(attributes.has('time') ? { time: attributes.get('time') as string } : {}),
+          ...(messageTime(attributes) !== undefined
+            ? { time: messageTime(attributes) as string }
+            : {}),
           ...(attributes.has('error') ? { error: attributes.get('error') as string } : {}),
           body,
         };
@@ -516,7 +561,9 @@ export function serializeConversation(conversation: Conversation): string {
       blocks.push(block(delimiterFor('reasoning', [['id', message.id]]), message.reasoning));
     }
 
-    // Canonical attribute order: id, status, provider, model, attachments, time, error.
+    // Canonical attribute order: id, status, provider, model, attachments, time,
+    // error. `createdAt` is not written: it is read as another spelling of
+    // `time` and normalised to it (see ATTRIBUTE_KEYS).
     const attributes: [AttributeKey, string][] = [['id', message.id]];
     if (message.type === 'assistant') {
       attributes.push(['status', message.status]);

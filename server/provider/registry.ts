@@ -124,7 +124,10 @@ export class ProviderRegistry {
     }
 
     if (raw === null) {
-      this.#logger.info('No providers configured; add one via the admin panel or edit _system/providers.json', {});
+      this.#logger.info(
+        'No providers configured; add one via the admin panel or edit _system/providers.json',
+        {}
+      );
       return { providers: [], rejected: [] };
     }
 

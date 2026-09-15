@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import {
-  ChevronUp,
+  ChevronDown,
   Download,
   LogOut,
   Moon,
@@ -157,7 +157,7 @@ export function Sidebar({
 
       <div className="sidebar__actions">
         <button type="button" className="nav-button" onClick={onCreate}>
-          <Plus size={15} />
+          <Plus size={18} />
           New chat
         </button>
 
@@ -165,7 +165,7 @@ export function Sidebar({
             is what actually protects these routes (INV-24). */}
         {user.role === 'admin' && (
           <button type="button" className="nav-button" onClick={onOpenAdmin}>
-            <Shield size={15} />
+            <Shield size={18} />
             Admin
           </button>
         )}
@@ -175,7 +175,7 @@ export function Sidebar({
             shape of a field here would promise the wrong thing — and it is one
             of the three ways out of this pane, so it looks like the other two. */}
         <button type="button" className="nav-button" onClick={onSearch}>
-          <Search size={15} />
+          <Search size={18} />
           Search
         </button>
 
@@ -183,7 +183,7 @@ export function Sidebar({
             way in that is not a conversation. It sits with the other ways out
             of this pane rather than in the list below, which is chats. */}
         <button type="button" className="nav-button" onClick={onOpenArtifacts}>
-          <Shapes size={15} />
+          <Shapes size={18} />
           Artifacts
         </button>
       </div>
@@ -274,7 +274,7 @@ function ConversationMenu({
   const items = [
     {
       label: pinned ? 'Unpin' : 'Pin',
-      icon: pinned ? <PinOff size={15} /> : <Pin size={15} />,
+      icon: pinned ? <PinOff size={16} /> : <Pin size={16} />,
       onSelect: () => onPin(conversation.id, !pinned),
     },
     ...(conversation.malformed
@@ -282,18 +282,18 @@ function ConversationMenu({
       : [
           {
             label: 'Rename',
-            icon: <Pencil size={15} />,
+            icon: <Pencil size={16} />,
             onSelect: () => onRename(conversation.id, conversation.title),
           },
           {
             label: 'Download',
-            icon: <Download size={15} />,
+            icon: <Download size={16} />,
             onSelect: () => onDownload(conversation.id, conversation.title),
           },
         ]),
     {
       label: 'Delete',
-      icon: <Trash2 size={15} />,
+      icon: <Trash2 size={16} />,
       destructive: true,
       onSelect: () => onDelete(conversation.id),
     },
@@ -311,7 +311,7 @@ function ConversationMenu({
         title="More"
         onClick={() => setOpen((current) => !current)}
       >
-        <MoreHorizontal size={16} />
+        <MoreHorizontal size={15} />
       </button>
 
       {open && triggerRef.current !== null && (
@@ -363,7 +363,7 @@ function AccountMenu({
       >
         <span className="avatar">{user.username.slice(0, 1).toUpperCase()}</span>
         <span className="sidebar__username">{user.username}</span>
-        <ChevronUp size={16} className={`account__chevron${open ? ' is-open' : ''}`} />
+        <ChevronDown size={15} className={`account__chevron${open ? ' is-open' : ''}`} />
       </button>
 
       {open && triggerRef.current !== null && (
@@ -376,17 +376,17 @@ function AccountMenu({
           items={[
             {
               label: 'Settings',
-              icon: <SettingsIcon size={15} />,
+              icon: <SettingsIcon size={16} />,
               onSelect: onSettings,
             },
             {
               label: theme === 'dark' ? 'Light mode' : 'Dark mode',
-              icon: theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />,
+              icon: theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />,
               onSelect: onToggleTheme,
             },
             {
               label: 'Sign out',
-              icon: <LogOut size={15} />,
+              icon: <LogOut size={16} />,
               separated: true,
               onSelect: onSignOut,
             },

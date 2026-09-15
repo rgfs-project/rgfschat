@@ -13,7 +13,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
-import { mkdtemp, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -319,6 +319,38 @@ async function main() {
   // A deterministic stand-in for llama.cpp, speaking the format recorded in
   // docs/provider-notes.md. `verify` must never depend on a real GPU box.
   const provider = await startMockProvider({ chunkDelayMs: 15 });
+
+  /*
+   * The provider is configured rather than bootstrapped.
+   *
+   * The server used to write a `providers.json` from `LLAMA_BASE_URL` when the
+   * file was absent, and this script relied on it. It no longer does — an
+   * instance that invents a provider pointing at a machine that may not exist
+   * is worse than one that lists none — so the file the server would have
+   * written is written here, which is also closer to what an operator does.
+   */
+  await mkdir(join(dataDir, '_system'), { recursive: true });
+  await writeFile(
+    join(dataDir, '_system', 'providers.json'),
+    JSON.stringify(
+      {
+        version: 1,
+        providers: [
+          {
+            id: 'local',
+            name: 'Local llama.cpp',
+            kind: 'openai-compatible',
+            baseUrl: provider.url,
+            apiKey: PROVIDER_KEY,
+            timeoutMs: 120_000,
+            capabilities: {},
+          },
+        ],
+      },
+      null,
+      2
+    )
+  );
 
   console.log(`\n[2/3] Starting server on ${baseUrl} (DATA_DIR=${dataDir})…`);
   console.log(`      mock provider at ${provider.url}`);

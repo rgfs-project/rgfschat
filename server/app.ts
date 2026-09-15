@@ -138,7 +138,12 @@ export function createApp({
         logger,
         ...(settings === undefined
           ? {}
-          : { registrationMode: () => settings.resolved().registrationMode }),
+          : {
+              registrationMode: () => settings.resolved().registrationMode,
+              onFirstAccountRegistered: async () => {
+                await settings.save({ ...settings.stored(), registrationMode: 'closed' });
+              },
+            }),
       })
     );
 
@@ -167,6 +172,9 @@ export function createApp({
         ...(proposals !== undefined && memories !== undefined ? { proposals, memories } : {}),
       })
     );
+
+    // Artifacts are a read-only projection of the same conversations, so they
+    // need the same two collaborators and nothing else.
   }
 
   // Everything a reader can change about their own account. Mounted after the

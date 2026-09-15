@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, Copy, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import type { Message as MessageModel, MessageStatus } from '@shared/conversation';
 import { Markdown } from './Markdown.tsx';
@@ -141,15 +141,24 @@ export function Message({
         </details>
       )}
 
-      <div className="msg__body">
-        {message.body === '' && statusLabel !== undefined ? (
-          <p className="muted msg__empty">No output was produced.</p>
-        ) : (
-          <Markdown>{message.body}</Markdown>
-        )}
-      </div>
-
-      {message.type === 'user' && <MessageAttachments ids={message.attachments ?? []} />}
+      {/* The bubble is the user's turn alone: what they said and what they
+          carried with it. The controls below sit outside it, on the page. */}
+      {message.type === 'user' ? (
+        <div className="msg__bubble">
+          <MessageAttachments ids={message.attachments ?? []} />
+          <div className="msg__body">
+            <Markdown>{message.body}</Markdown>
+          </div>
+        </div>
+      ) : (
+        <div className="msg__body">
+          {message.body === '' && statusLabel !== undefined ? (
+            <p className="muted msg__empty">No output was produced.</p>
+          ) : (
+            <Markdown>{message.body}</Markdown>
+          )}
+        </div>
+      )}
 
       {statusLabel !== undefined && (
         <p className="msg__status">
@@ -181,7 +190,7 @@ export function Message({
                 setEditing(true);
               }}
             >
-              <Pencil size={16} />
+              <Pencil size={15} />
             </button>
           )}
           {message.type === 'assistant' && isLast && (
@@ -192,7 +201,7 @@ export function Message({
               title="Regenerate"
               onClick={onRegenerate}
             >
-              <RefreshCw size={16} />
+              <RefreshCw size={15} />
             </button>
           )}
 
@@ -208,7 +217,7 @@ export function Message({
             title={copied ? 'Copied' : 'Copy'}
             onClick={() => copy(message.body)}
           >
-            {copied ? <Check size={16} /> : <Copy size={16} />}
+            {copied ? <Check size={15} /> : <Copy size={15} />}
           </button>
           <button
             type="button"
@@ -217,13 +226,16 @@ export function Message({
             title="Delete this message and its reply"
             onClick={() => onDelete(message.id)}
           >
-            <Trash2 size={16} />
+            <Trash2 size={15} />
           </button>
         </div>
       )}
     </article>
   );
 }
+
+/** How close to the bottom of the reasoning box still counts as following it. */
+const REASONING_PIN_PX = 32;
 
 /** The assistant turn currently streaming, before it becomes a stored message. */
 export function StreamingMessage({
@@ -235,15 +247,42 @@ export function StreamingMessage({
   reasoning: string;
   state: string;
 }): React.JSX.Element {
+  const reasoningRef = useRef<HTMLDivElement | null>(null);
+
+  /*
+   * The thinking scrolls itself.
+   *
+   * The box is a fixed height with its own scrollbar, so without this the
+   * working-out piles up below the fold and the visible part is whatever the
+   * model thought first — the least interesting end of it. The transcript
+   * itself deliberately holds still during a reply, which makes this the only
+   * thing that moves.
+   *
+   * Only while it is already at the bottom: scrolling up to reread a step is a
+   * thing to do while the rest is still arriving, and being yanked back down on
+   * the next token would make it impossible.
+   */
+  useLayoutEffect(() => {
+    const box = reasoningRef.current;
+    if (box === null) return;
+
+    const distance = box.scrollHeight - box.scrollTop - box.clientHeight;
+    if (distance > REASONING_PIN_PX) return;
+
+    box.scrollTop = box.scrollHeight;
+  }, [reasoning]);
+
   return (
     <article className="msg msg--assistant msg--streaming">
       {reasoning !== '' && (
-        <details className="reasoning" open>
+        <details className="reasoning">
           <summary>
             <ChevronRight size={14} className="reasoning__chevron" />
             Reasoning
           </summary>
-          <div className="reasoning__body">{reasoning}</div>
+          <div className="reasoning__body" ref={reasoningRef}>
+            {reasoning}
+          </div>
         </details>
       )}
 
