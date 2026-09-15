@@ -13,6 +13,17 @@ import type { ProviderModelGroup } from './api.ts';
  * context, which is the only reliable fix.
  */
 
+/** The resting width of `.model-menu`, and the gap it keeps from every edge. */
+const MENU_WIDTH = 356;
+const MARGIN = 8;
+
+/**
+ * A real phone, not a narrow window — the same test the stylesheets make, for
+ * the same reason: a desktop window dragged narrow keeps the desktop layout.
+ */
+const phoneQuery = (): MediaQueryList =>
+  window.matchMedia('(max-width: 767px) and (hover: none) and (pointer: coarse)');
+
 export interface ModelSelection {
   providerId: string;
   modelId: string;
@@ -58,7 +69,9 @@ export function ModelPicker({
 }: ModelPickerProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [position, setPosition] = useState<{ left: number; bottom: number } | null>(null);
+  const [position, setPosition] = useState<{ left: number; bottom: number; width: number } | null>(
+    null
+  );
 
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -82,13 +95,31 @@ export function ModelPicker({
     );
   }, [options, query]);
 
-  /** Anchors the menu above the trigger, in viewport coordinates. */
+  /**
+   * Anchors the menu above the control it belongs to, in viewport coordinates.
+   *
+   * On a phone that control is the composer rather than the trigger inside it:
+   * anchored to the trigger, a 356px menu opening from a control two thirds of
+   * the way along a 375px screen ran off the right-hand edge, and what was left
+   * on screen was a panel with two of its corners missing. Spanning the
+   * composer gives it the width it has to fit in and puts its edges on the
+   * edges of the box it opens from — one card above another rather than a panel
+   * at an angle to everything under it.
+   */
   const reposition = useCallback((): void => {
     const trigger = triggerRef.current;
     if (trigger === null) return;
 
-    const rect = trigger.getBoundingClientRect();
-    setPosition({ left: rect.left, bottom: window.innerHeight - rect.top + 8 });
+    const viewport = window.innerWidth;
+    const anchor = (phoneQuery().matches ? trigger.closest('.composer') : null) ?? trigger;
+    const rect = anchor.getBoundingClientRect();
+
+    const width = anchor === trigger ? Math.min(MENU_WIDTH, viewport - MARGIN * 2) : rect.width;
+    // Clamped either way: the anchored case can still be pushed off the right
+    // by a narrow window, which is what left the corners cut off.
+    const left = Math.min(Math.max(rect.left, MARGIN), viewport - width - MARGIN);
+
+    setPosition({ left, bottom: window.innerHeight - rect.top + MARGIN, width });
   }, []);
 
   useLayoutEffect(() => {
@@ -165,7 +196,7 @@ export function ModelPicker({
             className="model-menu"
             role="listbox"
             aria-label="Models"
-            style={{ left: position.left, bottom: position.bottom }}
+            style={{ left: position.left, bottom: position.bottom, width: position.width }}
           >
             <div className="model-menu__search">
               <Search size={15} />
@@ -179,7 +210,11 @@ export function ModelPicker({
             </div>
 
             <div className="model-menu__list">
-              {filtered.length === 0 && <p className="model-menu__empty muted">No models</p>}
+              {filtered.length === 0 && (
+                <p className="model-menu__empty muted">
+                  {options.length === 0 ? 'No models configured yet.' : 'No models match that.'}
+                </p>
+              )}
 
               {filtered.map((option) => {
                 const isSelected =

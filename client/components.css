@@ -654,7 +654,7 @@
   align-items: center;
   gap: 0.375rem;
   padding: 0.25rem 0.5rem;
-  border-radius: 0.375rem;
+  border-radius: 0.5rem;
   color: var(--text-soft);
   font-size: 0.84375rem;
 }
@@ -666,8 +666,15 @@
     transform var(--motion-fast) var(--ease-out);
 }
 
+/*
+ * Colour, like every other control that sits inside the composer.
+ *
+ * The fill was worse here than anywhere: a tap leaves an element in :hover on
+ * a touch screen until something else is tapped, so opening the menu left a
+ * grey box around the model name for as long as it stayed open — and then
+ * after it closed.
+ */
 .model-trigger:hover:not(:disabled) {
-  background: var(--hover);
   color: var(--text);
 }
 
@@ -681,10 +688,13 @@
   position: fixed;
   z-index: 100;
   width: 22.25rem;
-  max-width: calc(100vw - 2rem);
+  max-width: calc(100vw - 1rem);
   background: var(--raised);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  /* The composer's own radius, not the shared --radius: the two are stacked
+     one directly above the other, and two nested cards whose corners are cut
+     to different curves read as a misalignment rather than as a pair. */
+  border-radius: 1rem;
   box-shadow: var(--shadow-pop);
   overflow: hidden;
   animation: rise-in var(--motion) var(--ease-out);
@@ -2038,11 +2048,15 @@ button.linkish:hover {
   }
 
   /* Rows: height only. They are already the full width of their container, and
-     widening them is what would push a scroll container into overflowing. */
+     widening them is what would push a scroll container into overflowing.
+
+     The model trigger is not one of them, for all that it opens a menu like
+     one: it sits inline in the composer beside the attach and send controls,
+     and grown to 44 it became a pill half the height of the box it lives in,
+     with 12px of fill above and below a line of 13.5px type. */
   .conversation__open,
   .menu__item,
   .model-option,
-  .model-trigger,
   .panel__rail-item,
   .nav-button,
   .account {
