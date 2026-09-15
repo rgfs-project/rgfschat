@@ -48,8 +48,14 @@ export function SignIn({
   return (
     <main className="signin">
       <form className="signin__card" onSubmit={(e) => void submit(e)}>
-        <h1>ChatUI</h1>
-        <p className="muted small">{registering ? 'Create an account.' : 'Sign in to continue.'}</p>
+        {/* Grouped, so the name and the line under it space as one thing. The
+            subtitle previously pulled itself up with a negative margin to
+            escape the card's own gap, which is the shape of a layout fighting
+            itself. */}
+        <header className="signin__head">
+          <h1>ChatUI</h1>
+          <p className="muted">{registering ? 'Create an account.' : 'Sign in to continue.'}</p>
+        </header>
 
         {notice !== null && (
           <p role="status" className="notice">

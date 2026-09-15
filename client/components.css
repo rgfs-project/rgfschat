@@ -970,17 +970,64 @@
   padding: 1.25rem;
 }
 
+/*
+ * Its own width and padding, no longer the dialog's.
+ *
+ * `.modal__card` is a question asked over a page the reader is coming back to,
+ * so it is deliberately small. This is the whole screen, with nothing behind
+ * it — at 18rem it read as a dialog that had lost its page.
+ */
+.signin__card {
+  max-width: 20rem;
+  gap: 1.25rem;
+  padding: 1.75rem;
+}
+
+/* The name and the line under it are one unit, so they sit closer to each
+   other than the card's own gap puts anything else. */
+.signin__head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
 .signin__card h1 {
   margin: 0;
   font-family: var(--font-display);
   font-style: italic;
   font-size: 1.5rem;
   font-weight: 500;
+  line-height: 1.2;
 }
 
-.signin__card .muted {
-  margin: -0.5rem 0 0.25rem;
-  font-size: 0.875rem;
+.signin__head .muted {
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+/*
+ * What went wrong, shaped like the notice it sits beside.
+ *
+ * This carried no rule at all, so it inherited the body's 16px and came out the
+ * largest and heaviest thing on the card — bigger than the labels beneath it
+ * and louder than the wordmark above. A failed attempt became the focal point
+ * of the screen, which is both ugly and backwards: the form is what the reader
+ * is here to use, and the error is a remark about it.
+ *
+ * Marked by a heavier left rule than `.notice` gets, since the palette is
+ * achromatic and there is no red to spend — the same way destructive actions
+ * are marked everywhere else here.
+ */
+.error {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.8125rem;
+  line-height: 1.5;
 }
 
 .field {
@@ -989,8 +1036,11 @@
   gap: 0.375rem;
 }
 
+/* 0.75rem, not 0.6875: a field label is read once before typing and was the
+   smallest text in the application, a size below even the button labels it
+   sits above. */
 .field > span {
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
   color: var(--muted);
 }
 
