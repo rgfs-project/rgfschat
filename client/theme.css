@@ -367,14 +367,28 @@ select:focus-visible,
   outline-offset: 2px;
 }
 
-/** A quiet square button, used for icons throughout. */
+/**
+ * A quiet square button, used for icons throughout.
+ *
+ * The padding is zeroed and the glyph pinned, which is a fix rather than a
+ * tidy-up: a button carries 1px 6px of padding by default, so a box narrower
+ * than its glyph plus 12 left the glyph — a flex child, and shrinkable —
+ * squeezed narrower than it was asked to be. It drew a 15px icon at 9 in the
+ * message actions and a round 18px plus at 14 wide in the composer, each time
+ * looking like a different bug.
+ */
 .icon-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 2rem;
   height: 2rem;
+  padding: 0;
   color: var(--muted);
+  flex: none;
+}
+
+.icon-button > svg {
   flex: none;
 }
 

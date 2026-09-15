@@ -97,13 +97,8 @@
 .conversation__actions .icon-button {
   width: 1.4375rem;
   height: 1.4375rem;
-  padding: 0;
   border-radius: 0.25rem;
   color: var(--faint);
-}
-
-.conversation__actions .icon-button svg {
-  flex: none;
 }
 
 /* --- transcript ---------------------------------------------------------- */
@@ -121,8 +116,10 @@
   margin: 0 0 0.75rem;
 }
 
+/* The same size as the model's own control below it: on an empty conversation
+   these two are the same fact, stated in the two places it is wanted. */
 .empty-state p {
-  font-size: 0.84375rem;
+  font-size: 0.9375rem;
   color: var(--faint);
   margin: 0.5rem 0 0;
 }
@@ -224,20 +221,12 @@
   transition: opacity var(--motion-fast) var(--ease-out);
 }
 
-/* 15px glyph in 4px of padding, the size the reference draws them at. The
-   button's own padding is dropped and the glyph pinned: inherited, it left 11px
-   of content box for a 15px icon, which a flex child answers by shrinking — so
-   the glyphs came out at 9px, two thirds of the size they are asked for. */
+/* 15px glyph in 4px of padding, the size the reference draws them at. */
 .msg__actions .icon-button {
   width: 1.4375rem;
   height: 1.4375rem;
-  padding: 0;
   border-radius: 0.25rem;
   color: inherit;
-}
-
-.msg__actions .icon-button svg {
-  flex: none;
 }
 
 /* When it was sent, read at a glance rather than by opening the file — the
@@ -594,6 +583,22 @@
   gap: 0.25rem;
 }
 
+/*
+ * 28px, so the glyph lines up with the text above it.
+ *
+ * A "+" is drawn well inside its own box — about 4px of it at this size — so a
+ * control centred on the column the text starts from puts the visible cross to
+ * the right of the first letter. Narrowing the box moves the glyph left by half
+ * the difference, which is what buys those pixels back. Grown to a 44px tap
+ * target it was worse still: a third of the height of the box it sits in, hard
+ * against the corner, with the 10px of padding that reads as air around it
+ * gone. The bar is the full width of the screen and nothing crowds it.
+ */
+.composer__bar .icon-button {
+  width: 1.75rem;
+  height: 1.75rem;
+}
+
 .composer__send,
 .composer__send--stop {
   margin-left: auto;
@@ -656,7 +661,9 @@
   padding: 0.25rem 0.5rem;
   border-radius: 0.5rem;
   color: var(--text-soft);
-  font-size: 0.84375rem;
+  /* The model in use is the one thing in the composer bar that is read rather
+     than aimed at, and at 13.5 it was the smallest type on the screen. */
+  font-size: 0.9375rem;
 }
 
 .model-trigger {
@@ -2019,6 +2026,11 @@ button.linkish:hover {
     font-size: 1.0625rem;
   }
 
+  .model-trigger,
+  .empty-state p {
+    font-size: 1rem;
+  }
+
   .conversation__open,
   .sidebar__username {
     font-size: 1rem;
@@ -2054,8 +2066,11 @@ button.linkish:hover {
    * than the row they belong to, and it read as chrome rather than as the
    * message's own footnote. It keeps the size it has everywhere else.
    */
-  .icon-button:not(.msg__actions .icon-button, .main__header .icon-button),
-  .composer__send {
+  .icon-button:not(
+    .msg__actions .icon-button,
+    .main__header .icon-button,
+    .composer__bar .icon-button
+  ) {
     width: 2.75rem;
     height: 2.75rem;
   }
