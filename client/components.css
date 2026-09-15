@@ -98,15 +98,16 @@
 }
 
 .empty-state h2 {
-  font-size: 1.75rem;
+  font-size: 1.6875rem;
   font-weight: 400;
-  letter-spacing: -0.02em;
+  color: var(--text-soft);
   margin: 0 0 0.75rem;
 }
 
 .empty-state p {
-  font-size: 0.8125rem;
-  margin: 0;
+  font-size: 0.84375rem;
+  color: var(--faint);
+  margin: 0.5rem 0 0;
 }
 
 .msg {
@@ -1977,6 +1978,10 @@ button.linkish:hover {
 
   .main__title {
     font-size: 1.0625rem;
+  }
+
+  .empty-state h2 {
+    font-size: 1.875rem;
   }
 }
 
