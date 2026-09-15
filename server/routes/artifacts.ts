@@ -1,137 +1,68 @@
 import { Router, type Request } from 'express';
-import {
-  artifactFilename,
-  artifactId,
-  deriveTitle,
-  extractCodeBlocks,
-  isArtifact,
-  parseArtifactId,
-  type ArtifactSummary,
-} from '@shared/artifact.ts';
-import { isCanonicalUuid } from '@shared/conversation.ts';
-import type { ConversationStore } from '../storage/conversations.ts';
-import type { ChatIndex } from '../storage/index.ts';
 import { AppError } from '../errors/AppError.ts';
+import { toArtifactDto, type ArtifactStore } from '../storage/artifacts.ts';
 
 /**
- * The artifact gallery: every code block the caller has, across conversations.
+ * Reading and discarding artifacts.
  *
- * Derived on read, never stored. There is no artifact table to keep in step
- * with the Markdown, so there is nothing that can disagree with it — deleting a
- * message removes its artifacts, editing one re-derives them, and a restored
- * backup lists correctly the first time it is read. The conversation Markdown
- * is frozen (contracts §3) and this feature does not touch it.
+ * There is no upload route, and that is deliberate. An artifact is something a
+ * generation produced or an import recovered — never something a browser hands
+ * over. Accepting one from the client would be accepting arbitrary HTML into a
+ * store whose whole point is that its contents are not arbitrary.
  *
- * The scan mirrors search: walk the caller's index, `inspect` each conversation
- * rather than `load` it, and skip what will not parse. One unreadable file must
- * not fail the gallery for every other conversation.
+ * Identity comes from the session and nowhere else (INV-14): every route acts
+ * on the caller's own storage, and a cross-user id is simply not found.
  */
 
-/** Bounds the response. The gallery is for finding things, not for archiving. */
-const ARTIFACT_LIMIT = 200;
-
-export interface ArtifactsDeps {
-  store: ConversationStore;
-  index: ChatIndex;
-}
-
-function ownerOf(req: Request): string {
+function owner(req: Request): string {
   const userId = req.auth?.userId;
   if (userId === undefined) throw AppError.internal('Route reached without authentication');
   return userId;
 }
 
-export function artifactsRouter({ store, index }: ArtifactsDeps): Router {
+export function artifactRoutes(artifacts: ArtifactStore): Router {
   const router = Router();
 
   router.get('/artifacts', async (req, res) => {
-    const user = ownerOf(req);
-    const artifacts: ArtifactSummary[] = [];
+    const list = await artifacts.list(owner(req));
+    res.json({ artifacts: list.map(toArtifactDto) });
+  });
 
-    // Newest conversation first, so the cap drops the oldest rather than
-    // whatever the index happened to list last.
-    const entries = [...(await index.list(user))].sort((a, b) =>
-      b.updatedAt.localeCompare(a.updatedAt)
-    );
-
-    for (const entry of entries) {
-      if (entry.malformed) continue;
-
-      const found = await store.inspect(user, entry.id);
-      if (!found.ok) continue;
-
-      for (const message of found.conversation.messages) {
-        // System prompts are not shown in the transcript and reasoning is a
-        // model's scratch space; an artifact has to be something the reader can
-        // open where it came from.
-        if (message.type !== 'user' && message.type !== 'assistant') continue;
-
-        for (const block of extractCodeBlocks(message.body)) {
-          if (!isArtifact(block)) continue;
-
-          artifacts.push({
-            id: artifactId(message.id, block.ordinal),
-            conversationId: entry.id,
-            conversationTitle: entry.title,
-            messageId: message.id,
-            title: deriveTitle(block.language, block.code),
-            language: block.language,
-            lines: block.code.trim().split('\n').length,
-            updatedAt: found.conversation.updatedAt,
-          });
-        }
-      }
-
-      if (artifacts.length >= ARTIFACT_LIMIT) break;
-    }
-
-    res.json({ artifacts: artifacts.slice(0, ARTIFACT_LIMIT) });
+  router.get('/artifacts/:id', async (req, res) => {
+    const meta = await artifacts.read(owner(req), req.params.id ?? '');
+    res.json(toArtifactDto(meta));
   });
 
   /**
-   * One artifact, as a file to save.
+   * The source, as text, and only ever as text.
    *
-   * Re-derived from the Markdown on each request, like the list — there is no
-   * stored copy that could drift from the message it came from.
+   * An artifact is usually HTML, and HTML served from this origin with its own
+   * media type is a scriptable document inside the reader's session. So the
+   * stored type is deliberately *not* used here: the bytes go out as
+   * `text/plain`, under the same sandbox the attachment route uses, with
+   * `nosniff` so the browser cannot decide to disagree. The type that matters
+   * is on the metadata, where it drives how the panel presents the source.
    *
-   * Served as `text/plain` whatever the block's language is, and always as an
-   * attachment. The content is model- or user-authored: a block tagged `html`
-   * returned as `text/html` from this origin would be a stored-XSS delivery
-   * route straight past the CSP that protects the rest of the app. The same
-   * reasoning, and the same headers, as the attachment download route.
+   * Rendering an artifact rather than reading it needs an isolated origin and
+   * a frame that cannot reach this one. That is a separate thing to build, and
+   * it does not begin by loosening this.
    */
-  router.get('/conversations/:conversationId/artifacts/:artifactId/download', async (req, res) => {
-    const user = ownerOf(req);
-
-    const conversationId = req.params.conversationId;
-    if (!isCanonicalUuid(conversationId)) throw AppError.notFound('Conversation not found.');
-
-    const address = parseArtifactId(req.params.artifactId);
-    if (address === null) throw AppError.notFound('Artifact not found.');
-
-    const found = await store.inspect(user, conversationId);
-    if (!found.ok) throw AppError.notFound('Conversation not found.');
-
-    const message = found.conversation.messages.find(
-      (candidate) => candidate.id === address.messageId
-    );
-    if (message === undefined || (message.type !== 'user' && message.type !== 'assistant')) {
-      throw AppError.notFound('Artifact not found.');
-    }
-
-    const block = extractCodeBlocks(message.body).find((b) => b.ordinal === address.ordinal);
-    if (block === undefined || !isArtifact(block)) throw AppError.notFound('Artifact not found.');
-
-    const filename = artifactFilename(deriveTitle(block.language, block.code), block.language);
+  router.get('/artifacts/:id/source', async (req, res) => {
+    const userId = owner(req);
+    const meta = await artifacts.read(userId, req.params.id ?? '');
+    const content = await artifacts.content(userId, meta.id);
 
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`
-    );
-    // Belt and braces beside the global nosniff: nothing here is to be run.
-    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
-    res.send(block.code);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
+    res.setHeader('Cache-Control', 'private, max-age=0, must-revalidate');
+    res.send(content);
+  });
+
+  router.delete('/artifacts/:id', async (req, res) => {
+    const removed = await artifacts.remove(owner(req), req.params.id ?? '');
+    if (!removed) throw AppError.notFound('Artifact not found.');
+    res.status(204).end();
   });
 
   return router;

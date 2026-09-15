@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, PanelLeft } from 'lucide-react';
-import type { UserDto } from '@shared/auth.ts';
-import { deriveTitle, extractCodeBlocks, parseArtifactId } from '@shared/artifact.ts';
+import type { ArtifactDto } from '@shared/artifact';
+import type { UserDto } from '@shared/auth';
 import { ApiError, cancelGeneration, downloadConversation } from './api.ts';
+import { ArtifactPanel } from './ArtifactPanel.tsx';
+import { ArtifactsDialog } from './ArtifactsDialog.tsx';
 import { Composer } from './Composer.tsx';
 import { Dialog } from './Dialog.tsx';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
+import { failureMessage } from './failureMessage.ts';
 import { Message, StreamingMessage } from './Message.tsx';
 import type { ModelSelection } from './ModelPicker.tsx';
 import { SearchDialog } from './SearchDialog.tsx';
-import { ArtifactPanel } from './ArtifactPanel.tsx';
 import { Sidebar } from './Sidebar.tsx';
 import {
   keys,
@@ -137,17 +139,7 @@ export interface AppProps {
   onConversationCreated: (id: string) => void;
   onOpenSettings: () => void;
   onOpenAdmin: () => void;
-  onOpenArtifacts: () => void;
   onSignOut: () => void;
-  /**
-   * The artifact open beside the transcript, or `null` for none.
-   *
-   * In the URL for the same reason the conversation is: a panel that can be
-   * linked to and closed with Back, rather than state that a reload forgets.
-   */
-  openArtifactId?: string | null;
-  onOpenArtifact?: (artifactId: string) => void;
-  onCloseArtifact?: () => void;
 }
 
 export function App({
@@ -159,11 +151,7 @@ export function App({
   onConversationCreated,
   onOpenSettings,
   onOpenAdmin,
-  onOpenArtifacts,
   onSignOut,
-  openArtifactId = null,
-  onOpenArtifact,
-  onCloseArtifact,
 }: AppProps): React.JSX.Element {
   const client = useQueryClient();
 
@@ -186,6 +174,15 @@ export function App({
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<PendingDialog | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [artifactsOpen, setArtifactsOpen] = useState(false);
+  /*
+   * The artifact open beside the transcript.
+   *
+   * Held here rather than in the dialog because it outlives it: choosing one
+   * closes the list and leaves the panel open against the conversation, which
+   * is the whole point of a panel rather than a second dialog.
+   */
+  const [artifact, setArtifact] = useState<ArtifactDto | null>(null);
   /** A message arrived at from search, to scroll to and mark once it renders. */
   const [focusMessageId, setFocusMessageId] = useState<string | null>(null);
 
@@ -409,7 +406,7 @@ export function App({
       setError(
         live.state === 'timed_out'
           ? 'The model provider timed out.'
-          : 'The generation failed. Check the server logs.'
+          : failureMessage(live.errorCode)
       );
     }
 
@@ -420,7 +417,9 @@ export function App({
     if (currentId !== null) {
       void client.invalidateQueries({ queryKey: keys.conversation(currentId) });
     }
-  }, [live.state, generationId, currentId, client]);
+    // `errorCode` arrives in the same event as the terminal state; the ref
+    // above is what keeps this to once per generation, not the dependencies.
+  }, [live.state, live.errorCode, generationId, currentId, client]);
 
   const onSelectModel = useCallback(
     (next: ModelSelection) => {
@@ -665,39 +664,6 @@ export function App({
 
   const list = conversations.data ?? [];
   const title = list.find((c) => c.id === currentId)?.title ?? 'New chat';
-
-  /**
-   * The artifact named by the URL, resolved out of the conversation on screen.
-   *
-   * Derived rather than fetched: the transcript is already loaded, and the
-   * block is in it. An id that no longer resolves — a message since edited or
-   * deleted, or a hand-typed URL — yields `null` and simply draws no panel,
-   * which is the honest answer and needs no error state of its own.
-   */
-  const openArtifact = useMemo(() => {
-    if (openArtifactId === null || currentId === null) return null;
-
-    const address = parseArtifactId(openArtifactId);
-    if (address === null) return null;
-
-    const message = messages.find((candidate) => candidate.id === address.messageId);
-    if (message === undefined) return null;
-
-    const block = extractCodeBlocks(message.body).find((b) => b.ordinal === address.ordinal);
-    if (block === undefined) return null;
-
-    return {
-      id: openArtifactId,
-      conversationId: currentId,
-      conversationTitle: title,
-      messageId: message.id,
-      title: deriveTitle(block.language, block.code),
-      language: block.language,
-      lines: block.code.trim().split('\n').length,
-      updatedAt: conversation.data?.updatedAt ?? '',
-      code: block.code,
-    };
-  }, [openArtifactId, currentId, messages, title, conversation.data?.updatedAt]);
   const showEmptyState = !malformed && messages.length === 0 && !busy;
 
   const noModels = models.isSuccess && groups.length === 0;
@@ -709,7 +675,6 @@ export function App({
       className="shell"
       data-sidebar={sidebarOpen ? 'expanded' : 'collapsed'}
       data-narrow={narrow ? 'true' : 'false'}
-      data-artifact={openArtifact !== null ? 'open' : 'closed'}
     >
       {/* On a narrow window the sidebar covers the page, so it needs a way out
           that is not the control hidden underneath it. */}
@@ -738,13 +703,13 @@ export function App({
               dismissIfDrawer();
             }}
             onSearch={() => setSearchOpen(true)}
+            onOpenArtifacts={() => setArtifactsOpen(true)}
             onRename={(id, currentTitle) => setDialog({ kind: 'rename', id, title: currentTitle })}
             onDelete={(id) => setDialog({ kind: 'delete-conversation', id })}
             onPin={onPinConversation}
             onDownload={onDownloadConversation}
             onSettings={onOpenSettings}
             onOpenAdmin={onOpenAdmin}
-            onOpenArtifacts={onOpenArtifacts}
             onSignOut={onSignOut}
             modal={narrow && sidebarOpen}
           />
@@ -762,7 +727,10 @@ export function App({
       */}
       <GenerationAnnouncer state={live.state} />
 
-      <main className="main" inert={narrow && sidebarOpen}>
+      <main
+        className={`main${artifact !== null ? ' main--with-artifact' : ''}`}
+        inert={narrow && sidebarOpen}
+      >
         <header className="main__header">
           {/*
             On a narrow window this stays put whether the drawer is open or
@@ -847,7 +815,6 @@ export function App({
                     onEdit={onEditMessage}
                     onDelete={(id) => setDialog({ kind: 'delete-message', id })}
                     onRegenerate={() => void onRegenerate()}
-                    {...(onOpenArtifact === undefined ? {} : { onOpenArtifact })}
                   />
                 ))}
 
@@ -899,17 +866,20 @@ export function App({
         </div>
       </main>
 
-      {/* A column beside the transcript, not over it: an artifact is read
-          against the reply that produced it. Below the breakpoint the
-          stylesheet gives it the full width, because there is no beside. */}
-      {openArtifact !== null && onCloseArtifact !== undefined && (
-        <ErrorBoundary region="artifact" resetKey={openArtifact.id}>
-          <ArtifactPanel artifact={openArtifact} onClose={onCloseArtifact} />
-        </ErrorBoundary>
-      )}
+      {artifact !== null && <ArtifactPanel artifact={artifact} onClose={() => setArtifact(null)} />}
 
       {searchOpen && (
         <SearchDialog recent={list} onOpen={onOpenResult} onClose={() => setSearchOpen(false)} />
+      )}
+
+      {artifactsOpen && (
+        <ArtifactsDialog
+          onOpen={(chosen) => {
+            setArtifact(chosen);
+            setArtifactsOpen(false);
+          }}
+          onClose={() => setArtifactsOpen(false)}
+        />
       )}
 
       {/* Settings and Admin are routes now, rendered over this screen by

@@ -1,4 +1,5 @@
 import { REQUIRED_MODALITY } from '@shared/attachment.ts';
+import { imageDimensions } from './dimensions.ts';
 import type { Conversation } from '@shared/conversation.ts';
 import type { ResolvedAttachment } from '../generation/prompt.ts';
 import type { AttachmentStore } from './store.ts';
@@ -80,11 +81,25 @@ export async function resolveAttachments(
         continue;
       }
 
+      /*
+       * Read again here rather than carried from upload.
+       *
+       * The store checks dimensions to refuse an image too large to keep, but
+       * does not record them, and the budget needs the area to charge an image
+       * what it actually costs. The header is a few bytes at the front of a
+       * buffer already in hand, so reading it again is cheaper than a metadata
+       * migration. An unreadable header leaves `pixels` absent, which the
+       * estimate treats as "charge the flat rate".
+       */
+      const dimensions =
+        meta.kind === 'image' ? imageDimensions(meta.mediaType, new Uint8Array(bytes)) : null;
+
       resolved.set(id, {
         id,
         filename: meta.filename,
         kind: meta.kind,
         mediaType: meta.mediaType,
+        ...(dimensions === null ? {} : { pixels: dimensions.width * dimensions.height }),
         /*
          * An image goes as a `data:` URL and audio as bare base64, because
          * that is what each content part takes. Never a remote URL: that would

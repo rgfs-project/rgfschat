@@ -134,3 +134,84 @@ describe('estimateTokens', () => {
     expect(estimateTokens('€€€')).toBeGreaterThanOrEqual(3);
   });
 });
+
+/**
+ * An image's weight against the budget.
+ *
+ * These are the arithmetic behind a real failure: a large screenshot was
+ * charged a flat 1,200 tokens however big it was, so a prompt the budget
+ * passed was one the provider could not fit, and the reply died part-way with
+ * no reason attached to it.
+ */
+describe('image cost', () => {
+  const IMAGE_ID = '11111111-2222-4333-8444-555555555555';
+
+  function withImage(pixels: number | undefined) {
+    const message: Message = {
+      type: 'user',
+      id: randomUUID(),
+      attachments: [IMAGE_ID],
+      body: 'what is in this?',
+    };
+    return {
+      conversation: conversation([message]),
+      attachments: new Map([
+        [
+          IMAGE_ID,
+          {
+            id: IMAGE_ID,
+            filename: 'shot.png',
+            kind: 'image' as const,
+            mediaType: 'image/png',
+            content: 'data:image/png;base64,AAAA',
+            truncated: false,
+            ...(pixels === undefined ? {} : { pixels }),
+          },
+        ],
+      ]),
+      modalities: ['image'],
+    };
+  }
+
+  /** The estimate for one image, isolated from the message's own overhead. */
+  function imageCost(pixels: number | undefined): number {
+    const { conversation: convo, attachments, modalities } = withImage(pixels);
+    const withIt = assemblePrompt(convo, { ...ROOMY, attachments, modalities });
+    const withoutIt = assemblePrompt(convo, { ...ROOMY, attachments, modalities: [] });
+    return withIt.estimatedTokens - withoutIt.estimatedTokens;
+  }
+
+  it('charges a small image the floor rather than a fraction of a token', () => {
+    // 256x256 is 65,536 pixels — about 21 tokens by area alone.
+    expect(imageCost(256 * 256)).toBe(1_200);
+  });
+
+  it('charges a large image by its area', () => {
+    // A 5120x2880 capture: 14.7 MP, which is far more than the old flat figure.
+    expect(imageCost(5120 * 2880)).toBe(Math.ceil((5120 * 2880) / 3136));
+    expect(imageCost(5120 * 2880)).toBeGreaterThan(4_000);
+  });
+
+  it('scales with area, so a bigger picture never costs less', () => {
+    expect(imageCost(3840 * 2160)).toBeGreaterThan(imageCost(1920 * 1080));
+  });
+
+  it('falls back to the floor when the header could not be read', () => {
+    expect(imageCost(undefined)).toBe(1_200);
+  });
+
+  it('refuses a picture too large for the context instead of letting the provider fail', () => {
+    const { conversation: convo, attachments, modalities } = withImage(10_000 * 10_000);
+
+    // 100 MP is ~31,900 tokens. Against an 8k context it cannot be sent, and
+    // saying so here is what stops it being a reply that dies part-way.
+    expect(() =>
+      assemblePrompt(convo, {
+        contextTokens: 8_192,
+        maxOutputTokens: 2_048,
+        attachments,
+        modalities,
+      })
+    ).toThrowError(/too large/i);
+  });
+});

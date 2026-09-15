@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { GenerationEvent, GenerationSnapshotDto } from '@shared/generation.ts';
-import { isTerminal } from '@shared/generation.ts';
+import type { GenerationEvent, GenerationSnapshotDto } from '@shared/generation';
+import { isTerminal } from '@shared/generation';
 import { generationStreamUrl } from './api.ts';
 
 export interface LiveGeneration {

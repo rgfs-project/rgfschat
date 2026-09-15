@@ -14,6 +14,7 @@ import { SettingsStore } from './admin/settings.ts';
 import { ConversationStore } from './storage/conversations.ts';
 import { ChatIndex } from './storage/index.ts';
 import { PreferencesStore } from './storage/preferences.ts';
+import { ArtifactStore } from './storage/artifacts.ts';
 import { MemoryStore } from './storage/memories.ts';
 import { AttachmentStore } from './attachments/store.ts';
 import { reconcileAttachments } from './attachments/reconcile.ts';
@@ -59,6 +60,7 @@ async function main(): Promise<void> {
   const index = new ChatIndex({ store, logger });
   const preferences = new PreferencesStore(paths0, logger);
   const memories = new MemoryStore(paths0, logger);
+  const artifacts = new ArtifactStore(paths0, logger);
 
   /*
    * Loaded before the generation service is built, because the service asks it
@@ -123,6 +125,7 @@ async function main(): Promise<void> {
     index,
     preferences,
     memories,
+    artifacts,
     service,
     users,
     sessions,
@@ -165,7 +168,36 @@ async function main(): Promise<void> {
     .cleanupExpired()
     .then(async () => {
       if ((await users.count()) === 0) {
-        logger.warn('No accounts exist. Create the first admin with: npm run user:create', {});
+        /*
+         * The first account, without a CLI — but never with a password anyone
+         * could guess.
+         *
+         * `ADMIN_PASSWORD` set means an operator chose one, and the account is
+         * made from it so a container comes up ready to sign in to. Unset, no
+         * account is made: the alternative is a fixed default, and an instance
+         * that puts `admin` / a published string on an open port is worse than
+         * one that needs a step. Registration answers that case instead — it
+         * opens by itself while no account exists and closes the moment the
+         * first one is made (see `routes/auth.ts`), so the first person to
+         * reach the page creates the admin and nobody after them can.
+         */
+        const password = process.env['ADMIN_PASSWORD'];
+        if (password === undefined || password === '') {
+          logger.warn(
+            'No accounts exist. Registration is open until the first is created; ' +
+              'set ADMIN_PASSWORD to have one made at boot instead.',
+            {}
+          );
+        } else {
+          const admin = await users.create({
+            username: process.env['ADMIN_USERNAME'] ?? 'admin',
+            password,
+            role: 'admin' as const,
+          });
+          logger.info('Created the first admin account from ADMIN_PASSWORD', {
+            userId: admin.id,
+          });
+        }
       }
     })
     .catch((err: unknown) => {

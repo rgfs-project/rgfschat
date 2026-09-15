@@ -13,7 +13,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import type { UserDto } from '@shared/auth.ts';
+import type { UserDto } from '@shared/auth';
 import {
   ApiError,
   createAdminProvider,

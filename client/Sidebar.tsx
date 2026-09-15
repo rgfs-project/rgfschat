@@ -1,7 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import {
   ChevronDown,
-  Code2,
   Download,
   LogOut,
   Moon,
@@ -13,13 +12,14 @@ import {
   Plus,
   Search,
   Settings as SettingsIcon,
+  Shapes,
   Shield,
   Sun,
   Trash2,
 } from 'lucide-react';
 import { Menu } from './Menu.tsx';
 import { useFocusTrap } from './useFocusTrap.ts';
-import type { UserDto } from '@shared/auth.ts';
+import type { UserDto } from '@shared/auth';
 import type { ConversationSummary } from './api.ts';
 
 /**
@@ -43,14 +43,13 @@ export interface SidebarProps {
   onOpen: (id: string) => void;
   /** Opens the search palette; the sidebar itself no longer filters. */
   onSearch: () => void;
+  onOpenArtifacts: () => void;
   onRename: (id: string, currentTitle: string) => void;
   onDelete: (id: string) => void;
   onPin: (id: string, pinned: boolean) => void;
   onDownload: (id: string, title: string) => void;
   onSettings: () => void;
   onOpenAdmin: () => void;
-  /** Opens the artifact gallery: every code block, across conversations. */
-  onOpenArtifacts: () => void;
   onSignOut: () => void;
   /**
    * Open as a drawer over the page rather than standing beside it.
@@ -96,13 +95,13 @@ export function Sidebar({
   onCreate,
   onOpen,
   onSearch,
+  onOpenArtifacts,
   onRename,
   onDelete,
   onPin,
   onDownload,
   onSettings,
   onOpenAdmin,
-  onOpenArtifacts,
   onSignOut,
   modal = false,
 }: SidebarProps): React.JSX.Element {
@@ -179,11 +178,11 @@ export function Sidebar({
           Search
         </button>
 
-        {/* Beside Search because it answers the same question — "where did I
-            put that?" — for the one kind of content people go back for by
-            name rather than by conversation. */}
+        {/* Artifacts outlive the conversations that made them, so they need a
+            way in that is not a conversation. It sits with the other ways out
+            of this pane rather than in the list below, which is chats. */}
         <button type="button" className="nav-button" onClick={onOpenArtifacts}>
-          <Code2 size={18} />
+          <Shapes size={18} />
           Artifacts
         </button>
       </div>

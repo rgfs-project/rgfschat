@@ -1,10 +1,9 @@
-import { memo, useState } from 'react';
-import { Check, Copy, PanelRight } from 'lucide-react';
+import { memo } from 'react';
+import { Check, Copy } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { isArtifact } from '@shared/artifact.ts';
-import { useOpenArtifact } from './artifactContext.ts';
 import { safeUrl } from './safeUrl.ts';
+import { useCopy } from './useCopy.ts';
 
 /**
  * Renders assistant and user text as Markdown (INV-22).
@@ -42,46 +41,16 @@ function toText(node: React.ReactNode): string {
 }
 
 function CodeBlock({ text, language }: { text: string; language: string | null }) {
-  const [copied, setCopied] = useState(false);
-  const openArtifact = useOpenArtifact();
-
-  const copy = (): void => {
-    void navigator.clipboard
-      .writeText(text)
-      .then(() => {
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1500);
-      })
-      .catch(() => undefined);
-  };
-
-  /*
-   * Offered only for a block substantial enough to be an artifact, by the same
-   * rule the gallery lists them: a one-line command gains nothing from a panel,
-   * and an "Open" button on every `npm ci` would be noise on the thing it is
-   * trying to make findable.
-   */
-  const openable = openArtifact !== null && isArtifact({ language, code: text, ordinal: 0 });
+  const { copied, copy } = useCopy();
 
   return (
     <div className="code-block">
       <div className="code-block__bar">
         <span className="code-block__lang">{language ?? 'text'}</span>
-        {openable && (
-          <button
-            type="button"
-            className="code-block__open"
-            onClick={() => openArtifact(text)}
-            title="Open in panel"
-          >
-            <PanelRight size={13} />
-            Open
-          </button>
-        )}
         <button
           type="button"
           className="icon-button"
-          onClick={copy}
+          onClick={() => copy(text)}
           aria-label={copied ? 'Copied' : 'Copy code'}
           title={copied ? 'Copied' : 'Copy code'}
         >

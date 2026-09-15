@@ -1,27 +1,24 @@
-import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { ArtifactSummary } from '@shared/artifact.ts';
 import { createApp } from '../app.ts';
 import { createLogger } from '../logger.ts';
 import { SessionManager } from '../auth/sessions.ts';
 import { ARGON2_TEST_OPTIONS, UserStore } from '../auth/users.ts';
 import { signIn, type TestClient } from '../auth/testClient.ts';
 import { StoragePaths } from '../storage/paths.ts';
-import { ConversationStore } from '../storage/conversations.ts';
-import { ChatIndex } from '../storage/index.ts';
+import { ArtifactStore } from '../storage/artifacts.ts';
 
 /**
- * The artifact gallery over real HTTP.
+ * The artifact routes over real HTTP.
  *
- * The interesting properties are not "does it return a list" but that it is a
- * projection: it must see what the Markdown says and nothing else, it must stay
- * inside the caller's own conversations (INV-15), and one broken file must not
- * take the whole gallery down with it.
+ * An HTTP test rather than a unit test for the same reason the attachment one
+ * is: what keeps an artifact's bytes from executing in the reader's session is
+ * entirely a property of the response, and nothing below the route layer can be
+ * asked about it.
  */
 
 const logger = createLogger({ level: 'error', write: () => undefined });
@@ -29,34 +26,12 @@ const logger = createLogger({ level: 'error', write: () => undefined });
 let dataDir: string;
 let server: Server | undefined;
 let base: string;
-let store: ConversationStore;
+let artifacts: ArtifactStore;
 let owner: TestClient;
 let other: TestClient;
 let ownerId: string;
-let otherId: string;
 
-const CODE = ['# Rate limiter', 'def allow(key):', '    return True'].join('\n');
-
-async function conversationWith(userId: string, title: string, bodies: string[]): Promise<string> {
-  const { id } = await store.create(userId, title);
-  await store.appendMessages(
-    userId,
-    id,
-    bodies.map((body) => ({
-      type: 'assistant' as const,
-      id: randomUUID(),
-      status: 'complete' as const,
-      body,
-    }))
-  );
-  return id;
-}
-
-async function artifactsOf(client: TestClient): Promise<ArtifactSummary[]> {
-  const response = await client.fetch('/api/artifacts');
-  expect(response.status).toBe(200);
-  return ((await response.json()) as { artifacts: ArtifactSummary[] }).artifacts;
-}
+const PAGE = '<!DOCTYPE html>\n<script>alert(1)</script>\n';
 
 beforeEach(async () => {
   dataDir = await mkdtemp(join(tmpdir(), 'artifact-routes-'));
@@ -69,17 +44,14 @@ beforeEach(async () => {
     absoluteTtlMs: 3_600_000,
     idleTtlMs: 3_600_000,
   });
-
-  store = new ConversationStore({ paths, logger });
-  const index = new ChatIndex({ store, logger });
+  artifacts = new ArtifactStore(paths, logger);
 
   const app = createApp({
     logger,
     users,
     sessions,
-    store,
-    index,
     authConfig: { registrationMode: 'closed', absoluteTtlMs: 3_600_000, idleTtlMs: 3_600_000 },
+    artifacts,
   });
 
   server = app.listen(0, '127.0.0.1');
@@ -89,7 +61,6 @@ beforeEach(async () => {
   const one = await users.create({ username: 'owner', password: 'a-good-password' });
   const two = await users.create({ username: 'other', password: 'another-password' });
   ownerId = one.id;
-  otherId = two.id;
   owner = await signIn(base, sessions, one.id);
   other = await signIn(base, sessions, two.id);
 });
@@ -102,124 +73,149 @@ afterEach(async () => {
   await rm(dataDir, { recursive: true, force: true });
 });
 
-describe('listing artifacts', () => {
-  it('derives one from a fenced block, with a title from its leading comment', async () => {
-    const id = await conversationWith(ownerId, 'Limits', [
-      `Here:\n\n\`\`\`python\n${CODE}\n\`\`\``,
-    ]);
-
-    const [artifact, ...rest] = await artifactsOf(owner);
-    expect(rest).toEqual([]);
-    expect(artifact).toMatchObject({
-      conversationId: id,
-      conversationTitle: 'Limits',
-      title: 'Rate limiter',
-      language: 'python',
-      lines: 3,
-    });
+async function given(name = 'test-artifact'): Promise<string> {
+  const meta = await artifacts.create(ownerId, {
+    name,
+    mediaType: 'text/html',
+    content: PAGE,
+    description: 'A counter',
   });
+  return meta.id;
+}
 
-  it('addresses each block within its message, so two in one message are distinct', async () => {
-    await conversationWith(ownerId, 'Two', [
-      `\`\`\`sql\n-- First\nSELECT 1;\nSELECT 2;\n\`\`\`\n\n\`\`\`sql\n-- Second\nSELECT 3;\nSELECT 4;\n\`\`\``,
-    ]);
+describe('listing', () => {
+  it('serves what this reader has, and nothing of anyone else', async () => {
+    const id = await given();
 
-    const artifacts = await artifactsOf(owner);
-    expect(artifacts.map((a) => a.title)).toEqual(['First', 'Second']);
-
-    const [first, second] = artifacts;
-    expect(first?.messageId).toBe(second?.messageId);
-    expect(first?.id).not.toBe(second?.id);
-    expect(first?.id.endsWith('#0')).toBe(true);
-    expect(second?.id.endsWith('#1')).toBe(true);
-  });
-
-  it('ignores a snippet too small to be worth opening', async () => {
-    await conversationWith(ownerId, 'Small', ['Run `npm ci`:\n\n```sh\nnpm ci\n```']);
-    expect(await artifactsOf(owner)).toEqual([]);
-  });
-
-  it('has nothing to list for a reader with no conversations', async () => {
-    expect(await artifactsOf(owner)).toEqual([]);
-  });
-});
-
-describe('it is a projection of the Markdown, not a second copy', () => {
-  it('follows an edited message instead of going stale', async () => {
-    const id = await conversationWith(ownerId, 'Edited', [`\`\`\`python\n${CODE}\n\`\`\``]);
-    const before = await artifactsOf(owner);
-    expect(before[0]?.title).toBe('Rate limiter');
-
-    const conversation = await store.load(ownerId, id);
-    const messageId = conversation.messages[0]?.id ?? '';
-    await store.editMessageBody(
-      ownerId,
+    const mine = (await (await owner.fetch('/api/artifacts')).json()) as {
+      artifacts: { id: string; name: string; description?: string }[];
+    };
+    expect(mine.artifacts).toHaveLength(1);
+    expect(mine.artifacts[0]).toMatchObject({
       id,
-      messageId,
-      '```python\n# Token bucket\ndef allow(key):\n    return False\n```'
-    );
+      name: 'test-artifact',
+      description: 'A counter',
+    });
 
-    const after = await artifactsOf(owner);
-    expect(after).toHaveLength(1);
-    expect(after[0]?.title).toBe('Token bucket');
+    const theirs = (await (await other.fetch('/api/artifacts')).json()) as { artifacts: unknown[] };
+    expect(theirs.artifacts).toEqual([]);
   });
 
-  it('drops artifacts when their conversation is deleted', async () => {
-    const id = await conversationWith(ownerId, 'Doomed', [`\`\`\`python\n${CODE}\n\`\`\``]);
-    expect(await artifactsOf(owner)).toHaveLength(1);
-
-    const response = await owner.fetch(`/api/conversations/${id}`, { method: 'DELETE' });
-    expect(response.status).toBe(204);
-    expect(await artifactsOf(owner)).toEqual([]);
-  });
-});
-
-describe('isolation and robustness', () => {
-  it('INV-15: never lists another account’s artifacts', async () => {
-    await conversationWith(ownerId, 'Mine', [`\`\`\`python\n${CODE}\n\`\`\``]);
-    await conversationWith(otherId, 'Theirs', ['```sql\n-- Secret\nSELECT 1;\nSELECT 2;\n```']);
-
-    expect((await artifactsOf(owner)).map((a) => a.title)).toEqual(['Rate limiter']);
-    expect((await artifactsOf(other)).map((a) => a.title)).toEqual(['Secret']);
-  });
-
-  it('requires a session', async () => {
+  it('needs a session', async () => {
     const response = await fetch(`${base}/api/artifacts`);
     expect(response.status).toBe(401);
   });
+});
 
-  it('skips a malformed conversation rather than failing the whole gallery', async () => {
-    await conversationWith(ownerId, 'Good', [`\`\`\`python\n${CODE}\n\`\`\``]);
+describe('reading one', () => {
+  it('serves the metadata', async () => {
+    const id = await given();
 
-    // Corrupt a real conversation, so the index genuinely lists it and the
-    // gallery has to walk past it — rather than a stray file nothing knows of,
-    // which would make this test pass without exercising anything.
-    const doomed = await conversationWith(ownerId, 'Broken', [
-      '```sql\n-- Unreachable\nSELECT 1;\nSELECT 2;\n```',
-    ]);
-    const { writeFile } = await import('node:fs/promises');
-    await writeFile(
-      new StoragePaths(dataDir).conversationFile(ownerId, doomed),
-      'not a conversation at all\n',
-      'utf8'
-    );
-
-    // The precondition: it is listed, and listed as malformed (§3.7).
-    const listed = (await (await owner.fetch('/api/conversations')).json()) as {
-      conversations: { id: string; malformed?: boolean }[];
-    };
-    expect(listed.conversations.find((c) => c.id === doomed)?.malformed).toBe(true);
-
-    const artifacts = await artifactsOf(owner);
-    expect(artifacts.map((a) => a.title)).toEqual(['Rate limiter']);
+    const response = await owner.fetch(`/api/artifacts/${id}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ id, mediaType: 'text/html' });
   });
 
-  it('does not offer system prompts as artifacts', async () => {
-    const { id } = await store.create(ownerId, 'System');
-    await store.appendMessages(ownerId, id, [
-      { type: 'system', id: randomUUID(), body: '```python\n# Hidden prompt\nx = 1\ny = 2\n```' },
-    ]);
+  it('is not found for another reader, rather than forbidden', async () => {
+    // Ownership is never revealed: "yours or nobody's" is one answer.
+    const id = await given();
+    expect((await other.fetch(`/api/artifacts/${id}`)).status).toBe(404);
+  });
 
-    expect(await artifactsOf(owner)).toEqual([]);
+  it('is not found for an id that is not a UUID', async () => {
+    expect((await owner.fetch('/api/artifacts/..%2F..%2Fetc%2Fpasswd')).status).toBe(404);
+  });
+});
+
+/*
+ * The reason this route exists in this shape.
+ *
+ * An artifact is HTML. Served from this origin under its own media type it
+ * would be a scriptable document inside the reader's session, able to read
+ * their conversations through the very API that served it. So the stored type
+ * is deliberately not used on the wire.
+ */
+describe('serving the source', () => {
+  it('sends HTML as plain text, never as HTML', async () => {
+    const id = await given();
+    const response = await owner.fetch(`/api/artifacts/${id}/source`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toMatch(/^text\/plain/);
+    expect(response.headers.get('content-type')).not.toMatch(/html/);
+    expect(await response.text()).toBe(PAGE);
+  });
+
+  it('sandboxes it and forbids sniffing, so the type cannot be second-guessed', async () => {
+    const id = await given();
+    const response = await owner.fetch(`/api/artifacts/${id}/source`);
+
+    expect(response.headers.get('content-security-policy')).toBe("sandbox; default-src 'none'");
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+
+  it('is not cached by anything shared', async () => {
+    const id = await given();
+    const response = await owner.fetch(`/api/artifacts/${id}/source`);
+
+    expect(response.headers.get('cache-control')).toMatch(/private/);
+  });
+
+  it('does not serve another reader the bytes', async () => {
+    const id = await given();
+    expect((await other.fetch(`/api/artifacts/${id}/source`)).status).toBe(404);
+  });
+});
+
+describe('deleting', () => {
+  it('removes it', async () => {
+    const id = await given();
+
+    expect((await owner.fetch(`/api/artifacts/${id}`, { method: 'DELETE' })).status).toBe(204);
+    expect((await owner.fetch(`/api/artifacts/${id}`)).status).toBe(404);
+  });
+
+  it('is not found when there was nothing to remove', async () => {
+    const response = await owner.fetch('/api/artifacts/11111111-2222-4333-8444-555555555555', {
+      method: 'DELETE',
+    });
+    expect(response.status).toBe(404);
+  });
+
+  it('does not let another reader remove it', async () => {
+    const id = await given();
+
+    expect((await other.fetch(`/api/artifacts/${id}`, { method: 'DELETE' })).status).toBe(404);
+    expect((await owner.fetch(`/api/artifacts/${id}`)).status).toBe(200);
+  });
+});
+
+describe('what the browser may not do', () => {
+  /*
+   * There is no upload route, and its absence is a design decision rather than
+   * an omission: artifacts come from generations and imports, and accepting
+   * them from a client would be accepting arbitrary HTML into a store whose
+   * whole point is that its contents are not arbitrary.
+   */
+  it('offers no way to create one', async () => {
+    const response = await owner.fetch('/api/artifacts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'evil', mediaType: 'text/html', content: '<script></script>' }),
+    });
+
+    expect(response.status).toBe(404);
+  });
+
+  it('offers no way to rewrite one', async () => {
+    const id = await given();
+    const response = await owner.fetch(`/api/artifacts/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'replaced' }),
+    });
+
+    expect(response.status).toBe(404);
+    expect(await artifacts.content(ownerId, id)).toBe(PAGE);
   });
 });

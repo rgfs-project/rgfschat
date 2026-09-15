@@ -1,17 +1,23 @@
 /**
- * Conversation model — `formatVersion: 2` (contracts §3).
+ * Conversation model — `formatVersion: 1` (contracts §3).
  *
  * The shape was meant to be frozen once Phase 3 shipped, with every field a
  * later phase needs defined up front so nothing would require a version bump.
- * Per-message `createdAt` was the one field that plan missed: `formatVersion:
- * 1` predates it. The parser still reads `1` — those messages simply carry no
- * `createdAt` — but every conversation it writes back out, and every new one,
- * is `2`.
+ * Per-message time was the one field that plan missed, and it was added twice
+ * in parallel: once as an optional `time` attribute at version 1, and once as
+ * `createdAt` behind a bump to version 2. Neither is wrong, and files of both
+ * shapes exist.
+ *
+ * So the reader takes both and the writer picks one. `time` at version 1 is
+ * what is written: an optional attribute needs no bump to be added, and a file
+ * this app writes stays readable by a build that predates the argument.
+ * `createdAt` and version 2 are accepted on the way in and migrate to `time`
+ * the next time the conversation is written.
  */
 
-export const FORMAT_VERSION = 2;
-/** The oldest file shape the parser still accepts, for the reason above. */
-export const MIN_READABLE_FORMAT_VERSION = 1;
+export const FORMAT_VERSION = 1;
+/** The newest file shape the parser still accepts, for the reason above. */
+export const MAX_READABLE_FORMAT_VERSION = 2;
 
 export const MESSAGE_STATUSES = [
   'complete',
@@ -34,8 +40,16 @@ export interface UserMessage {
   id: string;
   /** 1–10 canonical UUIDs. Parsed and validated from Phase 3; used from Phase 11. */
   attachments?: string[];
-  /** Absent on a message written under `formatVersion: 1`, before this existed. */
-  createdAt?: string;
+  /**
+   * When the message was sent, as a canonical timestamp.
+   *
+   * Optional because conversations written before it existed have no such
+   * attribute, and a file that parsed yesterday has to parse today. A message
+   * without one is shown without a time rather than with a guessed one. Read
+   * from `createdAt` as well, which is what the same field was called in the
+   * parallel implementation of it.
+   */
+  time?: string;
   body: string;
 }
 
@@ -55,8 +69,18 @@ export interface AssistantMessage {
    * never be mistaken for a message to send back to the model (contracts §4).
    */
   reasoning?: string;
-  /** Absent on a message written under `formatVersion: 1`, before this existed. */
-  createdAt?: string;
+  /** When the reply was written, as a canonical timestamp. Optional, as on a user message. */
+  time?: string;
+  /**
+   * Why this reply did not complete, as an error code from the contract's table.
+   *
+   * Only meaningful alongside a non-`complete` status, and optional even then:
+   * every reply written before this existed has none, and a run can fail for a
+   * reason the server could not classify. Without it a failed reply reads as
+   * "Failed" forever — the server classifies the failure and logs it, but the
+   * person looking at the transcript is not the one who can read the log.
+   */
+  error?: string;
   body: string;
 }
 

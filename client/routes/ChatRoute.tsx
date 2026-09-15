@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
-import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
+import { useLocation, useNavigate, useParams } from 'react-router';
 import { App } from '../App.tsx';
-import { ARTIFACT_PARAM, CONVERSATION_PARAM, paths } from './paths.ts';
+import { CONVERSATION_PARAM, paths } from './paths.ts';
 import { useAppSession, useAuthenticatedUser } from './session.ts';
 
 /**
@@ -29,45 +29,11 @@ export function ChatRoute({ draft, onDraftChange }: ChatRouteProps): React.JSX.E
   const params = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const [search, setSearch] = useSearchParams();
   const user = useAuthenticatedUser();
   const { onSignOut } = useAppSession();
 
   // Absent on `/chat/new`, which is exactly the draft case.
   const currentId = params[CONVERSATION_PARAM] ?? null;
-
-  /*
-   * The open artifact lives in the query string, so it is part of the address
-   * and survives a reload. Opening one pushes — Back closes the panel and
-   * leaves the conversation — while closing it replaces, so Back does not
-   * immediately reopen what was just dismissed.
-   */
-  const openArtifactId = search.get(ARTIFACT_PARAM);
-
-  const onOpenArtifact = useCallback(
-    (artifactId: string) => {
-      setSearch(
-        (current) => {
-          const next = new URLSearchParams(current);
-          next.set(ARTIFACT_PARAM, artifactId);
-          return next;
-        },
-        { replace: false }
-      );
-    },
-    [setSearch]
-  );
-
-  const onCloseArtifact = useCallback(() => {
-    setSearch(
-      (current) => {
-        const next = new URLSearchParams(current);
-        next.delete(ARTIFACT_PARAM);
-        return next;
-      },
-      { replace: true }
-    );
-  }, [setSearch]);
 
   const onSelectConversation = useCallback(
     (id: string | null) => {
@@ -106,11 +72,7 @@ export function ChatRoute({ draft, onDraftChange }: ChatRouteProps): React.JSX.E
       onConversationCreated={onConversationCreated}
       onOpenSettings={openOverlay(paths.settings)}
       onOpenAdmin={openOverlay(paths.admin)}
-      onOpenArtifacts={openOverlay(paths.artifacts)}
       onSignOut={onSignOut}
-      openArtifactId={openArtifactId}
-      onOpenArtifact={onOpenArtifact}
-      onCloseArtifact={onCloseArtifact}
     />
   );
 }

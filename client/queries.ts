@@ -6,20 +6,22 @@ import {
   type UseMutationResult,
   type UseQueryResult,
 } from '@tanstack/react-query';
-import type { ArtifactSummary } from '@shared/artifact.ts';
-import type { Message } from '@shared/conversation.ts';
-import type { SessionDto } from '@shared/auth.ts';
+import type { ArtifactDto } from '@shared/artifact';
+import type { Message } from '@shared/conversation';
+import type { SessionDto } from '@shared/auth';
 import {
   createConversation,
+  deleteArtifact,
   deleteConversation,
   deleteMessage,
   editMessage,
+  fetchArtifacts,
+  fetchArtifactSource,
   fetchModels,
   fetchMyMemories,
   fetchMyPreferences,
   fetchSession,
   getConversation,
-  listArtifacts,
   listConversations,
   regenerate,
   pinConversation,
@@ -57,11 +59,12 @@ export const keys = {
   session: () => ['session'] as const,
   models: () => ['models'] as const,
   conversations: () => ['conversations'] as const,
-  artifacts: () => ['artifacts'] as const,
   conversation: (id: string) => ['conversation', id] as const,
   search: (query: string) => ['search', query] as const,
   preferences: () => ['me', 'preferences'] as const,
   memories: () => ['me', 'memories'] as const,
+  artifacts: () => ['artifacts'] as const,
+  artifactSource: (id: string) => ['artifact', id, 'source'] as const,
 };
 
 /**
@@ -110,23 +113,6 @@ export function useConversations(enabled: boolean): UseQueryResult<ConversationS
     queryKey: keys.conversations(),
     queryFn: ({ signal }) => listConversations(signal),
     enabled,
-  });
-}
-
-/**
- * The artifact gallery.
- *
- * Fetched when the gallery opens rather than kept warm: it is derived on the
- * server by reading every conversation, so it is the most expensive read in the
- * application and the least often wanted. `staleTime` keeps closing and
- * reopening it from paying that cost twice.
- */
-export function useArtifacts(enabled: boolean): UseQueryResult<ArtifactSummary[]> {
-  return useQuery({
-    queryKey: keys.artifacts(),
-    queryFn: ({ signal }) => listArtifacts(signal),
-    enabled,
-    staleTime: 30_000,
   });
 }
 
@@ -191,6 +177,30 @@ export function useMyMemories(enabled = true): UseQueryResult<MemoryDto[]> {
   });
 }
 
+export function useArtifacts(enabled = true): UseQueryResult<ArtifactDto[]> {
+  return useQuery({
+    queryKey: keys.artifacts(),
+    queryFn: ({ signal }) => fetchArtifacts(signal),
+    enabled,
+  });
+}
+
+/**
+ * One artifact's source.
+ *
+ * Cached separately from the list, and for longer: the list changes when
+ * something is imported or deleted, while an artifact's bytes never change at
+ * all — nothing in this application rewrites one.
+ */
+export function useArtifactSource(id: string | null): UseQueryResult<string> {
+  return useQuery({
+    queryKey: keys.artifactSource(id ?? ''),
+    queryFn: ({ signal }) => fetchArtifactSource(id as string, signal),
+    enabled: id !== null,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
 /* --- writes -------------------------------------------------------------- */
 
 /**
@@ -252,6 +262,16 @@ export function useRenameConversation(): UseMutationResult<
     onSuccess: (detail) => {
       client.setQueryData(keys.conversation(detail.id), detail);
       void client.invalidateQueries({ queryKey: keys.conversations() });
+    },
+  });
+}
+
+export function useDeleteArtifact(): UseMutationResult<void, Error, string> {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteArtifact(id),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: keys.artifacts() });
     },
   });
 }

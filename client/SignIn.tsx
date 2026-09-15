@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { LogIn, UserPlus } from 'lucide-react';
-import type { UserDto } from '@shared/auth.ts';
+import type { UserDto } from '@shared/auth';
 import { ApiError, login, register, setCsrfToken } from './api.ts';
 
 export interface SignInProps {

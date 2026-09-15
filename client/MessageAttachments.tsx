@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { FileText, ImageOff } from 'lucide-react';
-import { formatSize } from '@shared/attachment.ts';
+import { formatSize } from '@shared/attachment';
 import { ApiError, attachmentContentUrl, getAttachment } from './api.ts';
 
 /**

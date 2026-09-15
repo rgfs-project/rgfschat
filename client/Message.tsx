@@ -1,11 +1,11 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, Copy, Pencil, RefreshCw, Trash2 } from 'lucide-react';
-import type { Message as MessageModel, MessageStatus } from '@shared/conversation.ts';
-import { artifactId, extractCodeBlocks } from '@shared/artifact.ts';
-import { ArtifactOpenContext, type OpenArtifact } from './artifactContext.ts';
+import type { Message as MessageModel, MessageStatus } from '@shared/conversation';
 import { Markdown } from './Markdown.tsx';
+import { failureMessage } from './failureMessage.ts';
+import { useCopy } from './useCopy.ts';
+import { exactTime, relativeTime } from './relativeTime.ts';
 import { MessageAttachments } from './MessageAttachments.tsx';
-import { formatRelativeTime } from './relativeTime.ts';
 
 /**
  * One turn in the transcript.
@@ -40,8 +40,6 @@ export interface MessageProps {
   onEdit: (messageId: string, body: string, resend: boolean) => void;
   onDelete: (messageId: string) => void;
   onRegenerate: () => void;
-  /** Opens one of this message's code blocks in the artifact panel. */
-  onOpenArtifact?: (artifactId: string) => void;
 }
 
 export function Message({
@@ -53,43 +51,39 @@ export function Message({
   onEdit,
   onDelete,
   onRegenerate,
-  onOpenArtifact,
 }: MessageProps): React.JSX.Element {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(message.body);
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopy();
 
   /*
-   * Resolves a rendered block back to its address within this message.
+   * Computed as the row renders rather than kept ticking on a timer.
    *
-   * The renderer knows the text of the block it drew but not its position, and
-   * this is the only place that has both: the body it was drawn from, and the
-   * id of the message it belongs to.
+   * A timer would have to re-render every message in the transcript once a
+   * minute to keep "4 minutes ago" honest, and the row it would be correcting
+   * is only on screen while the pointer is on the message — by which time any
+   * of the things a reader does (send, scroll into a new query, switch chats)
+   * has re-rendered it anyway. The `title` carries the exact time for when the
+   * relative one is not precise enough to settle a question.
    */
-  const openArtifact = useMemo<OpenArtifact>(() => {
-    if (onOpenArtifact === undefined) return null;
-    return (code: string) => {
-      const block = extractCodeBlocks(message.body).find((candidate) => candidate.code === code);
-      if (block === undefined) return;
-      onOpenArtifact(artifactId(message.id, block.ordinal));
-    };
-  }, [onOpenArtifact, message.body, message.id]);
-
-  /** Copies the message as it was written, not as it was rendered. */
-  const copy = (): void => {
-    void navigator.clipboard
-      .writeText(message.body)
-      .then(() => {
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1500);
-      })
-      .catch(() => undefined);
-  };
+  const sentAt = message.type === 'system' ? undefined : message.time;
+  const sentLabel = relativeTime(sentAt);
 
   const status = message.type === 'assistant' ? message.status : undefined;
   const statusLabel = status === undefined ? undefined : STATUS_LABEL[status];
+  /*
+   * The outcome, and under it what went wrong.
+   *
+   * The label alone says a reply did not finish; the reason says whether that
+   * is worth retrying. A reply stored before the reason was recorded, or one
+   * whose failure the server could not classify, keeps the label on its own
+   * rather than gaining a sentence that explains nothing.
+   */
+  const reason =
+    message.type === 'assistant' && message.error !== undefined
+      ? failureMessage(message.error)
+      : undefined;
   const reasoning = message.type === 'assistant' ? message.reasoning : undefined;
-  const createdAt = message.type === 'system' ? undefined : message.createdAt;
 
   const save = (): void => {
     const next = draft.trim();
@@ -153,9 +147,7 @@ export function Message({
         <div className="msg__bubble">
           <MessageAttachments ids={message.attachments ?? []} />
           <div className="msg__body">
-            <ArtifactOpenContext.Provider value={openArtifact}>
-              <Markdown>{message.body}</Markdown>
-            </ArtifactOpenContext.Provider>
+            <Markdown>{message.body}</Markdown>
           </div>
         </div>
       ) : (
@@ -163,21 +155,28 @@ export function Message({
           {message.body === '' && statusLabel !== undefined ? (
             <p className="muted msg__empty">No output was produced.</p>
           ) : (
-            <ArtifactOpenContext.Provider value={openArtifact}>
-              <Markdown>{message.body}</Markdown>
-            </ArtifactOpenContext.Provider>
+            <Markdown>{message.body}</Markdown>
           )}
         </div>
       )}
 
-      {statusLabel !== undefined && <p className="msg__status">{statusLabel}</p>}
+      {statusLabel !== undefined && (
+        <p className="msg__status">
+          {statusLabel}
+          {reason !== undefined && <span className="msg__reason">{reason}</span>}
+        </p>
+      )}
 
       {!busy && (
         <div className="msg__actions">
-          {/* Absent on a message from before this existed (formatVersion 1)
-              rather than showing a fabricated or misleading time. */}
-          {createdAt !== undefined && (
-            <span className="msg__time">{formatRelativeTime(createdAt)}</span>
+          {/* Leads the row: it says something about the message, where the rest
+              of the row acts on it, and a reader following the column of times
+              down a conversation should not have to find them at a different
+              offset under every message. */}
+          {sentAt !== undefined && sentLabel !== undefined && (
+            <time className="msg__time" dateTime={sentAt} title={exactTime(sentAt)}>
+              {sentLabel}
+            </time>
           )}
 
           {message.type === 'user' && (
@@ -207,17 +206,19 @@ export function Message({
           )}
 
           {/* On both sides: wanting a copy of what you asked is as ordinary as
-              wanting a copy of the answer. */}
+              wanting a copy of the answer. It sits second on both, so the one
+              control that differs between a question and an answer is the one
+              in the position that differs — and copy and delete stay where the
+              hand left them when the eye moves down the transcript. */}
           <button
             type="button"
             className="icon-button"
             aria-label={copied ? 'Copied' : 'Copy message'}
             title={copied ? 'Copied' : 'Copy'}
-            onClick={copy}
+            onClick={() => copy(message.body)}
           >
             {copied ? <Check size={15} /> : <Copy size={15} />}
           </button>
-
           <button
             type="button"
             className="icon-button"

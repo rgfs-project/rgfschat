@@ -166,6 +166,38 @@ describe('resolving for a prompt', () => {
     expect(resolved.get(meta.id)?.content).toMatch(/^data:image\/png;base64,/);
   });
 
+  /*
+   * The budget charges an image by its area, so the area has to survive
+   * resolution. Without it every picture was charged a flat rate, a large
+   * screenshot went out weighing several times what it was billed, and the
+   * provider ran out of context part-way through the reply.
+   */
+  it("reports an image's area, so the budget can charge it what it costs", async () => {
+    const { meta } = await attachments.create(USER, 'wide.png', once(pngBytes(1920, 1080)));
+    const { id } = await conversationWith([meta.id]);
+    const conversation = await store.load(USER, id);
+
+    const resolved = await resolveAttachments(attachments, USER, conversation, {
+      maxInlineChars: 100,
+      modalities: ['text', 'image', 'audio'],
+    });
+
+    expect(resolved.get(meta.id)?.pixels).toBe(1920 * 1080);
+  });
+
+  it('leaves the area off a text attachment, which has no area to report', async () => {
+    const { meta } = await attachments.create(USER, 'log.txt', once(utf8('hello')));
+    const { id } = await conversationWith([meta.id]);
+    const conversation = await store.load(USER, id);
+
+    const resolved = await resolveAttachments(attachments, USER, conversation, {
+      maxInlineChars: 100,
+      modalities: ['text', 'image', 'audio'],
+    });
+
+    expect(resolved.get(meta.id)?.pixels).toBeUndefined();
+  });
+
   it('skips images entirely for a model that cannot see', async () => {
     const { meta } = await attachments.create(USER, 'photo.png', once(PNG));
     const { id } = await conversationWith([meta.id]);

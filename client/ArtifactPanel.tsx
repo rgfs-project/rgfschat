@@ -1,20 +1,21 @@
-import { useState } from 'react';
+import { useEffect } from 'react';
 import { Check, Copy, Download, X } from 'lucide-react';
-import type { ArtifactDto } from '@shared/artifact.ts';
+import { ARTIFACT_LANGUAGE, type ArtifactDto } from '@shared/artifact';
+import { useArtifactSource } from './queries.ts';
+import { useCopy } from './useCopy.ts';
 
 /**
- * One artifact, open beside the conversation it came from.
+ * One artifact, open beside the conversation.
  *
- * A panel rather than a dialog: it is read *against* the transcript — scrolled
- * through while the reply that produced it is still on screen — so it must not
- * trap focus or cover what it refers to. On a narrow window there is no room
- * for two columns and the stylesheet gives it the whole width, which is the
- * only place it behaves like a sheet.
+ * A panel rather than a dialog because an artifact is read *against* the
+ * transcript that produced it: the question that asked for it and the file
+ * that answered belong on screen together, and a dialog would cover the half
+ * that gives the other half its meaning.
  *
- * The code is rendered as text and never as markup. This is model output: the
- * `<pre><code>` here is the same treatment the transcript gives it (INV-22),
- * and downloading goes through the server route, which serves it as a plain-text
- * attachment rather than as anything a browser would run.
+ * Source, not a rendering. An artifact is usually HTML, and rendering one
+ * means running somebody's script; showing what it says needs neither a frame
+ * nor a relaxed policy, and it is what a reader wants most of the time anyway
+ * — the artifact is a file they are working on.
  */
 
 export interface ArtifactPanelProps {
@@ -23,53 +24,68 @@ export interface ArtifactPanelProps {
 }
 
 export function ArtifactPanel({ artifact, onClose }: ArtifactPanelProps): React.JSX.Element {
-  const [copied, setCopied] = useState(false);
+  const source = useArtifactSource(artifact.id);
+  const { copied, copy } = useCopy();
 
-  const copy = (): void => {
-    void navigator.clipboard
-      .writeText(artifact.code)
-      .then(() => {
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1500);
-      })
-      .catch(() => undefined);
+  // Escape closes it, as it closes every other layer in the application. The
+  // panel does not trap focus: unlike a dialog, what is behind it stays usable.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  /**
+   * Saved through a blob of our own rather than by linking at the source route.
+   *
+   * The route deliberately serves `text/plain` so that nothing a browser does
+   * with an artifact depends on the artifact's own type. A download should
+   * still land under the name and extension the reader expects, and building
+   * the blob here is what separates those two concerns.
+   */
+  const download = (): void => {
+    const text = source.data;
+    if (text === undefined) return;
+
+    const url = URL.createObjectURL(new Blob([text], { type: artifact.mediaType }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = artifact.name;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
-  const downloadHref = `/api/conversations/${encodeURIComponent(
-    artifact.conversationId
-  )}/artifacts/${encodeURIComponent(artifact.id)}/download`;
-
   return (
-    <aside className="artifact" aria-label={`Artifact: ${artifact.title}`}>
-      <div className="artifact__head">
-        <div className="artifact__heading">
-          <h2 className="artifact__title">{artifact.title}</h2>
-          <p className="artifact__kind muted">{artifact.language ?? 'text'}</p>
+    <aside className="artifact-panel" aria-label={`Artifact: ${artifact.name}`}>
+      <header className="artifact-panel__head">
+        <div className="artifact-panel__title">
+          <h2>{artifact.name}</h2>
+          <p className="artifact-panel__lang">{ARTIFACT_LANGUAGE[artifact.mediaType]}</p>
         </div>
 
-        <div className="artifact__actions">
+        <div className="artifact-panel__actions">
           <button
             type="button"
             className="icon-button"
-            onClick={copy}
-            aria-label={copied ? 'Copied' : 'Copy artifact'}
+            onClick={() => copy(source.data ?? '')}
+            disabled={source.data === undefined}
+            aria-label={copied ? 'Copied' : 'Copy source'}
             title={copied ? 'Copied' : 'Copy'}
           >
-            {copied ? <Check size={18} /> : <Copy size={18} />}
+            {copied ? <Check size={16} /> : <Copy size={16} />}
           </button>
-
-          {/* A real link, so it is a plain same-origin GET the browser saves —
-              no blob URL to fall foul of the app's own content policy. */}
-          <a
+          <button
+            type="button"
             className="icon-button"
-            href={downloadHref}
-            download
+            onClick={download}
+            disabled={source.data === undefined}
             aria-label="Download artifact"
             title="Download"
           >
-            <Download size={18} />
-          </a>
-
+            <Download size={16} />
+          </button>
           <button
             type="button"
             className="icon-button"
@@ -77,16 +93,27 @@ export function ArtifactPanel({ artifact, onClose }: ArtifactPanelProps): React.
             aria-label="Close artifact"
             title="Close"
           >
-            <X size={18} />
+            <X size={16} />
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* The <pre> scrolls, not the page — the same rule the transcript's code
-          blocks follow, and the reason a wide line cannot push the layout. */}
-      <pre className="artifact__code">
-        <code>{artifact.code}</code>
-      </pre>
+      {artifact.description !== undefined && (
+        <p className="artifact-panel__description">{artifact.description}</p>
+      )}
+
+      <div className="artifact-panel__body">
+        {source.isPending && <p className="muted">Loading…</p>}
+        {source.isError && (
+          <p className="muted">That artifact could not be read. It may have been deleted.</p>
+        )}
+        {source.data !== undefined && (
+          // The block scrolls in both directions; the panel itself does not.
+          <pre className="artifact-panel__source">
+            <code>{source.data}</code>
+          </pre>
+        )}
+      </div>
     </aside>
   );
 }

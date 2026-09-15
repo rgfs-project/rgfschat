@@ -1,4 +1,4 @@
-import { readdir, readFile, stat, unlink } from 'node:fs/promises';
+import { readdir, readFile, stat, unlink, utimes } from 'node:fs/promises';
 import { atomicWriteFile, ensureDir } from './atomic.ts';
 import { isMemoryName, type StoragePaths } from './paths.ts';
 import { AppError } from '../errors/AppError.ts';
@@ -79,7 +79,24 @@ export class MemoryStore {
    * so the last memory that fits is accepted and the one that would not is
    * refused — rather than the store silently exceeding its cap by one note.
    */
-  async write(userId: string, name: string, content: string): Promise<Memory> {
+  async write(
+    userId: string,
+    name: string,
+    content: string,
+    options: {
+      /**
+       * When this note was last changed, if that is known to be something
+       * other than now.
+       *
+       * An import carries the time the memory was actually written, and a list
+       * that stamps every imported note with the minute of the import loses
+       * the only ordering it had. Applied to the file's mtime because that is
+       * where `updatedAt` is read from — one source of truth, so a memory
+       * edited by hand outside this application still reports honestly.
+       */
+      modifiedAt?: string | undefined;
+    } = {}
+  ): Promise<Memory> {
     if (!isMemoryName(name)) {
       throw AppError.validation(
         'A memory name is lowercase letters, digits and hyphens, up to 64 characters.'
@@ -102,7 +119,16 @@ export class MemoryStore {
     }
 
     await ensureDir(this.#paths.memoriesDir(userId));
-    await atomicWriteFile(this.#paths.memoryFile(userId, name), content);
+    const file = this.#paths.memoryFile(userId, name);
+    await atomicWriteFile(file, content);
+
+    if (options.modifiedAt !== undefined) {
+      const at = new Date(options.modifiedAt);
+      // An unparseable timestamp leaves the write alone rather than failing it:
+      // the note is worth more than its date.
+      if (!Number.isNaN(at.getTime())) await utimes(file, at, at).catch(() => undefined);
+    }
+
     this.#logger.info('Memory written', { userId, name, bytes });
 
     return (await this.read(userId, name)) ?? { name, content, updatedAt: '', bytes };

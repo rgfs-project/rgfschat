@@ -1,7 +1,8 @@
 import { parseDocument, type Document } from 'yaml';
+import { ERROR_CODES } from '@shared/errors.ts';
 import {
   FORMAT_VERSION,
-  MIN_READABLE_FORMAT_VERSION,
+  MAX_READABLE_FORMAT_VERSION,
   MESSAGE_STATUSES,
   isCanonicalTimestamp,
   isCanonicalUuid,
@@ -40,26 +41,55 @@ const NEEDS_ESCAPE = /^\\*[ \t]*<!--[ \t]*cc:/;
 const MESSAGE_TYPES = ['system', 'user', 'reasoning', 'assistant'] as const;
 type BlockType = (typeof MESSAGE_TYPES)[number];
 
-const ATTRIBUTE_KEYS = ['id', 'status', 'provider', 'model', 'attachments', 'createdAt'] as const;
+const ATTRIBUTE_KEYS = [
+  'id',
+  'status',
+  'provider',
+  'model',
+  'attachments',
+  'time',
+  // The same field as `time`, under the name the parallel implementation of it
+  // used. Read, never written: it is normalised to `time` on the way in, so a
+  // file written by either build opens and every file written from here uses
+  // one spelling.
+  'createdAt',
+  'error',
+] as const;
 type AttributeKey = (typeof ATTRIBUTE_KEYS)[number];
 
 /**
  * Which attributes each type permits, and which are required (§3.4).
  *
- * `createdAt` is optional everywhere it is allowed, never required: a
- * `formatVersion: 1` file predates it and is still readable (§3.3), so a
- * block from one simply has no `createdAt` rather than failing to parse.
+ * `time` is optional everywhere it is allowed, never required: a file written
+ * before it existed simply has no `time` rather than failing to parse (§3.3),
+ * and `createdAt` is accepted in the same places for the same reason.
  */
 const ATTRIBUTE_RULES: Record<BlockType, { required: AttributeKey[]; optional: AttributeKey[] }> = {
   system: { required: ['id'], optional: [] },
-  user: { required: ['id'], optional: ['attachments', 'createdAt'] },
+  user: { required: ['id'], optional: ['attachments', 'time', 'createdAt'] },
   reasoning: { required: ['id'], optional: [] },
-  assistant: { required: ['id', 'status'], optional: ['provider', 'model', 'createdAt'] },
+  // `time` sits on the assistant block, not on the reasoning block that may
+  // precede it: the two are one turn and share a single instant.
+  // `error` is assistant-only: nothing else in the format can fail.
+  assistant: {
+    required: ['id', 'status'],
+    optional: ['provider', 'model', 'time', 'createdAt', 'error'],
+  },
 };
 
 interface ParsedDelimiter {
   type: BlockType;
   attributes: Map<AttributeKey, string>;
+}
+
+/**
+ * When a message was sent, under either of the two names it has been given.
+ *
+ * `time` wins where a file somehow carries both — it is the one this build
+ * writes, so it is the one that was written last.
+ */
+function messageTime(attributes: Map<AttributeKey, string>): string | undefined {
+  return attributes.get('time') ?? attributes.get('createdAt');
 }
 
 // ---------------------------------------------------------------------------
@@ -202,6 +232,19 @@ function validateAttributes(
     return { ok: false, reason: `invalid status "${status}"`, line };
   }
 
+  const error = attributes.get('error');
+  if (error !== undefined && !(ERROR_CODES as readonly string[]).includes(error)) {
+    return { ok: false, reason: `invalid error code "${error}"`, line };
+  }
+  if (error !== undefined && attributes.get('status') === 'complete') {
+    return { ok: false, reason: 'a complete message cannot carry an error', line };
+  }
+
+  const time = attributes.get('time');
+  if (time !== undefined && !isCanonicalTimestamp(time)) {
+    return { ok: false, reason: 'time is not a canonical timestamp', line };
+  }
+
   const attachments = attributes.get('attachments');
   if (attachments !== undefined) {
     const ids = attachments.split(',');
@@ -289,12 +332,15 @@ function parseFrontMatter(
   const data = doc.toJS() as Record<string, unknown>;
 
   const version = data['formatVersion'];
-  if (version !== MIN_READABLE_FORMAT_VERSION && version !== FORMAT_VERSION) {
+  if (version !== FORMAT_VERSION && version !== MAX_READABLE_FORMAT_VERSION) {
     // No implicit migration beyond the readable range: any other value is
-    // malformed (§3.3). `1` is still read — see the note on `createdAt`.
+    // malformed (§3.3). `2` is read as well as written-in-`1` because the
+    // parallel implementation of per-message time bumped the version to carry
+    // it; such a file is read and written back out as `1`, since the attribute
+    // it added never needed the bump.
     return {
       ok: false,
-      reason: `formatVersion must be the integer ${MIN_READABLE_FORMAT_VERSION} or ${FORMAT_VERSION}`,
+      reason: `formatVersion must be the integer ${FORMAT_VERSION} or ${MAX_READABLE_FORMAT_VERSION}`,
       line: 2,
     };
   }
@@ -416,8 +462,8 @@ export function parseConversation(input: string): ParseResult {
           type: 'user',
           id,
           ...(attachments !== undefined ? { attachments: attachments.split(',') } : {}),
-          ...(attributes.has('createdAt')
-            ? { createdAt: attributes.get('createdAt') as string }
+          ...(messageTime(attributes) !== undefined
+            ? { time: messageTime(attributes) as string }
             : {}),
           body,
         });
@@ -431,9 +477,10 @@ export function parseConversation(input: string): ParseResult {
           ...(attributes.has('provider') ? { provider: attributes.get('provider') as string } : {}),
           ...(attributes.has('model') ? { model: attributes.get('model') as string } : {}),
           ...(pendingReasoning !== null ? { reasoning: pendingReasoning.body } : {}),
-          ...(attributes.has('createdAt')
-            ? { createdAt: attributes.get('createdAt') as string }
+          ...(messageTime(attributes) !== undefined
+            ? { time: messageTime(attributes) as string }
             : {}),
+          ...(attributes.has('error') ? { error: attributes.get('error') as string } : {}),
           body,
         };
         pendingReasoning = null;
@@ -514,7 +561,9 @@ export function serializeConversation(conversation: Conversation): string {
       blocks.push(block(delimiterFor('reasoning', [['id', message.id]]), message.reasoning));
     }
 
-    // Canonical attribute order: id, status, provider, model, attachments, createdAt.
+    // Canonical attribute order: id, status, provider, model, attachments, time,
+    // error. `createdAt` is not written: it is read as another spelling of
+    // `time` and normalised to it (see ATTRIBUTE_KEYS).
     const attributes: [AttributeKey, string][] = [['id', message.id]];
     if (message.type === 'assistant') {
       attributes.push(['status', message.status]);
@@ -524,8 +573,15 @@ export function serializeConversation(conversation: Conversation): string {
     if (message.type === 'user' && message.attachments !== undefined) {
       attributes.push(['attachments', quote(message.attachments.join(','))]);
     }
-    if (message.type !== 'system' && message.createdAt !== undefined) {
-      attributes.push(['createdAt', quote(message.createdAt)]);
+    // Quoted, not bare: a canonical timestamp contains `:`, which is not in the
+    // BARE character set.
+    if (message.type !== 'system' && message.time !== undefined) {
+      attributes.push(['time', quote(message.time)]);
+    }
+    // Bare: an error code is upper-case letters and underscores, all of which
+    // the BARE alphabet admits.
+    if (message.type === 'assistant' && message.error !== undefined) {
+      attributes.push(['error', message.error]);
     }
 
     blocks.push(block(delimiterFor(message.type, attributes), message.body));

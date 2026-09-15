@@ -127,7 +127,9 @@ body {
 
 /* The main column follows it on a wide window, at the same rate. */
 .main {
-  transition: padding-left var(--motion) var(--ease-out);
+  transition:
+    padding-left var(--motion) var(--ease-out),
+    padding-right var(--motion) var(--ease-out);
 }
 
 .sidebar__brand,
@@ -303,6 +305,71 @@ body {
  */
 .shell[data-sidebar='expanded']:not([data-narrow='true']) .main {
   padding-left: var(--sidebar-width);
+}
+
+/* --- the artifact panel -------------------------------------------------- */
+
+/*
+ * An artifact, open beside the conversation that produced it.
+ *
+ * Positioned against the shell rather than laid out inside `main`, for the
+ * reason the sidebar is: `main` is the scroll container for the transcript, and
+ * making it a row would mean the transcript and the panel fighting over one
+ * height. The panel takes its width off the main column's right-hand padding
+ * instead, exactly as the sidebar takes its own off the left.
+ */
+:root {
+  --artifact-width: 32rem;
+}
+
+.artifact-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 12;
+  width: min(var(--artifact-width), 100%);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  animation: artifact-in var(--motion) var(--ease-out);
+}
+
+.main--with-artifact {
+  padding-right: min(var(--artifact-width), 100%);
+}
+
+/*
+ * On a narrow window it covers the conversation instead of sitting beside it.
+ *
+ * There is not room for both, and a 32rem panel on a phone would leave the
+ * transcript as a sliver — which is worse than being covered, because a sliver
+ * looks like it is still meant to be read.
+ */
+@media (max-width: 60rem) {
+  .main--with-artifact {
+    padding-right: 0;
+  }
+
+  .artifact-panel {
+    width: 100%;
+    border-left: none;
+  }
+}
+
+@keyframes artifact-in {
+  from {
+    transform: translateX(1rem);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artifact-panel {
+    animation: none;
+  }
 }
 
 /* Dismisses the drawer, and dims what it is covering so it reads as temporary. */

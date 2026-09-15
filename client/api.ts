@@ -1,8 +1,8 @@
-import type { ArtifactSummary } from '@shared/artifact.ts';
-import type { AttachmentDto } from '@shared/attachment.ts';
-import type { HealthDto } from '@shared/api.ts';
-import type { GenerationAcceptedDto, GenerationSnapshotDto } from '@shared/generation.ts';
-import type { Message } from '@shared/conversation.ts';
+import type { ArtifactDto } from '@shared/artifact';
+import type { AttachmentDto } from '@shared/attachment';
+import type { HealthDto } from '@shared/api';
+import type { GenerationAcceptedDto, GenerationSnapshotDto } from '@shared/generation';
+import type { Message } from '@shared/conversation';
 
 export interface ConversationSummary {
   id: string;
@@ -29,9 +29,9 @@ export interface ConversationDetail {
    */
   activeGenerationId: string | null;
 }
-import { isErrorCode, type ErrorCode } from '@shared/errors.ts';
-import type { SamplerSettings } from '@shared/generation.ts';
-import type { SessionDto, UserDto } from '@shared/auth.ts';
+import { isErrorCode, type ErrorCode } from '@shared/errors';
+import type { SamplerSettings } from '@shared/generation';
+import type { SessionDto, UserDto } from '@shared/auth';
 
 export class ApiError extends Error {
   readonly code: ErrorCode | 'NETWORK';
@@ -262,21 +262,6 @@ export async function listConversations(signal?: AbortSignal): Promise<Conversat
   return conversations;
 }
 
-/**
- * Every code block across the reader's conversations.
- *
- * Only summaries: the code itself is not carried here, because the gallery
- * shows names and the panel reads the block out of the conversation it already
- * has loaded.
- */
-export async function listArtifacts(signal?: AbortSignal): Promise<ArtifactSummary[]> {
-  const { artifacts } = await request<{ artifacts: ArtifactSummary[] }>(
-    '/api/artifacts',
-    signalInit(signal)
-  );
-  return artifacts;
-}
-
 export function pinConversation(id: string, pinned: boolean): Promise<{ pinned: boolean }> {
   return request<{ pinned: boolean }>(`/api/conversations/${id}/pin`, {
     method: 'PUT',
@@ -421,6 +406,45 @@ export async function deleteMyMemory(name: string): Promise<void> {
   if (response.status === 204) return;
   const body: unknown = await response.json().catch(() => null);
   throw readErrorBody(body) ?? new ApiError('INTERNAL', 'Could not delete the memory.');
+}
+
+/* --- artifacts ----------------------------------------------------------- */
+
+export async function fetchArtifacts(signal?: AbortSignal): Promise<ArtifactDto[]> {
+  const { artifacts } = await request<{ artifacts: ArtifactDto[] }>(
+    '/api/artifacts',
+    signalInit(signal)
+  );
+  return artifacts;
+}
+
+/**
+ * An artifact's source.
+ *
+ * Not `request`, because the server sends this one as plain text rather than
+ * as JSON — deliberately, so that an artifact's own media type never decides
+ * how a browser treats its bytes.
+ */
+export async function fetchArtifactSource(id: string, signal?: AbortSignal): Promise<string> {
+  const response = await fetch(`/api/artifacts/${encodeURIComponent(id)}/source`, {
+    headers: { Accept: 'text/plain' },
+    ...signalInit(signal),
+  });
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    throw readErrorBody(body) ?? new ApiError('INTERNAL', 'Could not read the artifact.');
+  }
+  return response.text();
+}
+
+export async function deleteArtifact(id: string): Promise<void> {
+  const response = await fetch(`/api/artifacts/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json', ...csrfHeader() },
+  });
+  if (response.status === 204) return;
+  const body: unknown = await response.json().catch(() => null);
+  throw readErrorBody(body) ?? new ApiError('INTERNAL', 'Could not delete the artifact.');
 }
 
 export interface SearchHit {
