@@ -108,9 +108,16 @@ const components: Components = {
   },
 
   table({ children }) {
-    // Wide tables scroll inside their own container, never the page.
+    /*
+     * Wide tables scroll inside their own container, never the page.
+     *
+     * The wrapper is a labelled, focusable region rather than a plain div: a
+     * region that scrolls only by dragging its scrollbar is unusable from a
+     * keyboard, and `tabIndex` is what lets the arrow keys reach it. The label
+     * is what stops that tab stop being an unexplained one.
+     */
     return (
-      <div className="table-scroll">
+      <div className="table-scroll" tabIndex={0} role="region" aria-label="Table">
         <table>{children}</table>
       </div>
     );

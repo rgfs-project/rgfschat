@@ -912,17 +912,41 @@
   white-space: pre;
 }
 
-/* Wide tables scroll inside their own container. */
+/*
+ * Wide tables scroll inside their own container, never the page.
+ *
+ * `scrollbar-gutter` keeps the bar's space reserved rather than letting an
+ * overlay scrollbar appear only on hover: a table that scrolls sideways has to
+ * *say* so, or the columns past the edge are simply invisible. The wrapper is
+ * focusable for the same reason — a scrollable region reachable only by
+ * dragging is not reachable at all without a mouse.
+ */
 .table-scroll {
   overflow-x: auto;
+  scrollbar-gutter: stable;
   margin: 0 0 1rem;
   border: 1px solid var(--border);
   border-radius: 0.625rem;
 }
 
+.table-scroll:focus-visible {
+  outline: 2px solid var(--border-strong);
+  outline-offset: 2px;
+}
+
+/*
+ * Sized to its contents, and at least as wide as the message.
+ *
+ * `width: 100%` squeezed every column into the message's width however much
+ * was in them, and with the `word-break: break-word` inherited from `.markdown`
+ * the result was headings chopped mid-word — "Architect / ures" — in columns
+ * two characters wider than they needed to be. Growing past the edge and
+ * scrolling is the honest answer: the wrapper above is what it scrolls in.
+ */
 .markdown table {
   border-collapse: collapse;
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   font-size: 0.9375rem;
 }
 
@@ -932,6 +956,29 @@
   padding: 0.625rem 0.875rem;
   text-align: left;
   vertical-align: top;
+  /*
+   * Ordinary words are never broken: `word-break: normal` undoes the
+   * transcript-wide rule, and `overflow-wrap: break-word` steps in only for a
+   * word that cannot fit on a line of its own — a hash, a URL, an identifier —
+   * which is the case the rule was there for.
+   */
+  word-break: normal;
+  overflow-wrap: break-word;
+  /* Wide enough that a label wraps at a space rather than inside a word, and
+     bounded so one long cell cannot drag the table out to an absurd width. */
+  min-width: 7rem;
+  max-width: 24rem;
+}
+
+/* A phone has no room for a 7rem minimum in three columns; the wrapper still
+   scrolls, and the padding stays readable rather than being squeezed away. */
+@media (max-width: 30rem) {
+  .markdown th,
+  .markdown td {
+    min-width: 5.5rem;
+    max-width: 16rem;
+    padding: 0.5rem 0.625rem;
+  }
 }
 
 .markdown th {
