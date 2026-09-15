@@ -1982,6 +1982,15 @@ button.linkish:hover {
   .empty-state h2 {
     font-size: 1.875rem;
   }
+
+  /* Always visible here (never hover-revealed — there is no hover), so it
+     has to sit in normal document flow instead of floating over whatever
+     comes next: absolutely positioned and permanently on, it overlapped the
+     following message instead of pushing it down. */
+  .msg__actions {
+    position: static;
+    margin-top: 0.5rem;
+  }
 }
 
 @media (pointer: coarse) {
