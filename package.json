@@ -25,6 +25,7 @@
     "probe:provider": "tsx --env-file-if-exists=.env scripts/probe-provider.ts",
     "index:rebuild": "node scripts/rebuild-index.mjs",
     "user:create": "tsx --env-file-if-exists=.env server/scripts/createUser.ts",
+    "user:password": "tsx --env-file-if-exists=.env server/scripts/setPassword.ts",
     "import:claude": "tsx --env-file-if-exists=.env server/scripts/importClaudeExport.ts",
     "test:e2e": "npm run build && playwright test",
     "test:e2e:container": "E2E_CONTAINER_IMAGE=${E2E_CONTAINER_IMAGE:-ghcr.io/rgfs-project/rgfschat:latest} playwright test",
