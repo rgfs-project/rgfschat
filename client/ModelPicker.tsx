@@ -207,7 +207,7 @@ export function ModelPicker({
                       <span className="model-option__tags">stale</span>
                     )}
 
-                    {isSelected && <Check size={15} className="model-option__check" />}
+                    {isSelected && <Check size={16} className="model-option__check" />}
                   </button>
                 );
               })}

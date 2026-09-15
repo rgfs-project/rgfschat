@@ -165,7 +165,7 @@ export function Select({
         aria-label={label}
       >
         <span className="select__value">{selected?.label ?? ''}</span>
-        <ChevronDown size={15} className="select__chevron" />
+        <ChevronDown size={16} className="select__chevron" />
       </button>
 
       {open &&

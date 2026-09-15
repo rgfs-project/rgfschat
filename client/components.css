@@ -651,11 +651,11 @@
 .model-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.375rem 0.5rem;
-  border-radius: 0.5rem;
-  color: var(--muted);
-  font-size: 0.8125rem;
+  gap: 0.375rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  color: var(--text-soft);
+  font-size: 0.84375rem;
 }
 
 .model-trigger {
@@ -666,7 +666,7 @@
 }
 
 .model-trigger:hover:not(:disabled) {
-  background: var(--surface-2);
+  background: var(--hover);
   color: var(--text);
 }
 
@@ -679,12 +679,12 @@
 .model-menu {
   position: fixed;
   z-index: 100;
-  width: 20rem;
+  width: 22.25rem;
   max-width: calc(100vw - 2rem);
   background: var(--raised);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
+  box-shadow: var(--shadow-pop);
   overflow: hidden;
   animation: rise-in var(--motion) var(--ease-out);
 }
@@ -692,10 +692,10 @@
 .model-menu__search {
   display: flex;
   align-items: center;
-  gap: 0.625rem;
-  padding: 0.5rem 0.625rem;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
   border-bottom: 1px solid var(--border);
-  color: var(--muted);
+  color: var(--faint);
 }
 
 .model-menu__search input {
@@ -704,20 +704,21 @@
   border: none;
   background: none;
   outline: none;
-  font-size: 0.8125rem;
+  font-size: 0.84375rem;
 }
 
 .model-menu__list {
-  max-height: 18rem;
+  max-height: 20rem;
   overflow-y: auto;
-  padding: 0.25rem;
+  padding: 0.25rem 0;
 }
 
 .model-menu__empty {
-  padding: 0.875rem;
+  padding: 0.75rem 0.875rem;
   margin: 0;
   text-align: center;
   font-size: 0.8125rem;
+  color: var(--faint);
 }
 
 .model-option {
@@ -726,8 +727,8 @@
   gap: 0.5rem;
   width: 100%;
   text-align: left;
-  padding: 0.5rem 0.625rem;
-  font-size: 0.8125rem;
+  padding: 0.625rem 0.875rem;
+  font-size: 0.875rem;
   color: var(--text);
 }
 
@@ -737,11 +738,10 @@
 
 .model-option:hover,
 .model-option[aria-selected='true'] {
-  background: var(--surface-2);
+  background: var(--hover);
 }
 
 .model-option__name {
-  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -749,8 +749,8 @@
 
 .model-option__tags,
 .model-option__provider {
-  color: var(--muted);
-  font-size: 0.6875rem;
+  color: var(--faint);
+  font-size: 0.75rem;
   flex: none;
 }
 
@@ -1098,7 +1098,7 @@ button.linkish:hover {
   background: var(--raised);
   border: 1px solid var(--border);
   border-radius: 0.75rem;
-  box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
+  box-shadow: var(--shadow-pop);
   animation: scale-in var(--motion-fast) var(--ease-out);
 }
 
@@ -2044,44 +2044,12 @@ button.linkish:hover {
 
 @media (max-width: 56rem) {
   /*
-   * The model picker becomes a sheet at the bottom of the screen — it is a
-   * long, searchable list, which a phone reads better anchored to the thumb
-   * than floating over the transcript.
-   *
-   * The conversation and account menus are deliberately excluded: they stay
-   * the same compact, anchored popover at every width. `Menu`'s own placement
-   * logic already clamps them on-screen, and a bottom sheet is the wrong
-   * shape for four short actions.
-   *
-   * `position: fixed` with the inline offsets overridden: this is portalled
-   * and carries a computed `left`/`top` as inline style, which `inset` alone
-   * would not beat — hence `!important` here and nowhere else in this file.
+   * The model picker stays the same compact, anchored popover as the
+   * conversation and account menus at every width — like the admin and
+   * settings panes, it reads as its own floating surface rather than as the
+   * screen itself. Select's own placement logic already clamps it on-screen,
+   * the same way Menu does for the other two.
    */
-  .model-menu {
-    position: fixed !important;
-    inset: auto 0 0 0 !important;
-    width: auto !important;
-    max-width: none;
-    max-height: 70dvh;
-    border-radius: var(--radius) var(--radius) 0 0;
-    border-bottom: none;
-    padding-bottom: var(--safe-bottom);
-    animation: sheet-in var(--motion) var(--ease-out);
-  }
-
-  .model-menu__list {
-    /* The sheet owns the height now; an inner cap would scroll twice. */
-    max-height: none;
-  }
-
-  @keyframes sheet-in {
-    from {
-      transform: translateY(100%);
-    }
-    to {
-      transform: none;
-    }
-  }
 
   /*
    * Dialogs sit against the bottom too, for the same reason, but keep their

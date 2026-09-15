@@ -41,6 +41,8 @@
   --danger: #9a3f36;
   --danger-bg: #f9eeec;
   --danger-border: #e2c3bf;
+  --ok: #3f7a4f;
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.12);
   --accent: #121212;
   --on-accent: #ffffff;
 
@@ -160,6 +162,8 @@
   --danger: #e0837c;
   --danger-bg: #170d0c;
   --danger-border: #3a201e;
+  --ok: #6fbf83;
+  --shadow-pop: 0 8px 24px rgb(0 0 0 / 0.6);
   --accent: #f2f2f2;
   --on-accent: #0a0a0a;
 }
