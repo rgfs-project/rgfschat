@@ -1,5 +1,5 @@
 import { hasSendableContent } from '@shared/conversation';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowUp, Plus, Square } from 'lucide-react';
 import type { ProviderModelGroup } from './api.ts';
 import { AttachmentChips } from './AttachmentChips.tsx';
@@ -37,7 +37,15 @@ export interface ComposerProps {
   modelHasVision?: boolean;
 }
 
-const MAX_ROWS_HEIGHT_PX = 200;
+/**
+ * How tall the field may grow before it scrolls itself.
+ *
+ * Past this the composer would be eating the transcript, which is the thing
+ * being written *about*. Deliberately a pixel count rather than a row count:
+ * rows assume a line height the font may not have, and the measurement below
+ * is of the text that is actually there.
+ */
+const MAX_HEIGHT_PX = 200;
 
 export function Composer({
   value,
@@ -56,15 +64,62 @@ export function Composer({
   const filePicker = useRef<HTMLInputElement | null>(null);
   const [dragging, setDragging] = useState(false);
 
-  // Grows with its content up to a cap, after which the field scrolls rather
-  // than pushing the transcript out of the way.
-  useEffect(() => {
+  /**
+   * Grows with its content up to a cap, after which the field scrolls.
+   *
+   * Measured rather than counted: the height is whatever the text actually
+   * occupies, which is the only thing that is right for a pasted paragraph, a
+   * font that loaded late, or a window the reader has just narrowed. Collapsing
+   * to `auto` first is what lets it shrink again — `scrollHeight` of a box
+   * already tall enough reports the box, not the text.
+   */
+  const measure = useCallback((): void => {
     const element = textarea.current;
     if (element === null) return;
 
     element.style.height = 'auto';
-    element.style.height = `${Math.min(element.scrollHeight, MAX_ROWS_HEIGHT_PX)}px`;
-  }, [value]);
+    const next = Math.min(element.scrollHeight, MAX_HEIGHT_PX);
+    element.style.height = `${next}px`;
+    // Only the capped field scrolls, so a field with room to grow cannot be
+    // left with a scroll position of its own.
+    element.style.overflowY = element.scrollHeight > MAX_HEIGHT_PX ? 'auto' : 'hidden';
+  }, []);
+
+  // In a layout effect so the height is right before the frame is painted: in
+  // a passive one the reader sees one frame of the wrong size on every keystroke
+  // that wraps a line.
+  useLayoutEffect(measure, [measure, value]);
+
+  /*
+   * The same measurement for everything that changes the width rather than the
+   * text: the window resizing, the sidebar opening, an attachment chip
+   * appearing above the field, the keyboard coming up on a phone. All of them
+   * re-wrap the text, and none of them change `value`.
+   */
+  useLayoutEffect(() => {
+    const element = textarea.current;
+    if (element === null || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [measure]);
+
+  /*
+   * And once more when the webfont arrives.
+   *
+   * The first measurement is taken in the fallback font, which is a different
+   * size; without this the field keeps that height until the next keystroke.
+   */
+  useLayoutEffect(() => {
+    let cancelled = false;
+    void document.fonts?.ready.then(() => {
+      if (!cancelled) measure();
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [measure]);
 
   const placeholder = selection === null ? 'Message…' : `Message ${selection.modelId}`;
 

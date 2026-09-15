@@ -559,9 +559,18 @@
   resize: none;
   font-size: 0.9375rem;
   line-height: 1.6;
-  /* Holds the box at the reference's resting height before any text is typed. */
+  /*
+   * One line, and no more, until something is typed.
+   *
+   * The resting composer is the most-seen piece of furniture in the app and it
+   * was holding two lines' worth of room for a field with nothing in it. The
+   * height is set from the text by the measurement in `Composer.tsx`; this is
+   * the floor it starts from and returns to when the field is emptied or a
+   * message is sent. The cap matches `MAX_HEIGHT_PX` there — past it the field
+   * scrolls rather than eating the transcript.
+   */
   padding: 0.25rem 0.5rem;
-  min-height: 2.125rem;
+  min-height: 1.75rem;
   max-height: 12.5rem;
   overflow-y: auto;
 }

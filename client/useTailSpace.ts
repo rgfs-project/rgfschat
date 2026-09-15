@@ -92,6 +92,23 @@ export function useTailSpace({ port, content, anchorId, adjustBy }: TailSpaceOpt
   }, [onResize]);
 
   /*
+   * The transcript can change height without the window doing anything.
+   *
+   * The composer grows as the reader types and shrinks when they send, and the
+   * transcript takes the difference — so the reserve computed against the old
+   * height is wrong, and the question it was holding in place moves. A window
+   * resize listener never hears about that; the box itself does.
+   */
+  useLayoutEffect(() => {
+    const scroller = port.current;
+    if (scroller === null || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(() => onResize());
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, [onResize, port]);
+
+  /*
    * Deliberately every render, with no dependency list.
    *
    * What is being measured is the rendered height of the last turn, which

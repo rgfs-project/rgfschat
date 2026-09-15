@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import type { AttachmentTray } from './useAttachments.ts';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Composer, type ComposerProps } from './Composer.tsx';
 
 /**
@@ -230,5 +230,155 @@ describe('sending an attachment with nothing typed', () => {
     setup({ value: '  ', attachments: tray() });
 
     expect(sendButton().disabled).toBe(true);
+  });
+});
+
+/**
+ * How tall the field is.
+ *
+ * Measured from the text rather than counted in rows: a row count assumes a
+ * line height the font may not have, and says nothing about a pasted
+ * paragraph, a window that has just narrowed, or a webfont that arrived after
+ * the first paint. jsdom lays nothing out, so `scrollHeight` — the one thing
+ * the measurement reads — is supplied here, and what is asserted is what the
+ * component does with it.
+ */
+describe('growing with what is typed', () => {
+  const LINE = 28;
+  let content = LINE;
+  let observers: (() => void)[] = [];
+  let original: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    content = LINE;
+    observers = [];
+    original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return this instanceof HTMLTextAreaElement ? content : 0;
+      },
+    });
+
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: () => void) {
+          observers.push(callback);
+        }
+        observe(): void {}
+        disconnect(): void {}
+      }
+    );
+  });
+
+  afterEach(() => {
+    if (original !== undefined) {
+      Object.defineProperty(HTMLElement.prototype, 'scrollHeight', original);
+    }
+    vi.unstubAllGlobals();
+  });
+
+  const heightOf = (textarea: HTMLTextAreaElement): number =>
+    Number.parseFloat(textarea.style.height);
+
+  it('rests at one line when there is nothing in it', () => {
+    const { textarea } = setup({ value: '' });
+
+    expect(heightOf(textarea)).toBe(LINE);
+    // Nothing to scroll, so nothing scrolls.
+    expect(textarea.style.overflowY).toBe('hidden');
+  });
+
+  it('is the same height for a single line of text', () => {
+    const { textarea } = setup({ value: 'hello' });
+
+    expect(heightOf(textarea)).toBe(LINE);
+  });
+
+  it('grows as the text wraps onto more lines', () => {
+    content = LINE * 3;
+    const { textarea } = setup({ value: 'a\nb\nc' });
+
+    expect(heightOf(textarea)).toBe(LINE * 3);
+  });
+
+  it('grows for pasted multiline text, not only for typing', () => {
+    content = LINE * 6;
+    const { textarea } = setup({ value: 'pasted\nover\nsix\nlines\nof\ntext' });
+
+    expect(heightOf(textarea)).toBe(LINE * 6);
+  });
+
+  it('stops at its maximum and scrolls inside itself', () => {
+    content = 900;
+    const { textarea } = setup({ value: 'a very long draft' });
+
+    expect(heightOf(textarea)).toBe(200);
+    expect(textarea.style.overflowY).toBe('auto');
+  });
+
+  it('shrinks again when the text is deleted', () => {
+    content = LINE * 4;
+    const { view, props, textarea } = setup({ value: 'four\nlines\nof\ntext' });
+    expect(heightOf(textarea)).toBe(LINE * 4);
+
+    content = LINE;
+    view.rerender(<Composer {...props} value="" />);
+
+    expect(heightOf(textarea)).toBe(LINE);
+    expect(textarea.style.overflowY).toBe('hidden');
+  });
+
+  /* Sending empties the field, which is the same path as deleting it all. */
+  it('returns to its resting height after a send', async () => {
+    const user = userEvent.setup();
+    content = LINE * 5;
+    const { view, props, textarea } = setup({ value: 'a draft\nover\nseveral\nlines\nhere' });
+
+    await user.click(textarea);
+    content = LINE;
+    await user.keyboard('{Enter}');
+    expect(props.onSend).toHaveBeenCalled();
+
+    // The shell clears the draft when the send is accepted.
+    view.rerender(<Composer {...props} value="" />);
+    expect(heightOf(textarea)).toBe(LINE);
+  });
+
+  /*
+   * A width change re-wraps the text without changing it: the window resizing,
+   * the sidebar opening, an attachment chip appearing above the field, a phone
+   * keyboard coming up. None of them touch `value`, so the observer is the only
+   * thing that hears about them.
+   */
+  it('re-measures when its box changes size but its text does not', () => {
+    const { textarea } = setup({ value: 'a line that will wrap when narrowed' });
+    expect(heightOf(textarea)).toBe(LINE);
+
+    content = LINE * 2;
+    for (const notify of observers) notify();
+
+    expect(heightOf(textarea)).toBe(LINE * 2);
+  });
+
+  it('keeps the attachment controls and send button in the same row as it grows', () => {
+    content = LINE * 5;
+    const { view } = setup({
+      value: 'tall',
+      attachments: {
+        items: [],
+        readyIds: [],
+        busy: false,
+        add: vi.fn(),
+        remove: vi.fn(),
+        clear: vi.fn(),
+        remaining: 10,
+      },
+    });
+
+    const bar = view.container.querySelector('.composer__bar');
+    expect(bar?.querySelector('[aria-label="Attach files"]')).not.toBeNull();
+    expect(bar?.querySelector('[aria-label="Send message"]')).not.toBeNull();
   });
 });
