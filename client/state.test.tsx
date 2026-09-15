@@ -404,6 +404,41 @@ describe('error boundaries', () => {
     expect(screen.getByRole('button', { name: 'New chat' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
   });
+
+  /**
+   * The other named region. A conversation summary with a non-string title
+   * makes the sidebar throw while rendering it as a JSX child, exactly as the
+   * malformed body does to the transcript above — and the blast radius should
+   * run the other way this time: the sidebar's own failure costs the sidebar,
+   * not the conversation already open beside it.
+   */
+  it('contains a sidebar failure without losing the open conversation', async () => {
+    mount();
+    await server.waitFor('/api/auth/session');
+    server.respond('/api/auth/session', sessionBody());
+    await server.waitFor('/api/conversations');
+    server.respond('/api/conversations', {
+      conversations: [
+        {
+          id: 'c1',
+          title: { not: 'a string' },
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          messageCount: 0,
+          malformed: false,
+        },
+      ],
+    });
+    await server.waitFor('/api/models');
+    server.respond('/api/models', modelsBody());
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('sidebar');
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+
+    // The transcript is untouched: the composer still works.
+    expect(screen.getByLabelText('Message')).toBeTruthy();
+  });
 });
 
 describe('empty states', () => {
