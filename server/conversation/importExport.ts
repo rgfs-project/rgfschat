@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { unzipSync } from 'fflate';
+import { AppError } from '../errors/AppError.ts';
 import { z } from 'zod';
 import {
   artifactMediaTypeFor,
@@ -456,14 +457,16 @@ export interface ExportContents {
  * carries files this application has no use for and refusing the archive over
  * them would make the common case impossible.
  */
-export function readExport(bytes: Uint8Array): ExportContents {
+export function readExport(bytes: Uint8Array, limits: ImportLimits = {}): ExportContents {
   const found: ExportContents = { conversations: [], memories: [] };
 
-  const files = isZip(bytes) ? unzipSync(bytes) : { 'upload.json': bytes };
+  const files = isZip(bytes) ? unpack(bytes, limits) : { 'upload.json': bytes };
   const decoder = new TextDecoder();
 
-  for (const [name, content] of Object.entries(files)) {
-    if (content.length === 0 || !name.toLowerCase().endsWith('.json')) continue;
+  // Only `.json` members are present: the archive reader never inflated the
+  // rest, and a bare upload is handed over under a synthetic name.
+  for (const content of Object.values(files)) {
+    if (content.length === 0) continue;
 
     let parsed: unknown;
     try {
@@ -483,6 +486,79 @@ export function readExport(bytes: Uint8Array): ExportContents {
   }
 
   return found;
+}
+
+/**
+ * What an archive is allowed to become once it is opened.
+ *
+ * The upload route limits the bytes that arrive, and for an archive those are
+ * the compressed ones: the ratio to what they expand to is chosen by whoever
+ * built the file, and a few kilobytes of zeros inflate to as much as they like.
+ * Inflating everything first and deciding afterwards puts that choice in the
+ * sender's hands, on a server every other account is sharing.
+ *
+ * Generous against a real export — the largest ones are tens of megabytes of
+ * JSON across a few hundred files — and finite, which is the property that was
+ * missing.
+ */
+export const IMPORT_MAX_TOTAL_BYTES = 256 * 1024 * 1024;
+export const IMPORT_MAX_ENTRIES = 2_000;
+
+/** Overrides for the two limits above; the defaults are what the route uses. */
+export interface ImportLimits {
+  maxTotalBytes?: number;
+  maxEntries?: number;
+}
+
+/**
+ * Opens an archive, reading only what an import can use.
+ *
+ * The filter runs before anything is decompressed, so a member this function
+ * would have thrown away — everything that is not `.json` — costs nothing at
+ * all, and the running total is the archive's own declared sizes rather than
+ * bytes already committed to memory.
+ *
+ * The declared sizes come from the archive and so are the sender's word; a
+ * header that lies about a member being small is caught by the second check,
+ * against what was really inflated. Both are needed: the first is what keeps
+ * the memory from being allocated, the second is what makes it true.
+ */
+function unpack(bytes: Uint8Array, limits: ImportLimits): Record<string, Uint8Array> {
+  const maxEntries = limits.maxEntries ?? IMPORT_MAX_ENTRIES;
+  const maxTotalBytes = limits.maxTotalBytes ?? IMPORT_MAX_TOTAL_BYTES;
+
+  let entries = 0;
+  let declared = 0;
+
+  const files = unzipSync(bytes, {
+    filter: (file) => {
+      if (!file.name.toLowerCase().endsWith('.json')) return false;
+
+      entries += 1;
+      if (entries > maxEntries) {
+        throw AppError.validation(
+          `That archive contains too many files to import (limit ${maxEntries}).`
+        );
+      }
+
+      declared += file.originalSize;
+      if (declared > maxTotalBytes) {
+        throw AppError.validation('That archive is too large to import once expanded.');
+      }
+
+      return true;
+    },
+  });
+
+  let inflated = 0;
+  for (const content of Object.values(files)) {
+    inflated += content.length;
+    if (inflated > maxTotalBytes) {
+      throw AppError.validation('That archive is too large to import once expanded.');
+    }
+  }
+
+  return files;
 }
 
 /** `PK\x03\x04`, the local file header every zip begins with. */

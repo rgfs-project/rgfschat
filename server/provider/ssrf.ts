@@ -99,11 +99,44 @@ export function isAlwaysBlocked(address: string): boolean {
   if (lower.startsWith('fe80:')) return true;
   if (lower === 'fd00:ec2::254') return true;
   if (lower === '::' || lower === '::0') return true;
-  // IPv4-mapped IPv6 (::ffff:169.254.169.254) must not slip past the v4 checks.
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
-  if (mapped?.[1] !== undefined) return isAlwaysBlocked(mapped[1]);
+  // IPv4 wearing an IPv6 costume must not slip past the v4 checks above.
+  const mapped = mappedIpv4(lower);
+  if (mapped !== null) return isAlwaysBlocked(mapped);
 
   return false;
+}
+
+/**
+ * The IPv4 address inside an IPv6 one, in whichever spelling arrived.
+ *
+ * `::ffff:169.254.169.254` and `::ffff:a9fe:a9fe` are the same address, and the
+ * second is the one that actually turns up: WHATWG URL parsing rewrites the
+ * dotted tail into hex, so a hostname taken from a parsed URL never has the
+ * dotted form the filters used to look for. Matching only that spelling meant
+ * `http://[::ffff:169.254.169.254]/` reached the metadata service unchallenged.
+ *
+ * The deprecated IPv4-compatible form (`::a9fe:a9fe`, no `ffff`) is handled the
+ * same way: it is a different notation for the same destination, and a filter
+ * that reads one and not the other is not a filter. `::1` is excluded because
+ * it is IPv6 loopback in its own right, already named below, not 0.0.0.1.
+ */
+function mappedIpv4(address: string): string | null {
+  const lower = address.toLowerCase().replace(/^\[|\]$/g, '');
+
+  // Dotted tail: ::ffff:169.254.169.254 — and its compatible-form twin.
+  const dotted = /^::(?:ffff:)?(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
+  if (dotted?.[1] !== undefined) return dotted[1];
+
+  // Hex tail: ::ffff:a9fe:a9fe, or the compatible ::a9fe:a9fe.
+  const hex = /^::(?:ffff:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(lower);
+  if (hex?.[1] === undefined || hex[2] === undefined) return null;
+
+  const high = Number.parseInt(hex[1], 16);
+  const low = Number.parseInt(hex[2], 16);
+  // `::1` and friends are IPv6 addresses in their own right, not 0.0.0.1.
+  if (!lower.startsWith('::ffff:') && high === 0) return null;
+
+  return [high >> 8, high & 0xff, low >> 8, low & 0xff].join('.');
 }
 
 /** Loopback, RFC1918, CGNAT, and their IPv6 equivalents. */
@@ -124,8 +157,8 @@ export function isPrivateAddress(address: string): boolean {
   if (lower === '::1') return true; // loopback
   if (/^f[cd]/.test(lower)) return true; // fc00::/7 unique local
 
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
-  if (mapped?.[1] !== undefined) return isPrivateAddress(mapped[1]);
+  const mapped = mappedIpv4(lower);
+  if (mapped !== null) return isPrivateAddress(mapped);
 
   return false;
 }

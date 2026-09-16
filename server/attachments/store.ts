@@ -47,7 +47,15 @@ const metaSchema = z.strictObject({
   messageId: z.string().nullable(),
   filename: z.string(),
   mediaType: z.string(),
-  kind: z.enum(['image', 'text']),
+  /*
+   * Every kind the application accepts, and audio is one of them: the upload
+   * path stores it, the capability check knows which models take it. Left out
+   * here, an audio attachment wrote fine and then failed to parse on the way
+   * back — reported as missing, and invisible to the quota that its bytes were
+   * nonetheless occupying. This schema is the one place that decides whether a
+   * stored file is readable, so it has to list what `kindOf` can produce.
+   */
+  kind: z.enum(['image', 'audio', 'text']),
   size: z.number().int().nonnegative(),
   sha256: z.string(),
   createdAt: z.string(),
@@ -211,11 +219,6 @@ export class AttachmentStore {
     }
     await handle.close();
 
-    // The bytes become `blob` in one step, before any metadata claims they are
-    // there. Order matters: meta.json is still the completion marker, and this
-    // guarantees that whenever it exists, a whole blob exists beside it.
-    await commitTempFile(temp, blob);
-
     const meta: AttachmentMeta = {
       id,
       ownerId: userId,
@@ -229,11 +232,46 @@ export class AttachmentStore {
       createdAt: new Date().toISOString(),
     };
 
-    // Last, and atomically: its presence is what makes the upload complete.
-    await atomicWriteFile(
-      this.#paths.attachmentMetaFile(userId, id),
-      `${JSON.stringify(meta, null, 2)}\n`
-    );
+    /*
+     * The quota decision happens here, under the account's own lock, against
+     * the total as it stands at this moment.
+     *
+     * The check while streaming, above, is an early-out: it stops an upload
+     * that is already hopeless without reading the rest of it. It cannot be the
+     * decision, because the total it compares against was read before a single
+     * byte arrived — two uploads starting together both read it, neither could
+     * see the other, and both concluded there was room. Whatever they added up
+     * to is what the account ended up holding.
+     *
+     * Serialising the commit is what makes the limit a limit: the second
+     * upload reads a total that already includes the first. The bytes are in a
+     * temp file by then and are removed on refusal, which costs one upload's
+     * worth of disk — bounded by `maxBytes` — in exchange for a quota that
+     * holds however many uploads arrive at once.
+     */
+    await this.#locks.run(`attachments:${userId}`, async () => {
+      const stored = await this.totalBytes(userId);
+      if (stored + size > this.#limits.maxTotalBytesPerUser) {
+        await rm(temp, { force: true });
+        await rm(directory, { recursive: true, force: true });
+        throw new AppError(
+          'QUOTA_EXCEEDED',
+          `You have used your attachment storage of ${formatBytes(this.#limits.maxTotalBytesPerUser)}.`
+        );
+      }
+
+      // The bytes become `blob` in one step, before any metadata claims they
+      // are there. Order matters: meta.json is still the completion marker, and
+      // this guarantees that whenever it exists, a whole blob exists beside it.
+      await commitTempFile(temp, blob);
+
+      // Last, and atomically: its presence is what makes the upload complete,
+      // and what makes these bytes visible to the next upload's check.
+      await atomicWriteFile(
+        this.#paths.attachmentMetaFile(userId, id),
+        `${JSON.stringify(meta, null, 2)}\n`
+      );
+    });
 
     return { meta };
   }

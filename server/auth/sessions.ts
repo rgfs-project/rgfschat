@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import type { Logger } from '../logger.ts';
 import { atomicWriteFile, ensureDir } from '../storage/atomic.ts';
+import { KeyedLock } from '../storage/locks.ts';
 import type { StoragePaths } from '../storage/paths.ts';
 
 /**
@@ -72,6 +73,19 @@ export class SessionManager {
   readonly #absoluteTtlMs: number;
   readonly #idleTtlMs: number;
   readonly #now: () => Date;
+  /**
+   * One lock per session file.
+   *
+   * Resolving slides the idle deadline, which is a read followed by a write;
+   * revoking is a delete. Without this, a revocation landing between that read
+   * and that write was simply overwritten — the file came back, with the same
+   * user and the same CSRF token, and a session that had been revoked went on
+   * authenticating. Every path that touches a session file takes this lock, so
+   * the two can no longer interleave, and a revocation that arrives after a
+   * refresh has begun is applied to the refreshed record rather than lost
+   * under it (INV-17).
+   */
+  readonly #locks = new KeyedLock();
 
   constructor(options: SessionManagerOptions) {
     this.#paths = options.paths;
@@ -131,30 +145,39 @@ export class SessionManager {
    */
   async resolve(token: string): Promise<ActiveSession | null> {
     const tokenHash = hashToken(token);
-    const record = await this.#read(tokenHash);
-    if (record === null) return null;
 
-    const now = this.#now().getTime();
-    if (now >= Date.parse(record.expiresAt) || now >= Date.parse(record.idleExpiresAt)) {
-      await this.#destroyByHash(tokenHash);
-      return null;
-    }
+    return this.#locks.run(tokenHash, async () => {
+      const record = await this.#read(tokenHash);
+      if (record === null) return null;
 
-    // Slide the idle window forward. The absolute deadline is never extended.
-    const refreshed: SessionRecord = {
-      ...record,
-      idleExpiresAt: new Date(now + this.#idleTtlMs).toISOString(),
-    };
-    await atomicWriteFile(this.#file(tokenHash), `${JSON.stringify(refreshed, null, 2)}\n`);
+      const now = this.#now().getTime();
+      if (now >= Date.parse(record.expiresAt) || now >= Date.parse(record.idleExpiresAt)) {
+        await this.#unlink(tokenHash);
+        return null;
+      }
 
-    return { token, userId: record.userId, csrfToken: record.csrfToken };
+      // Slide the idle window forward. The absolute deadline is never extended.
+      const refreshed: SessionRecord = {
+        ...record,
+        idleExpiresAt: new Date(now + this.#idleTtlMs).toISOString(),
+      };
+      await atomicWriteFile(this.#file(tokenHash), `${JSON.stringify(refreshed, null, 2)}\n`);
+
+      return { token, userId: record.userId, csrfToken: record.csrfToken };
+    });
   }
 
   async destroy(token: string): Promise<void> {
     await this.#destroyByHash(hashToken(token));
   }
 
+  /** Deletes a session under its lock, so no refresh can write it back. */
   async #destroyByHash(tokenHash: string): Promise<void> {
+    await this.#locks.run(tokenHash, () => this.#unlink(tokenHash));
+  }
+
+  /** The delete itself. Callers must already hold the lock for this hash. */
+  async #unlink(tokenHash: string): Promise<void> {
     await unlink(this.#file(tokenHash)).catch(() => undefined);
   }
 

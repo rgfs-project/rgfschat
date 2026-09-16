@@ -213,6 +213,11 @@ export class UserStore {
   }
 
   async count(): Promise<number> {
+    return this.#countLocked();
+  }
+
+  /** The count itself, usable from inside the registry lock. */
+  async #countLocked(): Promise<number> {
     return (await this.#scan()).length;
   }
 
@@ -232,7 +237,45 @@ export class UserStore {
       throw AppError.validation('Username must be 3-32 characters of a-z, 0-9, _, . or -');
     }
 
+    return this.#lock.run(REGISTRY_KEY, () => this.#createLocked(username, options));
+  }
+
+  /**
+   * Creates the very first account, or nothing at all.
+   *
+   * The check for emptiness and the creation are one critical section, which is
+   * the entire point of this method existing alongside `create`. Asked
+   * separately, several requests arriving together each saw an empty registry
+   * and each became an administrator — and an instance is only unclaimed once.
+   *
+   * Resolves to `null` when an account already exists, leaving it to the caller
+   * to say what that means; here it is a closed registration.
+   */
+  async createFirstAccount(options: {
+    username: string;
+    password: string;
+  }): Promise<UserDto | null> {
     return this.#lock.run(REGISTRY_KEY, async () => {
+      if ((await this.#countLocked()) > 0) return null;
+
+      // Validated inside the lock, after the emptiness check, so that a
+      // malformed username on a claimed instance still answers "closed"
+      // rather than disclosing that the door is shut for a different reason.
+      const username = normalizeUsername(options.username);
+      if (!isValidUsername(username)) {
+        throw AppError.validation('Username must be 3-32 characters of a-z, 0-9, _, . or -');
+      }
+
+      return this.#createLocked(username, { ...options, role: 'admin' });
+    });
+  }
+
+  /** The body of `create`. Callers must already hold the registry lock. */
+  async #createLocked(
+    username: string,
+    options: { password: string; role?: UserRole; id?: string }
+  ): Promise<UserDto> {
+    {
       if ((await this.findByUsername(username)) !== null) {
         throw new AppError('CONFLICT', 'That username is already taken.');
       }
@@ -261,7 +304,7 @@ export class UserStore {
 
       this.#logger.info('Account created', { userId: id, role: record.role });
       return toDto(record);
-    });
+    }
   }
 
   /**

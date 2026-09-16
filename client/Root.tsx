@@ -1,10 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  QueryClientProvider,
+  useQueryClient,
+  type Query,
+  type QueryClient,
+} from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router';
 import type { AuthState, UserDto } from '@shared/auth';
 import { ErrorBoundary } from './ErrorBoundary.tsx';
 import { logout, onAuthExpired, setCsrfToken } from './api.ts';
-import { createQueryClient, keys, useConversations, useModels, useSession } from './queries.ts';
+import { createQueryClient, useConversations, useModels, useSession } from './queries.ts';
 import { AppRoutes } from './routes/AppRoutes.tsx';
 import { SessionContext, type SessionValue } from './routes/session.ts';
 
@@ -49,10 +54,16 @@ export function Root(): React.JSX.Element {
  * the previous test's screen. A `MemoryRouter` per test has no such thread
  * between them.
  */
-export function AppRoot(): React.JSX.Element {
+export interface AppRootProps {
+  client?: QueryClient;
+}
+
+export function AppRoot({ client: supplied }: AppRootProps = {}): React.JSX.Element {
   // One client for the lifetime of the app; a new one per render would discard
-  // the cache on every state change.
-  const [client] = useState(createQueryClient);
+  // the cache on every state change. A test may hand one in, the same way it
+  // hands in a router, when what it needs to assert is what the cache holds.
+  const [created] = useState(createQueryClient);
+  const client = supplied ?? created;
 
   return (
     <QueryClientProvider client={client}>
@@ -95,17 +106,47 @@ function Shell(): React.JSX.Element {
   useModels(allowed);
 
   /*
-   * Whatever those two fetched for a user who turns out not to be signed in is
-   * dropped. They were started on speculation; once the speculation is wrong,
-   * keeping the results would mean one user's list could be shown to the next.
+   * Everything cached for an account is dropped the moment the account changes.
+   *
+   * Two things arrive here. The speculative fetches above, started before the
+   * session resolved, are discarded when the speculation turns out wrong. And a
+   * sign-out — or one account signing in over another, which on a shared
+   * machine happens without the page ever reloading — clears the rest.
+   *
+   * Named queries were tried first and got it wrong: conversations and models
+   * were listed, while preferences, memories, artifacts and search results were
+   * not, and no key said whose they were. The next account was handed the
+   * previous one's settings straight from cache, ahead of any request of their
+   * own. So the rule is inverted — everything goes except the session query,
+   * which is the thing that says who is signed in now — and a query added
+   * later is covered by having been added, rather than by somebody remembering
+   * this list.
+   *
+   * Cancelled before removed: a request already in flight for the previous
+   * account would otherwise land in an empty cache afterwards and put their
+   * data back.
    */
   const client = useQueryClient();
+  const identity = session.data?.user?.id ?? null;
+  const previousIdentity = useRef<string | null | undefined>(undefined);
+
   useEffect(() => {
-    if (authState !== 'unauthenticated') return;
-    client.removeQueries({ queryKey: keys.conversations() });
-    client.removeQueries({ queryKey: ['conversation'] });
-    client.removeQueries({ queryKey: keys.models() });
-  }, [authState, client]);
+    if (authState === 'unknown') return;
+
+    const account = authState === 'authenticated' ? identity : null;
+    const had = previousIdentity.current;
+    previousIdentity.current = account;
+
+    // Nothing to clear on the very first resolution *into* an account; there
+    // was no previous one. Everything else — signing out, expiring, or a
+    // different account arriving — clears.
+    if (had === undefined && account !== null) return;
+    if (had === account && account !== null) return;
+
+    const privateQuery = { predicate: (query: Query) => query.queryKey[0] !== 'session' };
+    void client.cancelQueries(privateQuery);
+    client.removeQueries(privateQuery);
+  }, [authState, identity, client]);
 
   const csrfToken = session.data?.csrfToken ?? null;
   useEffect(() => {

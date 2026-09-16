@@ -134,19 +134,29 @@ export function authRouter({
     perUsername('register-username', 5),
     async (req, res) => {
       const configuredOpen = registrationMode() === 'open';
-      // Only the bootstrap exception cares who is first; an administrator's
-      // own "open" needs no count and creates ordinary accounts.
-      const bootstrapping = !configuredOpen && (await users.count()) === 0;
-      if (!configuredOpen && !bootstrapping) {
+      const { username, password } = req.body as z.infer<typeof credentialsSchema>;
+
+      /*
+       * Only the bootstrap exception cares who is first; an administrator's own
+       * "open" needs no count and creates ordinary accounts.
+       *
+       * Asking "is the registry empty?" here and creating the account after
+       * would be two steps with a gap in them, and several requests arriving
+       * together all passed through it — every one of them made an
+       * administrator of an instance that can only be claimed once. The store
+       * answers both questions at once instead, under the lock it already
+       * holds for creation.
+       */
+      const bootstrapped = configuredOpen
+        ? null
+        : await users.createFirstAccount({ username, password });
+
+      if (!configuredOpen && bootstrapped === null) {
         throw new AppError('REGISTRATION_CLOSED', 'Registration is closed.');
       }
 
-      const { username, password } = req.body as z.infer<typeof credentialsSchema>;
-      const user = await users.create({
-        username,
-        password,
-        ...(bootstrapping ? { role: 'admin' as const } : {}),
-      });
+      const bootstrapping = bootstrapped !== null;
+      const user = bootstrapped ?? (await users.create({ username, password }));
 
       // Closes the exception back down rather than leaving the instance open
       // to the public past its own setup.
