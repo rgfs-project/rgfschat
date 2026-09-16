@@ -131,10 +131,30 @@ export function useGeneration(generationId: string | null): LiveGeneration {
       source.addEventListener(name, handle as EventListener);
     }
 
-    // A transport error after a terminal state is just the server closing.
+    /*
+     * A dropped connection is not a failed generation.
+     *
+     * `EventSource` reconnects by itself, and this stream is built for it: the
+     * browser resends `Last-Event-ID` and the server replays — or resyncs —
+     * from there. Closing the source here took that away, so a momentary blip
+     * mid-reply left the run going on the server with nothing watching it, and
+     * the reader looking at a loader that never resolved.
+     *
+     * `readyState` tells the two cases apart. `CONNECTING` means a retry is
+     * already scheduled and there is nothing to do. `CLOSED` means the browser
+     * has given up — a non-2xx status or a body that was not an event stream —
+     * and no retry is coming, so the run is genuinely no longer observable
+     * from here. Reporting that as a terminal state is what lets the shell
+     * stop waiting and refetch the conversation, which replaces this guess
+     * with whatever the server actually stored.
+     */
     source.onerror = () => {
-      setLive((prev) => (isTerminal(prev.state as never) ? prev : prev));
-      source.close();
+      if (source.readyState !== EventSource.CLOSED) return;
+      setLive((prev) =>
+        prev.state === 'idle' || isTerminal(prev.state)
+          ? prev
+          : { ...prev, state: 'failed', errorCode: undefined }
+      );
     };
 
     return () => {
