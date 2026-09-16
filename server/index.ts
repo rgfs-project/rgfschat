@@ -142,6 +142,7 @@ async function main(): Promise<void> {
     sessions,
     authConfig: config.auth,
     isProduction: config.isProduction,
+    trustProxyHops: config.trustProxyHops,
     registry,
     settings,
     audit,

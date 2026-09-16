@@ -57,6 +57,12 @@ export interface AppOptions {
   sessions?: SessionManager;
   authConfig?: AuthConfig;
   isProduction?: boolean;
+  /**
+   * Reverse proxies in front of this server. Defaults to 0 — none — so a
+   * forwarding header is never believed unless an operator has said how many
+   * hops of it are real.
+   */
+  trustProxyHops?: number;
   /** Phase 9. Absent in tests that do not exercise the admin surface. */
   registry?: ProviderRegistry;
   settings?: SettingsStore;
@@ -89,6 +95,7 @@ export function createApp({
   authConfig,
   clientDir,
   isProduction = false,
+  trustProxyHops = 0,
   registry,
   settings,
   audit,
@@ -98,6 +105,24 @@ export function createApp({
   const app = express();
 
   app.disable('x-powered-by');
+
+  /*
+   * Whose address a per-address limit counts.
+   *
+   * Off by default: `req.ip` is then the socket's peer, which behind a proxy
+   * is the proxy — so the per-address limits on login and registration become
+   * one shared budget and lock everybody out together. That is the safe
+   * direction to be wrong in, which is why it is the default, but it is still
+   * wrong, and a reverse proxy in front is the ordinary way this is deployed.
+   *
+   * The count is the fix, and it must be a count. `trust proxy: true` believes
+   * the entire `X-Forwarded-For` chain, so a caller who writes their own header
+   * chooses their own address and walks away from every per-address limit —
+   * strictly worse than not trusting it at all. A number tells Express to take
+   * the nth address from the right, which is the one the operator's own proxy
+   * appended and nothing upstream of it can forge.
+   */
+  if (trustProxyHops > 0) app.set('trust proxy', trustProxyHops);
 
   /*
    * One limiter for the whole process, shared by every rule. Separate limiters

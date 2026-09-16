@@ -112,9 +112,18 @@ it is invalid — never with a stack trace, and never echoing the offending valu
 | `MAX_OUTPUT_TOKENS`      | `2048`                  | Per-generation output cap                            |
 | `TLS_CERT_FILE`          | _(unset)_               | PEM cert; with the key below, serves HTTPS directly  |
 | `TLS_KEY_FILE`           | _(unset)_               | PEM private key; both or neither                     |
+| `TRUST_PROXY_HOPS`       | `0`                     | Reverse proxies in front; see below                  |
 
 `.env` is git-ignored and loaded natively by Node (`--env-file-if-exists`), so there is no
 dotenv dependency.
+
+**Behind a reverse proxy, set `TRUST_PROXY_HOPS`.** At its default of `0` no forwarding
+header is believed and `req.ip` is the socket's peer — which behind a proxy is the proxy, so
+the per-address limits on login and registration collapse into one shared budget and the
+first caller to trip it locks out everybody. Set it to the number of proxies that actually
+forward to this server (usually `1`). It is deliberately a count and never `true`: trusting
+the whole `X-Forwarded-For` chain would let a caller write their own address into it and
+leave the limit behind entirely. See [`SECURITY.md`](SECURITY.md) E-2.
 
 ## Talking to llama.cpp
 

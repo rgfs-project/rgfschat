@@ -171,16 +171,22 @@ deployment does not have.
 process.
 **Remediation:** a shared counter (Redis or equivalent) if multi-process is ever supported.
 
-### E-2 · `trust proxy` is off, so address limits collapse behind a reverse proxy
+### E-2 · Address limits need `TRUST_PROXY_HOPS` when a reverse proxy is in front — resolved
 
 **Requirement:** per-address limits on login and registration.
-**Why unresolved:** enabling `trust proxy` without knowing the hop count lets a caller spoof
-`X-Forwarded-For` and bypass the limit entirely.
-**Risk:** behind a reverse proxy every request appears to come from the proxy, so the
-per-address limit becomes global — too strict rather than bypassable.
-**Compensating control:** the per-username and per-account limits are unaffected, and those are
-the ones that bound credential guessing.
-**Remediation:** an `TRUST_PROXY_HOPS` setting an operator sets deliberately.
+**Resolution:** `TRUST_PROXY_HOPS` (default `0`). It is a count of the proxies that forward to
+this server, not a boolean: Express is told to take the address that many hops from the right of
+`X-Forwarded-For`, which is the entry the operator's own proxy appended. Entries a caller
+prepends are read past rather than believed, so the limit cannot be escaped by naming a fresh
+address on each attempt — which is what `trust proxy: true` would allow, and why that is not
+what this sets.
+**Residual risk:** left at its default behind a proxy, every request still appears to come from
+the proxy and the per-address limit is global — too strict rather than bypassable, and the safe
+direction to be wrong in. Set too high, the limit counts an address the caller chose. Both are
+an operator stating a fact about their own topology; nothing about it can be detected from a
+request.
+**Compensating control:** the per-username and per-account limits are unaffected either way, and
+those are the ones that bound credential guessing.
 
 ### E-3 · No virus scanning of attachments
 

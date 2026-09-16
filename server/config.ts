@@ -34,6 +34,23 @@ const envSchema = z.object({
     .min(60_000)
     .default(7 * 24 * 60 * 60 * 1000),
 
+  /*
+   * How many reverse proxies sit in front of this server.
+   *
+   * `0` — the default — means none, and `req.ip` is the socket's peer address:
+   * whatever Express is handed, no header is believed. Any other value is the
+   * operator stating, as a fact about their deployment, how many hops to trust
+   * at the end of `X-Forwarded-For`.
+   *
+   * A count rather than a boolean, and never `true`. `trust proxy: true`
+   * believes the whole chain, so a caller who writes their own
+   * `X-Forwarded-For` picks their own address and walks away from every
+   * per-address limit. Trusting exactly `n` hops takes the nth entry from the
+   * right, which is the one the proxy itself appended and nobody upstream can
+   * forge (SECURITY.md E-2).
+   */
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(10).default(0),
+
   // Streaming lifecycle (Phase 6).
   //
   // A checkpoint is written on every state transition and at most this often
@@ -148,6 +165,8 @@ export interface Config {
   dataDir: string;
   logLevel: LogLevel;
   isProduction: boolean;
+  /** Reverse proxies in front of this server; 0 means the peer address is used. */
+  trustProxyHops: number;
   /** Present only when both cert and key are configured; server runs HTTPS. */
   tls: { certFile: string; keyFile: string } | null;
   /** Canonical lowercase UUID. Used only by `user:create --adopt-local-data`. */
@@ -225,6 +244,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     DATA_DIR,
     LOG_LEVEL,
     LOCAL_USER_ID,
+    TRUST_PROXY_HOPS,
     REGISTRATION_MODE,
     SESSION_ABSOLUTE_TTL_MS,
     SESSION_IDLE_TTL_MS,
@@ -253,6 +273,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dataDir: resolve(DATA_DIR),
     logLevel: LOG_LEVEL,
     isProduction: NODE_ENV === 'production',
+    trustProxyHops: TRUST_PROXY_HOPS,
     tls: resolveTls(TLS_CERT_FILE, TLS_KEY_FILE),
     localUserId: LOCAL_USER_ID,
     auth: {

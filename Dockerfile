@@ -9,7 +9,13 @@ WORKDIR /app
 # Dependencies first, on their own layer, so a source-only change does not
 # re-run npm ci — the slowest step, because it compiles argon2.
 COPY package.json package-lock.json ./
-RUN npm ci
+# The cache mount keeps the downloaded tarballs between builds, so a rebuild
+# after a lockfile change re-fetches only what changed instead of the whole
+# tree. It is a mount, not a layer: nothing from it is in the image. `id` is
+# shared with the production install below, which asks for a subset of exactly
+# the same packages.
+RUN --mount=type=cache,id=npm,target=/root/.npm,sharing=locked \
+    npm ci --prefer-offline --no-audit --no-fund
 
 # Then the sources the build actually reads. Listed explicitly rather than
 # `COPY . .` so the build cache is not busted by an unrelated file, and so the
@@ -25,7 +31,8 @@ RUN npm run build
 # A second, production-only dependency tree to copy into the runtime image.
 # `npm ci` into a clean prefix keeps argon2's compiled binary but drops vite,
 # esbuild, playwright and the rest of devDependencies.
-RUN npm ci --omit=dev
+RUN --mount=type=cache,id=npm,target=/root/.npm,sharing=locked \
+    npm ci --omit=dev --prefer-offline --no-audit --no-fund
 
 # ---- runtime stage ---------------------------------------------------------
 FROM node:22-bookworm-slim AS runtime

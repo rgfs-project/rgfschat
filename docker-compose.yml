@@ -6,9 +6,18 @@
 #
 # TLS: mount a cert and key and set the two variables, or terminate TLS at a
 # proxy in front and leave them unset (see SECURITY.md).
+#
+# The project name is pinned rather than taken from the directory this file
+# happens to sit in, because the volume and image names are derived from it and
+# are quoted in the README: cloning into a differently named folder would
+# otherwise silently produce a different volume, and an existing deployment
+# that renamed its folder would come up with an empty one.
+name: workspace
+
 services:
   app:
     build: .
+    image: workspace_app:latest
     ports:
       - '3001:3001'
     volumes:
@@ -22,9 +31,25 @@ services:
       # private network — a plaintext hop leaks the key and every message.
       LLAMA_BASE_URL: ${LLAMA_BASE_URL:-http://host.docker.internal:8080}
       # LLAMA_API_KEY: ${LLAMA_API_KEY:-}
+      #
+      # How many reverse proxies stand in front of this container. Leave it at
+      # 0 when the port above is reached directly. Set it to 1 when a proxy —
+      # Caddy, nginx, Traefik, a compose sibling or a host service — forwards
+      # to it, or the per-address limits on login and registration count every
+      # request as coming from that proxy and one attacker locks out everyone.
+      # It is a count of hops and never `true`: see SECURITY.md E-2.
+      # TRUST_PROXY_HOPS: '1'
       # TLS_CERT_FILE: /tls/cert.pem
       # TLS_KEY_FILE: /tls/key.pem
     restart: unless-stopped
+
+    # `host.docker.internal` is a Docker Desktop convenience; on Linux — which
+    # is what a server runs — it does not resolve at all unless it is mapped
+    # here. Without this the default provider URL above fails to connect on
+    # exactly the platform this is deployed on. Harmless where the name already
+    # exists.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
 
     # The process needs no privileges beyond opening a socket above 1024 and
     # writing to its own volume, and it already runs as `node` rather than
