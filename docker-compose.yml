@@ -26,5 +26,31 @@ services:
       # TLS_KEY_FILE: /tls/key.pem
     restart: unless-stopped
 
+    # The process needs no privileges beyond opening a socket above 1024 and
+    # writing to its own volume, and it already runs as `node` rather than
+    # root. Saying so here means a flaw in a dependency cannot reach for
+    # anything more: `no-new-privileges` blocks a setuid binary from raising
+    # privileges mid-container, and dropping every capability leaves nothing
+    # to raise them to.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    # Shutdown is prompt — in-flight generations are cancelled and the
+    # listener closed on SIGTERM — but the default 10s leaves no margin if a
+    # slow disk is mid-write when the signal lands. Past this, Docker sends
+    # SIGKILL, which is how a half-written file happens.
+    stop_grace_period: 30s
+
+    # One JSON line per request, and the default driver keeps every one of
+    # them forever. On a long-lived deployment that is a disk that fills for
+    # no reason anybody notices until it is full.
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
+
 volumes:
   chatui-data:

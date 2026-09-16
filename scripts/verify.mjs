@@ -98,6 +98,68 @@ function freePort() {
   });
 }
 
+/**
+ * A fresh instance must never be claimable by whoever reaches the port first.
+ *
+ * Registration opens by itself while no account exists, so that a brand new
+ * deployment can be claimed without a CLI. `ADMIN_PASSWORD` is the operator
+ * saying they would rather claim it themselves — and for that to mean anything,
+ * the account has to exist before the listener does. When the bootstrap was
+ * merely *started* at boot rather than awaited, the port answered during the
+ * argon2 hash and a caller racing it was handed the first admin account: a 201,
+ * on an instance the operator thought they had already claimed.
+ *
+ * So this races the port exactly as such a caller would, from a cold container
+ * with its own empty DATA_DIR, and asserts the very first answer is a refusal.
+ */
+async function checkFirstAdminRace() {
+  const port = await freePort();
+  const dataDir = await mkdtemp(join(tmpdir(), 'verify-race-'));
+  const child = spawn(process.execPath, ['dist/server/index.js'], {
+    env: {
+      ...process.env,
+      PORT: String(port),
+      DATA_DIR: dataDir,
+      NODE_ENV: 'production',
+      LOG_LEVEL: 'error',
+      ADMIN_PASSWORD,
+      ADMIN_USERNAME: 'bootadmin',
+    },
+    stdio: ['ignore', 'inherit', 'inherit'],
+  });
+
+  try {
+    const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+    let answer = null;
+
+    // No delay and no backoff: the whole point is to be the first request the
+    // listener ever accepts.
+    while (answer === null && Date.now() < deadline && child.exitCode === null) {
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/api/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: 'racer', password: 'racer-chosen-passphrase' }),
+        });
+        // A 404 is the SPA fallback answering before the API is mounted; keep going.
+        if (res.status !== 404) answer = res.status;
+      } catch {
+        // Not listening yet.
+      }
+    }
+
+    check(
+      'ADMIN_PASSWORD: registration is already closed on the first request the port answers',
+      answer !== null && answer >= 400,
+      answer === null ? 'the port never answered' : `registration returned ${answer}`
+    );
+  } finally {
+    child.kill('SIGTERM');
+    await waitForExit(child);
+    await rm(dataDir, { recursive: true, force: true });
+  }
+}
+
 async function waitForHealth(baseUrl, child) {
   const deadline = Date.now() + STARTUP_TIMEOUT_MS;
 
@@ -399,6 +461,8 @@ async function main() {
 
     // 2. Authentication (Phase 4), before anything protected is reachable.
     console.log('\n   auth:');
+    // Its own cold instance, because what is being checked is the boot itself.
+    await checkFirstAdminRace();
     const anonymous = await fetch(`${baseUrl}/api/conversations`);
     check(
       'protected routes reject an anonymous caller',

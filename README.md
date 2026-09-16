@@ -298,6 +298,12 @@ terminate TLS at a proxy in front. `/data` is the entire persistent state; back
 up the volume (it holds secrets — see SECURITY.md). `docker stop` /
 `podman stop` triggers the server's graceful shutdown via `dumb-init`.
 
+The image's health check follows the same settings: it reads `PORT` and the two
+TLS variables and probes `/api/health` over whichever scheme the server is
+actually listening on, so configuring TLS does not leave a healthy container
+reporting `unhealthy`. It is `entrypoint healthcheck` on the image, runnable by
+hand when a container's health is in question.
+
 ### The published image
 
 A built image is published to GHCR and is public, so it needs no login to pull:

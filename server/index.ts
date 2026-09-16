@@ -175,7 +175,18 @@ async function main(): Promise<void> {
     })
     .catch((err: unknown) => logger.error('Provider configuration failed to load', { error: err }));
 
-  sessions
+  /*
+   * Awaited, not left to run alongside the listener.
+   *
+   * Registration opens by itself while no account exists and closes the moment
+   * the first one is made, which is what lets a fresh instance be claimed
+   * without a CLI. Setting `ADMIN_PASSWORD` is the operator saying they would
+   * rather claim it themselves — so the account must exist before anything can
+   * reach the port. Started and not awaited, the listener opened during the
+   * argon2 hash, and for that window a fresh container on a reachable port
+   * would hand the first admin account to whoever asked for it.
+   */
+  await sessions
     .cleanupExpired()
     .then(async () => {
       if ((await users.count()) === 0) {

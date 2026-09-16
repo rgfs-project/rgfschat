@@ -64,8 +64,14 @@ EXPOSE 3001
 # Answers on the health route the app already serves. `start-period` covers the
 # generation-recovery pass that runs before the listener opens. Honoured by
 # Docker; Podman ignores it unless the image is built with `--format docker`.
+#
+# The probe is a subcommand of the entrypoint rather than an inline one-liner
+# so that it reads PORT and the TLS variables the same way the server does. An
+# http:// probe against a TLS listener fails forever, which marks a perfectly
+# healthy container unhealthy and deadlocks anything waiting on
+# `service_healthy`.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD ["entrypoint", "healthcheck"]
 
 ENTRYPOINT ["dumb-init", "--", "entrypoint"]
 CMD ["serve"]
